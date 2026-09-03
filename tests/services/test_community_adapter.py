@@ -91,7 +91,11 @@ def test_strip_community_prefix():
 def test_no_nodes_available_raises_503(monkeypatch):
     _install_fake_gpu_module(monkeypatch, nodes=[])
     with pytest.raises(HTTPException) as exc:
-        ca.community_request([{"role": "user", "content": "hi"}], "community/some-model")
+        ca.community_request(
+            [{"role": "user", "content": "hi"}],
+            "community/some-model",
+            _gatewayz_billing_ref="ref-1",
+        )
     assert exc.value.status_code == 503
     assert exc.value.detail == "no_community_node_available"
 
@@ -99,8 +103,45 @@ def test_no_nodes_available_raises_503(monkeypatch):
 def test_gpu_module_missing_treated_as_no_nodes(monkeypatch):
     monkeypatch.delitem(sys.modules, "src.db.gpu", raising=False)
     with pytest.raises(HTTPException) as exc:
-        ca.community_request([{"role": "user", "content": "hi"}], "community/some-model")
+        ca.community_request(
+            [{"role": "user", "content": "hi"}],
+            "community/some-model",
+            _gatewayz_billing_ref="ref-1",
+        )
     assert exc.value.status_code == 503
+
+
+# --- auth required (gatewayz-backend#2262 #2265, spec §1: community requires
+# auth) -- defense in depth behind src.security.inference_gates.
+# enforce_community_auth_gate, which is the primary control. -----------------
+
+
+def test_request_without_billing_ref_is_refused(monkeypatch):
+    calls = _install_fake_gpu_module(monkeypatch, nodes=[NODE])
+    with pytest.raises(HTTPException) as exc:
+        ca.community_request([{"role": "user", "content": "hi"}], "community/some-model")
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "community_requires_auth"
+    # No side effects: never even selected/touched a node.
+    assert calls["adjust_outstanding"] == []
+
+
+def test_stream_without_billing_ref_is_refused(monkeypatch):
+    calls = _install_fake_gpu_module(monkeypatch, nodes=[NODE])
+    with pytest.raises(HTTPException) as exc:
+        ca.community_stream([{"role": "user", "content": "hi"}], "community/some-model")
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "community_requires_auth"
+    assert calls["adjust_outstanding"] == []
+
+
+def test_request_with_empty_string_billing_ref_is_refused(monkeypatch):
+    _install_fake_gpu_module(monkeypatch, nodes=[NODE])
+    with pytest.raises(HTTPException) as exc:
+        ca.community_request(
+            [{"role": "user", "content": "hi"}], "community/some-model", _gatewayz_billing_ref=""
+        )
+    assert exc.value.status_code == 403
 
 
 def test_selects_head_node_of_returned_list(monkeypatch):
@@ -191,7 +232,9 @@ def test_request_increments_and_decrements_outstanding(monkeypatch):
     _install_fake_db_gpu_work(monkeypatch)
     _fake_openai_client(monkeypatch)
 
-    ca.community_request([{"role": "user", "content": "hi"}], "community/some-model")
+    ca.community_request(
+        [{"role": "user", "content": "hi"}], "community/some-model", _gatewayz_billing_ref="ref-1"
+    )
 
     assert calls["adjust_outstanding"] == [("node-1", 1), ("node-1", -1)]
 
@@ -202,7 +245,11 @@ def test_request_decrements_outstanding_on_provider_exception(monkeypatch):
     _fake_openai_client(monkeypatch, error=RuntimeError("node offline"))
 
     with pytest.raises(RuntimeError):
-        ca.community_request([{"role": "user", "content": "hi"}], "community/some-model")
+        ca.community_request(
+            [{"role": "user", "content": "hi"}],
+            "community/some-model",
+            _gatewayz_billing_ref="ref-1",
+        )
 
     assert calls["adjust_outstanding"] == [("node-1", 1), ("node-1", -1)]
 
@@ -388,7 +435,11 @@ def test_stream_yields_chunks_and_records_receipt_on_completion(monkeypatch):
 def test_stream_no_node_raises_before_returning_generator(monkeypatch):
     _install_fake_gpu_module(monkeypatch, nodes=[])
     with pytest.raises(HTTPException):
-        ca.community_stream([{"role": "user", "content": "hi"}], "community/some-model")
+        ca.community_stream(
+            [{"role": "user", "content": "hi"}],
+            "community/some-model",
+            _gatewayz_billing_ref="ref-1",
+        )
 
 
 def test_stream_connect_error_decrements_outstanding_and_records_failure(monkeypatch):
@@ -397,7 +448,11 @@ def test_stream_connect_error_decrements_outstanding_and_records_failure(monkeyp
     _fake_openai_stream_client(monkeypatch, [], error=RuntimeError("connect failed"))
 
     with pytest.raises(RuntimeError):
-        ca.community_stream([{"role": "user", "content": "hi"}], "community/some-model")
+        ca.community_stream(
+            [{"role": "user", "content": "hi"}],
+            "community/some-model",
+            _gatewayz_billing_ref="ref-1",
+        )
 
     assert calls["adjust_outstanding"] == [("node-1", 1), ("node-1", -1)]
     assert recorded["work"][0]["status"] == "failed"

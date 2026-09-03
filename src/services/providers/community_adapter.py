@@ -117,6 +117,23 @@ def _select_head_node(model_suffix: str) -> dict:
     return nodes[0]
 
 
+COMMUNITY_REQUIRES_AUTH_DETAIL = "community_requires_auth"
+
+
+def _require_billing_ref(billing_ref: str | None) -> None:
+    """Refuse to call a node without a billing_ref (spec §1: community requires
+    auth). ``src.security.inference_gates.enforce_community_auth_gate`` is the
+    primary control (403 before this adapter is ever reached); this is
+    defense in depth against any other dispatch path that might call
+    ``community_request``/``community_stream`` without going through it --
+    an anonymous request has no billing_ref (see chat_dispatch.py), so
+    without it a node would do unpaid, unattributable work and no receipt
+    could be written anyway (record_work no-ops without a billing_ref).
+    """
+    if not billing_ref:
+        raise HTTPException(status_code=403, detail=COMMUNITY_REQUIRES_AUTH_DETAIL)
+
+
 # ---------------------------------------------------------------------------
 # Per-node adapter cache
 # ---------------------------------------------------------------------------
@@ -302,6 +319,7 @@ def _record_receipt(
 def community_request(messages: list[dict[str, Any]], model_id: str, **kwargs: Any) -> Any:
     """Non-streaming ``PROVIDER_ROUTING["community"]["request"]``."""
     billing_ref = kwargs.pop("_gatewayz_billing_ref", None)
+    _require_billing_ref(billing_ref)
     model_suffix = strip_community_prefix(model_id)
     node = _select_head_node(model_suffix)
     adapter = adapter_for_node(node)
@@ -399,6 +417,7 @@ def community_stream(messages: list[dict[str, Any]], model_id: str, **kwargs: An
     bookkeeping is deferred into the returned generator.
     """
     billing_ref = kwargs.pop("_gatewayz_billing_ref", None)
+    _require_billing_ref(billing_ref)
     model_suffix = strip_community_prefix(model_id)
     node = _select_head_node(model_suffix)
     adapter = adapter_for_node(node)

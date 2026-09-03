@@ -26,9 +26,7 @@ from src.services.anonymous_rate_limiter import (
     validate_anonymous_request,
 )
 from src.services.passive_health_monitor import capture_model_health
-from src.services.prometheus_metrics import (
-    record_free_model_usage,
-)
+from src.services.prometheus_metrics import record_free_model_usage
 from src.utils.errors import APIExceptions
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
@@ -104,6 +102,7 @@ import src.services.trial_validation as trial_module
 from src.routes.chat_dispatch import dispatch_non_streaming, dispatch_streaming  # noqa: E402
 from src.security.inference_gates import (
     enforce_anonymous_gate,
+    enforce_community_auth_gate,
     enforce_model_pricing_gate,
     enforce_subscription_status_gate,
 )
@@ -378,6 +377,9 @@ async def chat_completions(
     # Abuse-control gates (anonymous + unpriced models). Centralized helpers so
     # /v1/images and /v1/audio can adopt the same policy.
     enforce_anonymous_gate(is_anonymous, request_id=request_id, model_id=req.model)
+    # community/<model> requires auth regardless of Config.ANONYMOUS_ENABLED
+    # (gatewayz-backend#2262 #2265, M4 spec §1) -- see enforce_community_auth_gate.
+    enforce_community_auth_gate(is_anonymous, model_id=req.model, request_id=request_id)
 
     # Resolve `auto`/`router:*` aliases to a real model BEFORE the pricing gate
     # below, which treats req.model as a real catalog/pricing model and 400s

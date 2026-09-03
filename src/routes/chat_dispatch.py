@@ -194,6 +194,21 @@ async def dispatch_streaming(
         )
     else:
         # Anonymous users: keep existing provider routing logic
+        #
+        # Upstream identity firewall (docs/security/ANONYMITY_THREAT_MODEL.md G1):
+        # this path bypassed scrub_upstream_kwargs entirely until now -- the
+        # authenticated path (chat_handler.py) has always scrubbed `optional`
+        # before it reaches a provider, but this anonymous path built its own
+        # kwargs (`optional`, from chat_request.py's prepare_upstream_request,
+        # which forwards the client's `user` field verbatim) and called
+        # PROVIDER_ROUTING[...] directly with them. Scrub once, applies to
+        # every provider attempted below (registry-dispatched or the
+        # OpenRouter fallback), not just community.
+        from src.services.upstream.anonymize import scrub_upstream_kwargs
+
+        _billing_ref = getattr(getattr(request, "state", None), "billing_ref", None)
+        optional = scrub_upstream_kwargs(optional, billing_ref=_billing_ref)
+
         last_http_exc = None
         for idx, attempt_provider in enumerate(provider_chain):
             attempt_model = transform_model_id(original_model, attempt_provider)
@@ -204,13 +219,25 @@ async def dispatch_streaming(
 
             request_model = attempt_model
             is_async_stream = False  # Default to sync, only OpenRouter uses async currently
+            # community's receipt (provider_work) needs billing_ref -- see
+            # community_adapter.py's community_request/community_stream. Every
+            # other provider is unaffected by this private kwarg (popped
+            # before it reaches the OpenAI SDK). In practice
+            # enforce_community_auth_gate blocks anonymous callers from ever
+            # reaching "community" before dispatch is called at all; this is
+            # defense in depth, not the primary control.
+            call_kwargs = (
+                {**optional, "_gatewayz_billing_ref": _billing_ref}
+                if attempt_provider == "community"
+                else optional
+            )
             try:
                 # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
                 # Note: Streaming tracing is handled in _chat.stream_generator to capture final token counts
                 if attempt_provider in PROVIDER_ROUTING:
                     # Use registry for all registered providers
                     stream_func = PROVIDER_ROUTING[attempt_provider]["stream"]
-                    stream = await _to_thread(stream_func, messages, request_model, **optional)
+                    stream = await _to_thread(stream_func, messages, request_model, **call_kwargs)
                 else:
                     # Default to OpenRouter with async streaming for performance
                     try:
@@ -520,6 +547,15 @@ async def dispatch_non_streaming(
                 raise http_exc
     else:
         # Anonymous users: keep existing provider routing logic
+        #
+        # Upstream identity firewall (docs/security/ANONYMITY_THREAT_MODEL.md G1):
+        # same gap and same fix as dispatch_streaming's anonymous branch above
+        # -- see that comment for detail.
+        from src.services.upstream.anonymize import scrub_upstream_kwargs
+
+        _billing_ref = getattr(getattr(request, "state", None), "billing_ref", None)
+        optional = scrub_upstream_kwargs(optional, billing_ref=_billing_ref)
+
         for idx, attempt_provider in enumerate(provider_chain):
             attempt_model = transform_model_id(original_model, attempt_provider)
             if attempt_model != original_model:
@@ -535,6 +571,13 @@ async def dispatch_non_streaming(
                     request_timeout,
                     attempt_provider,
                 )
+            # See dispatch_streaming's identical comment: defense in depth,
+            # not the primary control (enforce_community_auth_gate is).
+            call_kwargs = (
+                {**optional, "_gatewayz_billing_ref": _billing_ref}
+                if attempt_provider == "community"
+                else optional
+            )
 
             try:
                 # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
@@ -549,7 +592,7 @@ async def dispatch_non_streaming(
                         request_func = PROVIDER_ROUTING[attempt_provider]["request"]
                         process_func = PROVIDER_ROUTING[attempt_provider]["process"]
                         resp_raw = await asyncio.wait_for(
-                            _to_thread(request_func, messages, request_model, **optional),
+                            _to_thread(request_func, messages, request_model, **call_kwargs),
                             timeout=request_timeout,
                         )
                         processed = await _to_thread(process_func, resp_raw)

@@ -268,6 +268,11 @@ def _call_community(monkeypatch, **kwargs):
     # failure per call.
     monkeypatch.setattr("src.db.gpu_work.record_work", lambda **_: None)
 
+    # community_request() now refuses to call a node without a billing_ref
+    # (spec §1: community requires auth) -- default one here so this canary
+    # keeps testing what it's actually for (the identity firewall), not the
+    # separate auth-required behavior (see test_community_adapter.py).
+    kwargs.setdefault("_gatewayz_billing_ref", "canary-billing-ref")
     community_adapter.community_request(MESSAGES, "community/canary-model", **kwargs)
 
 

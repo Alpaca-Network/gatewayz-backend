@@ -20,7 +20,7 @@ User-Agent), and a real client-supplied `user` field in the request body.
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -549,3 +549,48 @@ class TestMessagesRealRoute:
 
         params = inspect.signature(transform_anthropic_to_openai).parameters
         assert "metadata" not in params
+
+
+class TestAnonymousCommunityGate:
+    """community/<model> requires auth (fix round 1, gatewayz-backend#2262
+    #2265, spec §1) -- independent of Config.ANONYMOUS_ENABLED, and fires
+    before any provider/node is ever touched. Minimal mocking needed: unlike
+    the authenticated real-route tests above, this gate rejects before user
+    lookup / catalog / credits, matching the low-mocking convention already
+    used for the plain anonymous gate in tests/routes/test_chat_identity.py.
+    """
+
+    def test_anonymous_community_request_is_rejected_even_when_anonymous_enabled(
+        self, app_client, intercepted_http
+    ):
+        with patch("src.security.inference_gates.Config.ANONYMOUS_ENABLED", True):
+            resp = app_client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "community/llama-3.1-8b-instruct",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["error"]["code"] == "community_requires_auth"
+        # Never reached a provider/node at all.
+        assert not intercepted_http
+
+    def test_anonymous_non_community_request_is_not_blocked_by_this_gate(
+        self, app_client, intercepted_http
+    ):
+        # Anonymous-disabled entirely -- hits enforce_anonymous_gate (401),
+        # not enforce_community_auth_gate (403). Proves the two gates are
+        # independent and this one doesn't over-match non-community models.
+        with patch("src.security.inference_gates.Config.ANONYMOUS_ENABLED", False):
+            resp = app_client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["error"]["code"] == "missing_api_key"
