@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.main import app
 from src.routes.gpu import _earnings_summary, _invalidate_node_adapter
-from src.security.deps import get_user_id, require_admin
+from src.security.deps import get_api_key, get_current_user, get_user_id, require_admin
 from src.security.node_auth import get_node as get_auth_node
 
 # create_node's node_token_hash and node_auth's lookup both hash via
@@ -798,10 +798,33 @@ def test_admin_approve_provider_404_when_missing(mock_set_status):
 
 
 def test_admin_endpoints_reject_non_admin():
-    # No require_admin override -- falls through to the real dependency,
-    # which needs a real user auth chain; simplest un-authed check is that
-    # it's rejected rather than silently succeeding.
-    response = client.post("/gpu/admin/providers/1/approve")
+    """No require_admin override -- exercises the real dependency chain
+    (require_admin -> get_current_user -> get_api_key), which must reject
+    an unauthenticated request with 401/403.
+
+    app.dependency_overrides is a shared, module-level dict (same lesson
+    as _override_user_id's save/restore above): at least one other test
+    module (tests/routes/test_admin_model_usage_analytics.py) sets
+    `dependency_overrides[require_admin]` at IMPORT time and never restores
+    it, so under xdist -- wherever that module lands in the same worker
+    process before this test runs -- require_admin silently resolves to a
+    fake admin here too. That let this request reach the real (unmocked)
+    handler, which called the real set_provider_status, got None back from
+    its safe-default-on-any-error DB path, and 404'd -- a false pass turned
+    into an unrelated-looking CI failure, not a bug in the route's ordering.
+    Explicitly clearing the whole auth dependency chain here makes this
+    test's result reflect ITS OWN request, regardless of what any other
+    module left behind."""
+    cleared = {
+        dep: app.dependency_overrides.pop(dep)
+        for dep in (require_admin, get_current_user, get_api_key)
+        if dep in app.dependency_overrides
+    }
+    try:
+        response = client.post("/gpu/admin/providers/1/approve")
+    finally:
+        app.dependency_overrides.update(cleared)
+
     assert response.status_code in (401, 403)
 
 
