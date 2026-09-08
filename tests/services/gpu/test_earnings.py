@@ -133,6 +133,32 @@ def test_tier_multiplier_bps_order_independent(sb):
     assert tier_multiplier_bps(1_500_000, shuffled) == 6000
 
 
+def test_tier_multiplier_bps_pays_zero_when_no_tier_covers_the_volume(sb):
+    """Non-empty tiers, but none apply (e.g. the 0-floor seed row was
+    deleted, leaving only a min_tokens_7d=100000 row) -- a misconfiguration
+    should never silently overpay, so this pays 0, not the lowest
+    configured tier's rate."""
+    no_floor = [{"min_tokens_7d": 100_000, "multiplier_bps": 2500, "label": "small"}]
+    assert tier_multiplier_bps(50_000, no_floor) == 0
+
+
+def test_tier_multiplier_bps_logs_an_error_when_misconfigured(sb, caplog):
+    """PR #2295 review round 1, Important #2: a silent $0 payout from a
+    missing floor row is indistinguishable from a correct bottom-tier
+    payout -- must be loud (ERROR), not silent."""
+    no_floor = [{"min_tokens_7d": 100_000, "multiplier_bps": 2500, "label": "small"}]
+    with caplog.at_level("ERROR", logger="src.services.gpu.earnings"):
+        tier_multiplier_bps(50_000, no_floor)
+    assert any("payout_tiers_misconfigured" in record.message for record in caplog.records)
+
+
+def test_tier_multiplier_bps_does_not_log_when_covered(sb, caplog):
+    """No log noise on the normal, correctly-covered path."""
+    with caplog.at_level("ERROR", logger="src.services.gpu.earnings"):
+        tier_multiplier_bps(0, _TIERS)
+    assert not any("payout_tiers_misconfigured" in record.message for record in caplog.records)
+
+
 # ---------------------------------------------------------------------------
 # next_tier_min_tokens_7d
 # ---------------------------------------------------------------------------

@@ -24,6 +24,12 @@
 --
 --   RLS is enabled, service-role only (no policy), matching every other
 --   table in 20260903200000_gpu_marketplace.sql.
+--
+--   Also adds gpu_provider_verified_volume_7d(), a SECURITY DEFINER SQL
+--   function that computes a provider's trailing-7d verified-token sum
+--   entirely in Postgres (see its own comment block below) -- fixes review
+--   round 1's Important #1 (PostgREST .limit(2000) + client-side Python sum
+--   silently undercounted high-volume providers).
 
 CREATE TABLE IF NOT EXISTS public.provider_payout_tiers (
     min_tokens_7d       bigint PRIMARY KEY,
@@ -75,9 +81,52 @@ BEGIN
 END $$;
 
 
--- Index-friendly support for get_provider_verified_volume_7d's per-provider,
+-- Index-friendly support for gpu_provider_verified_volume_7d's per-provider,
 -- verified-only, trailing-7d sum -- the existing idx_provider_work_node_created
 -- is keyed by node_id, not provider_id, and idx_provider_work_verification
 -- alone doesn't cover the created_at range scan.
 CREATE INDEX IF NOT EXISTS idx_provider_work_provider_verification_created
     ON public.provider_work (provider_id, verification, created_at);
+
+
+-- ============================================================================
+-- gpu_provider_verified_volume_7d: server-side trailing-7d verified-token sum
+-- ============================================================================
+-- PR #2295 review fix round 1, Important #1: src/db/gpu_payouts.py's
+-- get_provider_verified_volume_7d originally pulled raw provider_work rows
+-- via PostgREST (.limit(2000)) and summed client-side in Python -- any
+-- provider generating more than 2000 verified rows in 7 days (very plausible
+-- well before the "medium" tier at 1M tokens/7d for smaller request sizes)
+-- got an undercounted, nondeterministic-subset volume, locking them into a
+-- lower payout multiplier indefinitely. This function computes the SUM
+-- entirely in Postgres -- no row cap, no client-side truncation.
+--
+-- SECURITY DEFINER (mirrors atomic_add_credits's convention,
+-- 20260705000001_add_atomic_add_credits.sql) so it always runs with the
+-- function owner's privileges regardless of caller, matching the "no anon
+-- RLS policy" posture on provider_work -- EXECUTE is revoked from
+-- anon/authenticated below and granted only to service_role, so this can't
+-- become a public alternate read path into provider_work.
+DROP FUNCTION IF EXISTS public.gpu_provider_verified_volume_7d(bigint, bigint);
+
+CREATE OR REPLACE FUNCTION public.gpu_provider_verified_volume_7d(
+    p_provider_id bigint,
+    p_exclude_work_id bigint DEFAULT NULL
+) RETURNS bigint
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint
+    FROM public.provider_work
+    WHERE provider_id = p_provider_id
+      AND verification = 'verified'
+      AND created_at >= now() - interval '7 days'
+      AND (p_exclude_work_id IS NULL OR id <> p_exclude_work_id);
+$$;
+
+REVOKE ALL ON FUNCTION public.gpu_provider_verified_volume_7d(bigint, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.gpu_provider_verified_volume_7d(bigint, bigint) FROM anon;
+REVOKE ALL ON FUNCTION public.gpu_provider_verified_volume_7d(bigint, bigint) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.gpu_provider_verified_volume_7d(bigint, bigint) TO service_role;

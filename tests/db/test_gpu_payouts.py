@@ -105,41 +105,115 @@ def test_get_payout_tiers_returns_empty_list_on_error(sb):
         assert gpu_payouts.get_payout_tiers() == []
 
 
+def test_check_payout_tiers_seeded_warns_when_table_is_empty(sb, caplog):
+    with patch("src.db.gpu_payouts.get_payout_tiers", return_value=[]):
+        with caplog.at_level("WARNING", logger="src.db.gpu_payouts"):
+            gpu_payouts.check_payout_tiers_seeded()
+    assert any("provider_payout_tiers is empty" in r.message for r in caplog.records)
+
+
+def test_check_payout_tiers_seeded_warns_when_floor_row_is_missing(sb, caplog):
+    no_floor = [{"min_tokens_7d": 100000, "multiplier_bps": 2500, "label": "small"}]
+    with patch("src.db.gpu_payouts.get_payout_tiers", return_value=no_floor):
+        with caplog.at_level("WARNING", logger="src.db.gpu_payouts"):
+            gpu_payouts.check_payout_tiers_seeded()
+    assert any("no min_tokens_7d=0 floor row" in r.message for r in caplog.records)
+
+
+def test_check_payout_tiers_seeded_is_silent_when_correctly_configured(sb, caplog):
+    rows = [{"min_tokens_7d": 0, "multiplier_bps": 500, "label": "bot"}]
+    with patch("src.db.gpu_payouts.get_payout_tiers", return_value=rows):
+        with caplog.at_level("WARNING", logger="src.db.gpu_payouts"):
+            gpu_payouts.check_payout_tiers_seeded()
+    assert caplog.records == []
+
+
 # ---------------------------------------------------------------------------
 # get_provider_verified_volume_7d
 # ---------------------------------------------------------------------------
 
 
-def test_get_provider_verified_volume_7d_sums_tokens(sb):
-    rows = [
-        {"prompt_tokens": 100, "completion_tokens": 50},
-        {"prompt_tokens": 200, "completion_tokens": 0},
-    ]
-    client, query = _client_with(rows)
+def _rpc_client_with(data):
+    """A client whose .rpc(...).execute() returns *data* as-is (mimics a
+    scalar-returning Postgres function via PostgREST)."""
+    client = MagicMock()
+    client.rpc.return_value.execute.return_value = MagicMock(data=data)
+    return client
+
+
+def test_get_provider_verified_volume_7d_calls_the_rpc_with_no_row_cap(sb):
+    """PR #2295 review Important #1 regression: the primary path is the
+    server-side RPC (no row cap), not a PostgREST .limit()+Python-sum."""
+    client = _rpc_client_with(350)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.get_provider_verified_volume_7d(5) == 350
+    client.rpc.assert_called_once_with(
+        "gpu_provider_verified_volume_7d",
+        {"p_provider_id": 5, "p_exclude_work_id": None},
+    )
+    client.table.assert_not_called()
+
+
+def test_get_provider_verified_volume_7d_passes_exclude_work_id_to_the_rpc(sb):
+    client = _rpc_client_with(100)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        gpu_payouts.get_provider_verified_volume_7d(5, exclude_work_id=99)
+    client.rpc.assert_called_once_with(
+        "gpu_provider_verified_volume_7d",
+        {"p_provider_id": 5, "p_exclude_work_id": 99},
+    )
+
+
+def test_get_provider_verified_volume_7d_treats_null_rpc_result_as_zero(sb):
+    client = _rpc_client_with(None)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.get_provider_verified_volume_7d(5) == 0
+
+
+def test_get_provider_verified_volume_7d_falls_back_when_rpc_unavailable(sb):
+    """If the RPC raises (e.g. the migration hasn't been applied yet on some
+    environment), falls back to the row-capped client-side sum rather than
+    losing volume tracking entirely."""
+    client = MagicMock()
+    client.rpc.side_effect = RuntimeError(
+        "function gpu_provider_verified_volume_7d(...) does not exist"
+    )
+    query = _query_mock(
+        [
+            {"prompt_tokens": 100, "completion_tokens": 50},
+            {"prompt_tokens": 200, "completion_tokens": 0},
+        ]
+    )
+    client.table.return_value = query
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         assert gpu_payouts.get_provider_verified_volume_7d(5) == 350
     query.eq.assert_any_call("provider_id", 5)
     query.eq.assert_any_call("verification", "verified")
 
 
-def test_get_provider_verified_volume_7d_excludes_a_work_id(sb):
-    rows = [{"prompt_tokens": 100, "completion_tokens": 50}]
-    client, query = _client_with(rows)
+def test_get_provider_verified_volume_7d_fallback_excludes_a_work_id(sb):
+    client = MagicMock()
+    client.rpc.side_effect = RuntimeError("boom")
+    query = _query_mock([{"prompt_tokens": 100, "completion_tokens": 50}])
+    client.table.return_value = query
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         gpu_payouts.get_provider_verified_volume_7d(5, exclude_work_id=99)
     query.neq.assert_called_once_with("id", 99)
 
 
-def test_get_provider_verified_volume_7d_treats_missing_counts_as_zero(sb):
-    rows = [{"prompt_tokens": None, "completion_tokens": None}]
-    client, query = _client_with(rows)
+def test_get_provider_verified_volume_7d_fallback_treats_missing_counts_as_zero(sb):
+    client = MagicMock()
+    client.rpc.side_effect = RuntimeError("boom")
+    query = _query_mock([{"prompt_tokens": None, "completion_tokens": None}])
+    client.table.return_value = query
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         assert gpu_payouts.get_provider_verified_volume_7d(5) == 0
 
 
-def test_get_provider_verified_volume_7d_returns_zero_on_error(sb):
+def test_get_provider_verified_volume_7d_returns_zero_when_rpc_and_fallback_both_fail(sb):
     client = MagicMock()
-    client.table.side_effect = RuntimeError("boom")
+    client.rpc.side_effect = RuntimeError("boom")
+    client.table.side_effect = RuntimeError("boom too")
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         assert gpu_payouts.get_provider_verified_volume_7d(5) == 0
 

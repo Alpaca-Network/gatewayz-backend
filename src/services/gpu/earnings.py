@@ -90,11 +90,22 @@ def tier_multiplier_bps(volume_7d: int, tiers: list[dict]) -> int:
     1.0x (10000 bps) rate rather than zeroing out every payout. If tiers
     ARE configured but somehow none apply (e.g. the 0-floor row was
     deleted) this returns 0 -- a misconfiguration should never silently
-    overpay."""
+    overpay -- and logs at ERROR (PR #2295 review round 1, Important #2)
+    so a deleted floor row is an operator-visible incident, not a silent
+    $0 payout indistinguishable from "this genuinely is the bottom tier."
+    See also src/db/gpu_payouts.py's check_payout_tiers_seeded(), a
+    startup-time check for the same misconfiguration."""
     if not tiers:
         return _FULL_MULTIPLIER_BPS
     applicable = [t for t in tiers if int(t.get("min_tokens_7d", 0)) <= volume_7d]
     if not applicable:
+        logger.error(
+            "payout_tiers_misconfigured: no tier covers volume_7d=%s; paying 0 bps "
+            "(tiers=%r) -- provider_payout_tiers is likely missing its min_tokens_7d=0 "
+            "floor row",
+            volume_7d,
+            tiers,
+        )
         return 0
     best = max(applicable, key=lambda t: int(t.get("min_tokens_7d", 0)))
     return int(best.get("multiplier_bps", 0))

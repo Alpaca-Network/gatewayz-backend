@@ -108,6 +108,34 @@ def get_payout_tiers() -> list[dict]:
         return _payout_tiers_cache or []
 
 
+def check_payout_tiers_seeded() -> None:
+    """Startup sanity check (PR #2295 review round 1, Important #2): warns
+    loudly if provider_payout_tiers has no row with min_tokens_7d == 0.
+    Without that floor row, src/services/gpu/earnings.py's
+    tier_multiplier_bps() has no tier covering a low-volume provider's
+    trailing-7d volume and pays them 0 bps -- easy to mistake for "working
+    as intended, this IS the bottom tier" rather than a misconfiguration,
+    since nothing else signals the difference at request time
+    (tier_multiplier_bps only logs once per affected accrual, not once per
+    misconfiguration). Called from src/services/startup.py's lifespan so an
+    operator who hand-edits the tier table and accidentally drops the floor
+    row finds out at boot, not from a slow trickle of zero-paid providers."""
+    tiers = get_payout_tiers()
+    if not tiers:
+        logger.warning(
+            "provider_payout_tiers is empty -- every provider will be paid the full "
+            "1.0x (10000 bps) rate until it's seeded (see the sliding-scale tier docs "
+            "in docs/gpu/VERIFICATION_AND_PAYOUTS.md)."
+        )
+        return
+    if not any(int(t.get("min_tokens_7d", -1)) == 0 for t in tiers):
+        logger.warning(
+            "provider_payout_tiers has no min_tokens_7d=0 floor row -- every provider "
+            "below the lowest configured threshold will be paid 0 bps (not the bottom "
+            "tier's intended rate). Add a row with min_tokens_7d=0 to fix."
+        )
+
+
 # ---------------------------------------------------------------------------
 # provider_work / verification
 # ---------------------------------------------------------------------------
@@ -234,6 +262,9 @@ def list_recent_work_for_provider(
         return []
 
 
+_VOLUME_7D_RPC = "gpu_provider_verified_volume_7d"
+
+
 def get_provider_verified_volume_7d(provider_id: int, exclude_work_id: int | None = None) -> int:
     """Sum of prompt_tokens + completion_tokens over this PROVIDER's (not
     node's) provider_work rows with verification='verified' in the
@@ -253,8 +284,43 @@ def get_provider_verified_volume_7d(provider_id: int, exclude_work_id: int | Non
     double-count it during the earnings-reconciliation retry path (where
     the row IS already 'verified' by the time this runs again).
 
-    Returns 0 on error -- treated as the bottom tier, never a hard
-    failure blocking payout."""
+    PR #2295 review round 1, Important #1: the sum is computed SERVER-SIDE
+    via the gpu_provider_verified_volume_7d() SQL function (see
+    20260909000000_provider_payout_tiers.sql) -- a prior version pulled raw
+    rows via PostgREST with a 2000-row cap and summed them in Python, which
+    silently undercounted exactly the high-volume providers this feature is
+    meant to reward. The RPC has no row cap. If the RPC itself is
+    unavailable (e.g. this migration hasn't been applied yet on some
+    environment), falls back to the old row-capped client-side sum -- loudly
+    logged, since that fallback CAN undercount and operators should know
+    they're on it.
+
+    Returns 0 if both the RPC and the fallback fail -- treated as the
+    bottom tier, never a hard failure blocking payout."""
+    try:
+        client = get_supabase_client()
+        result = client.rpc(
+            _VOLUME_7D_RPC,
+            {"p_provider_id": provider_id, "p_exclude_work_id": exclude_work_id},
+        ).execute()
+        return int(result.data or 0)
+    except Exception as e:
+        logger.warning(
+            f"{_VOLUME_7D_RPC} RPC failed for provider {provider_id} -- falling back to a "
+            f"row-capped, client-side sum (may undercount volume above "
+            f"{_WORK_QUERY_ROW_CAP} verified rows/7d; check the migration is applied): {e}"
+        )
+        return _get_provider_verified_volume_7d_fallback(provider_id, exclude_work_id)
+
+
+def _get_provider_verified_volume_7d_fallback(provider_id: int, exclude_work_id: int | None) -> int:
+    """Row-capped, client-side sum -- used ONLY when the
+    gpu_provider_verified_volume_7d RPC raises (see get_provider_verified_volume_7d).
+    Caps at _WORK_QUERY_ROW_CAP rows with no ordering, so it CAN undercount a
+    high-volume provider (PR #2295 review Important #1) -- this exists purely
+    as a degrade-gracefully path while the RPC is unreachable, not the
+    primary implementation. Returns 0 on error, same safe-default
+    convention as every other read in this module."""
     try:
         since_iso = (datetime.now(UTC) - timedelta(days=7)).isoformat()
         client = get_supabase_client()
@@ -274,7 +340,8 @@ def get_provider_verified_volume_7d(provider_id: int, exclude_work_id: int | Non
         )
     except Exception as e:
         logger.warning(
-            f"provider_work verified-volume-7d lookup failed for provider {provider_id}: {e}"
+            f"provider_work verified-volume-7d fallback lookup failed for provider "
+            f"{provider_id}: {e}"
         )
         return 0
 
