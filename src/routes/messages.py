@@ -35,7 +35,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.schemas.proxy import ProxyRequest
-from src.security.deps import get_optional_api_key
+from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
 from src.services.providers.anthropic_transformer import (
     transform_anthropic_to_openai,
@@ -375,7 +375,7 @@ async def create_message(
     req: AnthropicMessagesRequest,
     background_tasks: BackgroundTasks,
     request: Request = None,
-    api_key: str | None = Depends(get_optional_api_key),
+    api_key: str | None = Depends(get_optional_api_key_strict),
 ):
     """Anthropic Messages API endpoint.
 

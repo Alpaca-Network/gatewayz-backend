@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 from fastapi import Depends, Request
 
-from src.security.deps import get_optional_api_key
+from src.security.deps import get_optional_api_key, get_optional_api_key_strict
 from src.services.user_lookup_cache import get_user
 
 logger = logging.getLogger(__name__)
@@ -169,3 +169,24 @@ async def get_request_identity(
     if state is not None:
         state.identity = identity
     return identity
+
+
+async def get_request_identity_strict(
+    request: Request,
+    api_key: str | None = Depends(get_optional_api_key_strict),
+) -> RequestIdentity:
+    """`get_request_identity` for routes that refuse a supplied-but-invalid key.
+
+    Identical resolution — it just sources the key from the strict dependency,
+    so a caller who sent a bad key gets told so instead of being quietly
+    demoted to anonymous.
+
+    MUST be paired with `Depends(get_optional_api_key_strict)` on the route's
+    own `api_key` parameter. FastAPI caches a dependency per request by
+    callable, so mixing the strict and lenient key dependencies in one route
+    resolves BOTH — re-running `validate_api_key_security()` and its
+    `last_used_at` write to Supabase twice per authenticated request. That is
+    the hazard this module's main docstring describes; the pairing is asserted
+    in tests/security/test_supplied_key_rejection.py.
+    """
+    return await get_request_identity(request, api_key=api_key)

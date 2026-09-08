@@ -17,8 +17,11 @@ import src.db.users as users_module
 from src.config import Config
 from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.schemas import ProxyRequest
-from src.security.deps import get_optional_api_key
-from src.security.identity import RequestIdentity, get_request_identity
+from src.security.deps import get_optional_api_key_strict
+from src.security.identity import (
+    RequestIdentity,
+    get_request_identity_strict,
+)
 from src.services.anonymous_rate_limiter import (
     ANONYMOUS_DAILY_LIMIT,
     get_anonymous_allowed_models_sample,
@@ -333,10 +336,13 @@ logger.info("📍 Registering /chat/completions endpoint")
 async def chat_completions(
     req: ProxyRequest,
     background_tasks: BackgroundTasks,
-    api_key: str | None = Depends(get_optional_api_key),
+    # Strict pair: a SUPPLIED key that fails validation is rejected rather than
+    # silently demoted to anonymous. Both must use the strict chain or FastAPI
+    # stops deduping and revalidates the key twice per request.
+    api_key: str | None = Depends(get_optional_api_key_strict),
     session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
-    identity: RequestIdentity = Depends(get_request_identity),
+    identity: RequestIdentity = Depends(get_request_identity_strict),
 ):
     # === 0) Setup / sanity ===
     # Request correlation ID used for logging AND as the billing idempotency key

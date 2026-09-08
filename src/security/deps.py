@@ -376,6 +376,35 @@ async def get_optional_api_key(
         return None
 
 
+async def get_optional_api_key_strict(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    request: Request = None,
+) -> str | None:
+    """Optional auth that still refuses a key the caller actually supplied.
+
+    Same contract as `get_optional_api_key` for the anonymous case — no
+    credentials means `None`, and the endpoint serves anonymous traffic. The
+    difference is what happens when a key IS supplied and fails validation:
+    the lenient version swallows the rejection and hands back `None`, so the
+    caller is treated as anonymous and learns nothing about their key.
+
+    On a billed inference route that is actively misleading. A typo'd key
+    produced "Model X is not available for anonymous users", sending an
+    integrator to read the model catalog over one wrong character in a header —
+    the same misdirection as returning 503 for an unknown model id, or 429 for
+    an exhausted cap. An exhausted cap was swallowed the same way: a partner
+    who hit their ceiling saw a model-availability message instead of the 402.
+
+    Used only by the inference routes. The other call sites keep the lenient
+    dependency on purpose: a stale token in a browser should degrade to
+    anonymous on a public page, not 401 it.
+    """
+    if not credentials:
+        return None
+    # Deliberately NOT wrapped in try/except — the rejection is the point.
+    return await get_api_key(credentials, request, log_security_violations=False)
+
+
 async def get_optional_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     request: Request = None,
