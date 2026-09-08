@@ -11,12 +11,14 @@ client = TestClient(app)
 app.dependency_overrides[get_user_id] = lambda: 42
 
 
+@patch("src.routes.gpu_earnings.get_payout_tiers")
+@patch("src.routes.gpu_earnings.get_provider_verified_volume_7d")
 @patch("src.routes.gpu_earnings.list_settlements_for_provider")
 @patch("src.routes.gpu_earnings.list_recent_work_for_provider")
 @patch("src.routes.gpu_earnings.earnings_totals")
 @patch("src.routes.gpu_earnings.get_provider_for_user")
 def test_earnings_returns_totals_work_and_settlements(
-    mock_get_provider, mock_totals, mock_work, mock_settlements
+    mock_get_provider, mock_totals, mock_work, mock_settlements, mock_volume, mock_tiers
 ):
     mock_get_provider.return_value = {"id": 5, "user_id": 42}
     mock_totals.return_value = {"accrued": 1000, "settled": 2000, "void": 300}
@@ -43,6 +45,12 @@ def test_earnings_returns_totals_work_and_settlements(
             "created_at": "2026-09-02T00:00:00Z",
         }
     ]
+    mock_volume.return_value = 150000
+    mock_tiers.return_value = [
+        {"min_tokens_7d": 0, "multiplier_bps": 500, "label": "bot"},
+        {"min_tokens_7d": 100000, "multiplier_bps": 2500, "label": "small"},
+        {"min_tokens_7d": 1000000, "multiplier_bps": 6000, "label": "medium"},
+    ]
 
     response = client.get("/gpu/providers/me/earnings")
 
@@ -52,10 +60,46 @@ def test_earnings_returns_totals_work_and_settlements(
     assert data["work"][0]["billing_ref"] == "br-1"
     assert "prompt_hash" not in data["work"][0]
     assert data["settlements"][0]["tx_url"] == "https://testnet.snowtrace.io/tx/0xabc123"
+    assert data["tier"] == {
+        "current_volume_7d": 150000,
+        "multiplier_bps": 2500,
+        "next_tier_min_tokens_7d": 1000000,
+    }
     mock_get_provider.assert_called_once_with(42)
     mock_totals.assert_called_once_with(5)
     mock_work.assert_called_once_with(5, limit=50)
     mock_settlements.assert_called_once_with(5)
+    mock_volume.assert_called_once_with(5)
+
+
+@patch("src.routes.gpu_earnings.get_payout_tiers")
+@patch("src.routes.gpu_earnings.get_provider_verified_volume_7d")
+@patch("src.routes.gpu_earnings.list_settlements_for_provider")
+@patch("src.routes.gpu_earnings.list_recent_work_for_provider")
+@patch("src.routes.gpu_earnings.earnings_totals")
+@patch("src.routes.gpu_earnings.get_provider_for_user")
+def test_earnings_tier_next_threshold_is_null_at_the_top_tier(
+    mock_get_provider, mock_totals, mock_work, mock_settlements, mock_volume, mock_tiers
+):
+    mock_get_provider.return_value = {"id": 5, "user_id": 42}
+    mock_totals.return_value = {"accrued": 0, "settled": 0, "void": 0}
+    mock_work.return_value = []
+    mock_settlements.return_value = []
+    mock_volume.return_value = 200_000_000
+    mock_tiers.return_value = [
+        {"min_tokens_7d": 0, "multiplier_bps": 500, "label": "bot"},
+        {"min_tokens_7d": 100000000, "multiplier_bps": 15000, "label": "whale"},
+    ]
+
+    response = client.get("/gpu/providers/me/earnings")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["tier"] == {
+        "current_volume_7d": 200_000_000,
+        "multiplier_bps": 15000,
+        "next_tier_min_tokens_7d": None,
+    }
 
 
 @patch("src.routes.gpu_earnings.get_provider_for_user")
@@ -65,12 +109,14 @@ def test_earnings_returns_404_when_caller_has_no_provider(mock_get_provider):
     assert response.status_code == 404
 
 
+@patch("src.routes.gpu_earnings.get_payout_tiers")
+@patch("src.routes.gpu_earnings.get_provider_verified_volume_7d")
 @patch("src.routes.gpu_earnings.list_settlements_for_provider")
 @patch("src.routes.gpu_earnings.list_recent_work_for_provider")
 @patch("src.routes.gpu_earnings.earnings_totals")
 @patch("src.routes.gpu_earnings.get_provider_for_user")
 def test_earnings_settlement_without_tx_hash_has_no_tx_url(
-    mock_get_provider, mock_totals, mock_work, mock_settlements
+    mock_get_provider, mock_totals, mock_work, mock_settlements, mock_volume, mock_tiers
 ):
     mock_get_provider.return_value = {"id": 5, "user_id": 42}
     mock_totals.return_value = {"accrued": 0, "settled": 0, "void": 0}
@@ -87,6 +133,8 @@ def test_earnings_settlement_without_tx_hash_has_no_tx_url(
             "created_at": "2026-09-02T00:00:00Z",
         }
     ]
+    mock_volume.return_value = 0
+    mock_tiers.return_value = []
 
     response = client.get("/gpu/providers/me/earnings")
 
@@ -103,12 +151,14 @@ def test_earnings_requires_auth():
         app.dependency_overrides[get_user_id] = lambda: 42
 
 
+@patch("src.routes.gpu_earnings.get_payout_tiers")
+@patch("src.routes.gpu_earnings.get_provider_verified_volume_7d")
 @patch("src.routes.gpu_earnings.list_settlements_for_provider")
 @patch("src.routes.gpu_earnings.list_recent_work_for_provider")
 @patch("src.routes.gpu_earnings.earnings_totals")
 @patch("src.routes.gpu_earnings.get_provider_for_user")
 def test_earnings_scopes_strictly_to_the_caller_via_user_id(
-    mock_get_provider, mock_totals, mock_work, mock_settlements
+    mock_get_provider, mock_totals, mock_work, mock_settlements, mock_volume, mock_tiers
 ):
     """Regression-style guard: the route must always resolve the provider
     via get_provider_for_user(caller's user_id) -- never accept a
@@ -118,9 +168,12 @@ def test_earnings_scopes_strictly_to_the_caller_via_user_id(
     mock_totals.return_value = {"accrued": 0, "settled": 0, "void": 0}
     mock_work.return_value = []
     mock_settlements.return_value = []
+    mock_volume.return_value = 0
+    mock_tiers.return_value = []
 
     response = client.get("/gpu/providers/me/earnings?provider_id=1")
 
     assert response.status_code == 200
     mock_get_provider.assert_called_once_with(42)
     mock_totals.assert_called_once_with(999)
+    mock_volume.assert_called_once_with(999)

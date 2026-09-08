@@ -76,6 +76,9 @@ TARGET_TABLES = frozenset(
         "provider_earnings",
         "provider_settlements",
         "gpu_utilization_hourly",
+        # Sliding-scale payout tiers (PR #2295 review round 1, Important #3)
+        # -- same service-role-only, no-policy posture as the rest of M4.
+        "provider_payout_tiers",
     }
 )
 

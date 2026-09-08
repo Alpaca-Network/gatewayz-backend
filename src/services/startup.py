@@ -271,6 +271,17 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Failed to pre-load system config (will use defaults): {e}")
 
+        # PR #2295 review round 1, Important #2: warn at boot if
+        # provider_payout_tiers is missing its min_tokens_7d=0 floor row --
+        # otherwise every low-volume GPU provider silently earns 0 instead
+        # of the intended bottom-tier rate, with no other operator signal.
+        try:
+            from src.db.gpu_payouts import check_payout_tiers_seeded
+
+            check_payout_tiers_seeded()
+        except Exception as e:
+            logger.warning(f"Failed to check provider_payout_tiers seeding: {e}")
+
         # Sync DB providers table with ENABLED_PROVIDERS env var
         try:
             from src.config.config import Config

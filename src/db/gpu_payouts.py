@@ -24,6 +24,8 @@ ImportError-fallback treatment; this module has nothing to do with it.
 from __future__ import annotations
 
 import logging
+import time
+from datetime import UTC, datetime, timedelta
 
 from src.config.supabase_config import get_supabase_client
 from src.db.gpu import get_node as _gpu_get_node
@@ -34,6 +36,7 @@ from src.db.gpu import set_node_status as _gpu_set_node_status
 logger = logging.getLogger(__name__)
 
 _RATES_TABLE = "provider_payout_rates"
+_TIERS_TABLE = "provider_payout_tiers"
 _WORK_TABLE = "provider_work"
 _EARNINGS_TABLE = "provider_earnings"
 _SETTLEMENTS_TABLE = "provider_settlements"
@@ -42,6 +45,17 @@ _NODES_TABLE = "gpu_nodes"
 # Row caps -- testnet scale, but real limits rather than unbounded selects.
 _WORK_QUERY_ROW_CAP = 2000
 _EARNINGS_LIST_ROW_CAP = 50
+
+# In-memory cache for provider_payout_tiers -- same convention as
+# src/db/system_config.py's cache: tier_multiplier_bps is evaluated on
+# every verified work item (record_earning_for_verified_work) and on
+# every earnings-endpoint read, so a per-request DB round trip isn't
+# worth it for a table operators tune by hand a few times a year. 60s
+# (not system_config's 5 minutes) since payouts are money-adjacent and a
+# tuning change should take effect quickly.
+_payout_tiers_cache: list[dict] | None = None
+_payout_tiers_cache_timestamp: float = 0.0
+_PAYOUT_TIERS_CACHE_TTL = 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +79,61 @@ def get_payout_rate_wei_per_1k(model_class: str) -> int | None:
     except Exception as e:
         logger.warning(f"provider_payout_rates lookup failed for {model_class}: {e}")
         return None
+
+
+def get_payout_tiers() -> list[dict]:
+    """provider_payout_tiers rows, ascending by min_tokens_7d, cached
+    in-memory for _PAYOUT_TIERS_CACHE_TTL seconds. An empty list means
+    "no tiers configured" to callers (src/services/gpu/earnings.py's
+    tier_multiplier_bps treats that as a full 1.0x/10000bps multiplier,
+    never a hard failure) -- returned both when the table is genuinely
+    unseeded and, defensively, on a DB error (stale cache if one exists,
+    else [])."""
+    global _payout_tiers_cache, _payout_tiers_cache_timestamp
+    now = time.monotonic()
+    if (
+        _payout_tiers_cache is not None
+        and (now - _payout_tiers_cache_timestamp) < _PAYOUT_TIERS_CACHE_TTL
+    ):
+        return _payout_tiers_cache
+    try:
+        client = get_supabase_client()
+        result = client.table(_TIERS_TABLE).select("*").order("min_tokens_7d", desc=False).execute()
+        rows = result.data or []
+        _payout_tiers_cache = rows
+        _payout_tiers_cache_timestamp = now
+        return rows
+    except Exception as e:
+        logger.warning(f"provider_payout_tiers lookup failed: {e}")
+        return _payout_tiers_cache or []
+
+
+def check_payout_tiers_seeded() -> None:
+    """Startup sanity check (PR #2295 review round 1, Important #2): warns
+    loudly if provider_payout_tiers has no row with min_tokens_7d == 0.
+    Without that floor row, src/services/gpu/earnings.py's
+    tier_multiplier_bps() has no tier covering a low-volume provider's
+    trailing-7d volume and pays them 0 bps -- easy to mistake for "working
+    as intended, this IS the bottom tier" rather than a misconfiguration,
+    since nothing else signals the difference at request time
+    (tier_multiplier_bps only logs once per affected accrual, not once per
+    misconfiguration). Called from src/services/startup.py's lifespan so an
+    operator who hand-edits the tier table and accidentally drops the floor
+    row finds out at boot, not from a slow trickle of zero-paid providers."""
+    tiers = get_payout_tiers()
+    if not tiers:
+        logger.warning(
+            "provider_payout_tiers is empty -- every provider will be paid the full "
+            "1.0x (10000 bps) rate until it's seeded (see the sliding-scale tier docs "
+            "in docs/gpu/VERIFICATION_AND_PAYOUTS.md)."
+        )
+        return
+    if not any(int(t.get("min_tokens_7d", -1)) == 0 for t in tiers):
+        logger.warning(
+            "provider_payout_tiers has no min_tokens_7d=0 floor row -- every provider "
+            "below the lowest configured threshold will be paid 0 bps (not the bottom "
+            "tier's intended rate). Add a row with min_tokens_7d=0 to fix."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +262,90 @@ def list_recent_work_for_provider(
         return []
 
 
+_VOLUME_7D_RPC = "gpu_provider_verified_volume_7d"
+
+
+def get_provider_verified_volume_7d(provider_id: int, exclude_work_id: int | None = None) -> int:
+    """Sum of prompt_tokens + completion_tokens over this PROVIDER's (not
+    node's) provider_work rows with verification='verified' in the
+    trailing 7 days -- the input to the sliding-scale payout tier lookup
+    (src/services/gpu/earnings.py's tier_multiplier_bps). Scoped to
+    provider_id by design: volume is per payout wallet, so splitting
+    traffic across many small node registrations under the same provider
+    does not lower anyone's tier -- see m4/spec.md §5's sybil note.
+
+    exclude_work_id lets a caller that is about to accrue a NEW work
+    item's own earning ask "what was this provider's volume WITHOUT this
+    row" and then add the row's own tokens itself -- needed because
+    record_earning_for_verified_work runs before provider_work.verification
+    is flipped to 'verified' for the row currently being paid (see
+    spot_check.py's _apply_sampled_outcome), so this query alone would
+    otherwise miss it on a provider's very first verified work, and would
+    double-count it during the earnings-reconciliation retry path (where
+    the row IS already 'verified' by the time this runs again).
+
+    PR #2295 review round 1, Important #1: the sum is computed SERVER-SIDE
+    via the gpu_provider_verified_volume_7d() SQL function (see
+    20260909000000_provider_payout_tiers.sql) -- a prior version pulled raw
+    rows via PostgREST with a 2000-row cap and summed them in Python, which
+    silently undercounted exactly the high-volume providers this feature is
+    meant to reward. The RPC has no row cap. If the RPC itself is
+    unavailable (e.g. this migration hasn't been applied yet on some
+    environment), falls back to the old row-capped client-side sum -- loudly
+    logged, since that fallback CAN undercount and operators should know
+    they're on it.
+
+    Returns 0 if both the RPC and the fallback fail -- treated as the
+    bottom tier, never a hard failure blocking payout."""
+    try:
+        client = get_supabase_client()
+        result = client.rpc(
+            _VOLUME_7D_RPC,
+            {"p_provider_id": provider_id, "p_exclude_work_id": exclude_work_id},
+        ).execute()
+        return int(result.data or 0)
+    except Exception as e:
+        logger.warning(
+            f"{_VOLUME_7D_RPC} RPC failed for provider {provider_id} -- falling back to a "
+            f"row-capped, client-side sum (may undercount volume above "
+            f"{_WORK_QUERY_ROW_CAP} verified rows/7d; check the migration is applied): {e}"
+        )
+        return _get_provider_verified_volume_7d_fallback(provider_id, exclude_work_id)
+
+
+def _get_provider_verified_volume_7d_fallback(provider_id: int, exclude_work_id: int | None) -> int:
+    """Row-capped, client-side sum -- used ONLY when the
+    gpu_provider_verified_volume_7d RPC raises (see get_provider_verified_volume_7d).
+    Caps at _WORK_QUERY_ROW_CAP rows with no ordering, so it CAN undercount a
+    high-volume provider (PR #2295 review Important #1) -- this exists purely
+    as a degrade-gracefully path while the RPC is unreachable, not the
+    primary implementation. Returns 0 on error, same safe-default
+    convention as every other read in this module."""
+    try:
+        since_iso = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+        client = get_supabase_client()
+        query = (
+            client.table(_WORK_TABLE)
+            .select("prompt_tokens,completion_tokens")
+            .eq("provider_id", provider_id)
+            .eq("verification", "verified")
+            .gte("created_at", since_iso)
+        )
+        if exclude_work_id is not None:
+            query = query.neq("id", exclude_work_id)
+        result = query.limit(_WORK_QUERY_ROW_CAP).execute()
+        rows = result.data or []
+        return sum(
+            (row.get("prompt_tokens") or 0) + (row.get("completion_tokens") or 0) for row in rows
+        )
+    except Exception as e:
+        logger.warning(
+            f"provider_work verified-volume-7d fallback lookup failed for provider "
+            f"{provider_id}: {e}"
+        )
+        return 0
+
+
 # ---------------------------------------------------------------------------
 # gpu_nodes health (no W-A1 equivalent planned -- owned here permanently)
 # ---------------------------------------------------------------------------
@@ -273,7 +426,13 @@ def _is_duplicate_error(error: Exception) -> bool:
     )
 
 
-def create_earning(provider_id: int, work_id: int, amount_wei: int) -> tuple[dict | None, str]:
+def create_earning(
+    provider_id: int,
+    work_id: int,
+    amount_wei: int,
+    multiplier_bps: int | None = None,
+    volume_7d_at_accrual: int | None = None,
+) -> tuple[dict | None, str]:
     """Insert an 'accrued' provider_earnings row. Returns (row_or_None, outcome):
 
     'created'   -- inserted successfully.
@@ -290,21 +449,25 @@ def create_earning(provider_id: int, work_id: int, amount_wei: int) -> tuple[dic
                    forever -- src/services/gpu/spot_check.py's
                    run_spot_check_verification retries these via its
                    reconciliation pass.
+
+    multiplier_bps / volume_7d_at_accrual are the sliding-scale
+    payout-tier audit fields (provider_payout_tiers) -- included in the
+    insert only when the caller supplies them, so a caller that doesn't
+    know about tiers gets exactly the same insert payload as before.
     """
+    payload: dict[str, object] = {
+        "provider_id": provider_id,
+        "work_id": work_id,
+        "amount_wei": str(amount_wei),
+        "status": "accrued",
+    }
+    if multiplier_bps is not None:
+        payload["multiplier_bps"] = multiplier_bps
+    if volume_7d_at_accrual is not None:
+        payload["volume_7d_at_accrual"] = volume_7d_at_accrual
     try:
         client = get_supabase_client()
-        result = (
-            client.table(_EARNINGS_TABLE)
-            .insert(
-                {
-                    "provider_id": provider_id,
-                    "work_id": work_id,
-                    "amount_wei": str(amount_wei),
-                    "status": "accrued",
-                }
-            )
-            .execute()
-        )
+        result = client.table(_EARNINGS_TABLE).insert(payload).execute()
         return (result.data[0] if result.data else None), "created"
     except Exception as e:
         if _is_duplicate_error(e):
