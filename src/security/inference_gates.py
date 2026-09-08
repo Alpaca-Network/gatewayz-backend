@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from src.config import Config
+from src.services.model_resolution import index_is_empty, resolve_catalog_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -23,20 +24,84 @@ async def enforce_model_pricing_gate(
     model_id: str,
     request_id: str | None = None,
     api_key_mask: str | None = None,
-) -> None:
+) -> str:
     """
-    Raise HTTPException 400 if the model has no pricing configured.
+    Resolve `model_id` to a canonical catalog id and admit it, or raise.
 
-    Raises 503 with a distinct error code when the model is detected as
-    "high-value pricing missing" — operators should treat this as an outage.
+    Returns the canonical id the caller MUST use downstream — routing and
+    billing have to agree with what this gate priced, so the caller assigns
+    the return value back onto the request.
+
+    Raises:
+        400 model_not_found  — no catalog model matches (the caller's mistake).
+        400 model_ambiguous  — several match a bare name; we refuse to guess.
+        400 model_not_priced — resolved, in catalog, deliberately unpriced.
+        503 pricing_not_configured — resolved, high-value, pricing MISSING.
+            Ours to fix, and the only branch that should page anyone.
     """
     if not Config.REQUIRE_MODEL_PRICING:
-        return
+        return model_id
 
     # Lazy import to avoid pulling pricing into modules that never call this.
     import asyncio
 
     from src.services.pricing import model_has_pricing
+
+    # Callers send vendor-native ids (`claude-sonnet-4-6`) as well as
+    # fully-qualified ones. Resolve first so the rest of this gate — and
+    # everything downstream — works on one canonical string.
+    resolution = resolve_catalog_model_id(model_id)
+    if resolution.canonical_id is None:
+        if resolution.matched_by == "ambiguous":
+            listed = ", ".join(f"'{c}'" for c in resolution.candidates)
+            logger.info(
+                "Rejected ambiguous model (request_id=%s, model=%s, candidates=%s)",
+                request_id,
+                model_id,
+                list(resolution.candidates),
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": (
+                            f"Model '{model_id}' matches more than one model in the "
+                            f"catalog ({listed}). Send the fully-qualified id."
+                        ),
+                        "type": "invalid_request_error",
+                        "code": "model_ambiguous",
+                    }
+                },
+            )
+        # Unresolved. Only a BARE name checked against a POPULATED index is
+        # real evidence the model doesn't exist. A fully-qualified id keeps its
+        # pre-resolution treatment (the pricing checks below decide), and a cold
+        # or unreachable catalog falls through for every id — otherwise a cache
+        # outage would answer "that model does not exist" to the entire API.
+        if "/" in model_id or index_is_empty():
+            resolved = model_id
+        else:
+            logger.info(
+                "Rejected unknown model (request_id=%s, model=%s, key=%s)",
+                request_id,
+                model_id,
+                api_key_mask,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": (
+                            f"Model '{model_id}' does not exist. "
+                            f"See GET /v1/models for available model ids."
+                        ),
+                        "type": "invalid_request_error",
+                        "code": "model_not_found",
+                    }
+                },
+            )
+    else:
+        resolved = resolution.canonical_id
 
     # Free models legitimately have no/zero pricing — exempt them so the
     # zero-price rejection in model_has_pricing only blocks PAID models whose
@@ -45,18 +110,20 @@ async def enforce_model_pricing_gate(
     try:
         from src.services.cache.model_capabilities_cache import is_free_model
 
-        if model_id and await asyncio.to_thread(is_free_model, model_id):
-            return
+        if await asyncio.to_thread(is_free_model, resolved):
+            return resolved
     except Exception:  # noqa: BLE001 - free-check is best-effort; fall through on any error
         pass
 
     try:
-        has_pricing = await asyncio.to_thread(model_has_pricing, model_id)
+        has_pricing = await asyncio.to_thread(model_has_pricing, resolved)
     except ValueError as e:
         logger.error(
-            "Rejected high-value unpriced request (request_id=%s, model=%s, key=%s): %s",
+            "Rejected high-value unpriced request (request_id=%s, model=%s, "
+            "resolved=%s, key=%s): %s",
             request_id,
             model_id,
+            resolved,
             api_key_mask,
             e,
         )
@@ -64,7 +131,7 @@ async def enforce_model_pricing_gate(
             status_code=503,
             detail={
                 "error": {
-                    "message": f"Pricing for model '{model_id}' is not configured. Please contact support.",
+                    "message": f"Pricing for model '{resolved}' is not configured. Please contact support.",
                     "type": "service_unavailable",
                     "code": "pricing_not_configured",
                 }
@@ -73,21 +140,25 @@ async def enforce_model_pricing_gate(
 
     if not has_pricing:
         logger.warning(
-            "Rejected unpriced model request (request_id=%s, model=%s, key=%s)",
+            "Rejected unpriced model request (request_id=%s, model=%s, "
+            "resolved=%s, key=%s)",
             request_id,
             model_id,
+            resolved,
             api_key_mask,
         )
         raise HTTPException(
             status_code=400,
             detail={
                 "error": {
-                    "message": f"Model '{model_id}' is not available for inference (no pricing configured).",
+                    "message": f"Model '{resolved}' is not available for inference (no pricing configured).",
                     "type": "invalid_request_error",
                     "code": "model_not_priced",
                 }
             },
         )
+
+    return resolved
 
 
 def enforce_subscription_status_gate(

@@ -392,7 +392,10 @@ async def chat_completions(
         conversation_id=str(session_id) if session_id else None,
     )
 
-    await enforce_model_pricing_gate(
+    # The gate returns the CANONICAL id it priced (a caller may have sent a
+    # vendor-native one like `claude-sonnet-4-6`). Routing and billing must use
+    # the same string the gate admitted, so write it back onto the request.
+    req.model = await enforce_model_pricing_gate(
         req.model,
         request_id=request_id,
         api_key_mask=mask_key(api_key) if api_key else "anonymous",

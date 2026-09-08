@@ -83,6 +83,17 @@ def _ensure_index() -> None:
                 _build_index()
 
 
+def index_is_empty() -> bool:
+    """True when the catalog index holds nothing to resolve against.
+
+    A cold cache, or a Supabase the process cannot reach, must not be allowed
+    to turn every request into "that model does not exist" — callers check
+    this and fall through to the pre-resolution behavior instead.
+    """
+    _ensure_index()
+    return not _exact
+
+
 def invalidate_resolution_index() -> None:
     """Drop the index; rebuilt lazily on the next resolve. Call on catalog sync."""
     global _exact, _by_suffix, _aliases
