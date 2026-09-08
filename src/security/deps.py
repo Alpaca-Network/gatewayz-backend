@@ -17,6 +17,78 @@ from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
 logger = logging.getLogger(__name__)
 
+
+# Key-validation failures, mapped to a status AND a machine-readable code.
+#
+# The two spend ceilings are the reason this exists. A rate limit is transient
+# and should be waited out; an exhausted request cap or an empty balance is
+# terminal until a human raises the cap or tops up. Cap exhaustion used to
+# return 429 — the same status as a rate limit — with a bare
+# `{"detail": "..."}` string, so an integrator could only tell them apart by
+# matching on prose, and every SDK with a retry policy (Anthropic's included)
+# retried a condition that retrying can never clear.
+#
+# Ordered: the first substring found in the message wins, so put the specific
+# entries above the general ones.
+_KEY_FAILURE_MAP: tuple[tuple[str, int, str, str], ...] = (
+    (
+        "limit reached",
+        402,
+        "request_cap_exhausted",
+        "This API key has reached its request cap. Retrying will not clear it — "
+        "the cap must be raised.",
+    ),
+    (
+        "Insufficient credits",
+        402,
+        "insufficient_credits",
+        "Insufficient credits. Please add credits to continue.",
+    ),
+    ("inactive", 401, "api_key_inactive", "This API key is inactive."),
+    ("expired", 401, "api_key_expired", "This API key has expired."),
+    ("IP address", 403, "ip_not_allowed", "This IP address is not allowed for this API key."),
+    ("Domain", 403, "domain_not_allowed", "This domain is not allowed for this API key."),
+    ("not allowed", 403, "not_allowed", "This request is not allowed for this API key."),
+)
+
+
+def ceiling_http_exception(error_message: str) -> HTTPException:
+    """Build the HTTPException for a key-validation failure.
+
+    Returns a structured body — `{"error": {"message", "type", "code"}}` —
+    so a caller can branch on `code` instead of substring-matching the prose.
+    Unrecognised failures keep the historical 401 default.
+    """
+    for keyword, status, code, message in _KEY_FAILURE_MAP:
+        if keyword in error_message:
+            # The two spend ceilings get the canned, actionable copy — they are
+            # what a partner branches on. Everything else echoes the original
+            # validation message, which is what callers already relied on.
+            body = message if status == 402 else error_message
+            return HTTPException(
+                status_code=status,
+                detail={
+                    "error": {
+                        "message": body,
+                        "type": (
+                            "invalid_request_error" if status == 402 else "authentication_error"
+                        ),
+                        "code": code,
+                    }
+                },
+            )
+    return HTTPException(
+        status_code=401,
+        detail={
+            "error": {
+                "message": error_message,
+                "type": "authentication_error",
+                "code": "invalid_api_key",
+            }
+        },
+    )
+
+
 # HTTP Bearer security scheme with auto_error=False to allow custom error handling
 security = HTTPBearer(auto_error=False)
 
@@ -101,7 +173,8 @@ async def get_api_key(
         Validated API key string (or dummy key in local environment)
 
     Raises:
-        HTTPException: 401/403/429 depending on error type
+        HTTPException: 401/402/403 depending on error type (402 = a terminal
+            spend ceiling: request cap exhausted or credits out)
     """
     # Import Config here to avoid circular imports
     from src.config import Config
@@ -162,29 +235,13 @@ async def get_api_key(
     except ValueError as e:
         error_message = str(e)
 
-        # Map errors to HTTP status codes
-        status_code_map = {
-            "inactive": 401,
-            "expired": 401,
-            "limit reached": 429,
-            "not allowed": 403,
-            "IP address": 403,
-            "Domain": 403,
-        }
-
-        status_code = 401
-        for keyword, code in status_code_map.items():
-            if keyword in error_message:
-                status_code = code
-                break
-
         # Log security violation (only for required auth endpoints)
         if log_security_violations and client_ip:
             audit_logger.log_security_violation(
                 violation_type="INVALID_API_KEY", details=error_message, ip_address=client_ip
             )
 
-        raise HTTPException(status_code=status_code, detail=error_message) from e
+        raise ceiling_http_exception(error_message) from e
 
     except Exception as e:
         logger.error(f"Unexpected error validating API key: {e}")

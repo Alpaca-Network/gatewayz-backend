@@ -668,13 +668,16 @@ data: [DONE]
 }
 ```
 
-### Unified Responses
+### Unified Responses — NOT SERVED
 
-```http
-POST /v1/responses
-```
+> **`POST /v1/responses` returns 404 in production and is not registered by any
+> router.** It is documented here historically; do not integrate against it.
+> Use `POST /v1/chat/completions` (OpenAI-compatible) or `POST /v1/messages`
+> (Anthropic-compatible). Reported by a partner integrating from these docs,
+> 2026-09-08 — a documented endpoint that 404s costs an integrator a debugging
+> session before they think to doubt the documentation.
 
-Unified response API endpoint (OpenAI v1/responses compatible).
+The request/response shapes below are retained for reference only.
 
 **Request Body:**
 ```json
