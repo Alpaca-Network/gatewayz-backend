@@ -20,7 +20,12 @@ from fastapi.testclient import TestClient
 import src.security.deps as deps_module
 from src.main import app
 from src.security.deps import get_optional_api_key
-from src.security.identity import ANONYMOUS, RequestIdentity, get_request_identity
+from src.security.identity import (
+    ANONYMOUS,
+    RequestIdentity,
+    get_request_identity,
+    get_request_identity_strict,
+)
 
 CHAT_PY = Path(__file__).resolve().parents[2] / "src" / "routes" / "chat.py"
 
@@ -109,7 +114,10 @@ def test_overriding_identity_bypasses_the_anonymous_gate():
         is_guest=False,
         wallet_addresses=(),
     )
-    app.dependency_overrides[get_request_identity] = lambda: fake_identity
+    # chat.py depends on the STRICT identity chain (a supplied-but-invalid key
+    # is rejected rather than demoted to anonymous), so the override has to
+    # target that dependency — overriding the lenient one silently does nothing.
+    app.dependency_overrides[get_request_identity_strict] = lambda: fake_identity
 
     try:
         with patch("src.security.inference_gates.Config.ANONYMOUS_ENABLED", False):
@@ -118,7 +126,7 @@ def test_overriding_identity_bypasses_the_anonymous_gate():
                 json={"model": "openai/gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
             )
     finally:
-        del app.dependency_overrides[get_request_identity]
+        del app.dependency_overrides[get_request_identity_strict]
 
     # Whatever happens next (missing user -> invalid_api_key, etc.), it must
     # NOT be the anonymous-gate rejection.
