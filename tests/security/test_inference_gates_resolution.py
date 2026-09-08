@@ -12,9 +12,9 @@ import sys
 import pytest
 from fastapi import HTTPException
 
+import src.services.pricing  # noqa: F401 -- put the PACKAGE in sys.modules
 from src.security import inference_gates
 from src.services.model_resolution import ModelResolution
-import src.services.pricing  # noqa: F401 -- put the PACKAGE in sys.modules
 
 # HARNESS TRAP: `src/services/pricing/` is a package that CONTAINS a
 # `pricing.py`, so the usual string form —
@@ -143,8 +143,7 @@ async def test_cold_catalog_does_not_reject_a_bare_id(monkeypatch):
         index_empty=True,
     )
     assert (
-        await inference_gates.enforce_model_pricing_gate("claude-sonnet-4-6")
-        == "claude-sonnet-4-6"
+        await inference_gates.enforce_model_pricing_gate("claude-sonnet-4-6") == "claude-sonnet-4-6"
     )
 
 
@@ -153,6 +152,5 @@ async def test_gate_disabled_returns_the_input_unchanged(monkeypatch):
 
     monkeypatch.setattr(Config, "REQUIRE_MODEL_PRICING", False, raising=False)
     assert (
-        await inference_gates.enforce_model_pricing_gate("claude-sonnet-4-6")
-        == "claude-sonnet-4-6"
+        await inference_gates.enforce_model_pricing_gate("claude-sonnet-4-6") == "claude-sonnet-4-6"
     )

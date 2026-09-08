@@ -55,8 +55,8 @@ HIGH_VALUE_MODEL_PATTERNS: tuple[str, ...] = (
     "o1-",
     "o3-",
     "o4-",
-    "claude-",          # every Claude generation: opus, sonnet, haiku
-    "gemini-",          # every Gemini generation
+    "claude-",  # every Claude generation: opus, sonnet, haiku
+    "gemini-",  # every Gemini generation
     "command-r-plus",
     "mixtral-8x22b",
     "grok-",

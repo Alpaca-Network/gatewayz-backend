@@ -25,10 +25,7 @@ def test_catalog_invalidation_drops_the_resolution_index(monkeypatch):
     ids.append("near/claude-sonnet-4-6")
 
     # Stale index: still resolves, because nothing has told it to rebuild.
-    assert (
-        model_resolution.resolve_catalog_model_id("claude-sonnet-4-6").canonical_id
-        is not None
-    )
+    assert model_resolution.resolve_catalog_model_id("claude-sonnet-4-6").canonical_id is not None
 
     from src.services.cache.model_catalog_cache import invalidate_full_catalog
 

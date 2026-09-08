@@ -28,9 +28,9 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
+import src.services.pricing  # noqa: F401 -- put the PACKAGE in sys.modules
 from src.security import inference_gates
 from src.services import model_resolution
-import src.services.pricing  # noqa: F401 -- put the PACKAGE in sys.modules
 
 # HARNESS TRAP: `src/services/pricing/` is a package that CONTAINS a
 # `pricing.py`, so the usual string form —

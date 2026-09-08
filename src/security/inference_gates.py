@@ -140,8 +140,7 @@ async def enforce_model_pricing_gate(
 
     if not has_pricing:
         logger.warning(
-            "Rejected unpriced model request (request_id=%s, model=%s, "
-            "resolved=%s, key=%s)",
+            "Rejected unpriced model request (request_id=%s, model=%s, " "resolved=%s, key=%s)",
             request_id,
             model_id,
             resolved,

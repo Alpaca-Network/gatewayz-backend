@@ -54,9 +54,7 @@ def test_detail_code_is_extracted_when_present():
 
 
 def test_model_not_found_maps_to_anthropic_invalid_request_error():
-    assert messages_route._anthropic_error_type(400, "model_not_found") == (
-        "invalid_request_error"
-    )
+    assert messages_route._anthropic_error_type(400, "model_not_found") == ("invalid_request_error")
 
 
 def test_pricing_not_configured_is_not_advertised_as_retryable():
