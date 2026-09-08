@@ -7,11 +7,24 @@ outage and is what production returned for every vendor-native Anthropic id.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 from fastapi import HTTPException
 
 from src.security import inference_gates
 from src.services.model_resolution import ModelResolution
+import src.services.pricing  # noqa: F401 -- put the PACKAGE in sys.modules
+
+# HARNESS TRAP: `src/services/pricing/` is a package that CONTAINS a
+# `pricing.py`, so the usual string form —
+#     monkeypatch.setattr("src.services.pricing.model_has_pricing", fake)
+# — resolves to the SUBMODULE and leaves the PACKAGE attribute untouched. The
+# package attribute is the one `from src.services.pricing import
+# model_has_pricing` actually reads, so that patch silently does nothing and
+# the test then passes (or fails) against real pricing data. Patch the package
+# object out of sys.modules instead.
+_PRICING = sys.modules["src.services.pricing"]
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +37,7 @@ def _require_pricing(monkeypatch):
 def _stub(monkeypatch, resolution: ModelResolution, priced: set[str], index_empty: bool = False):
     monkeypatch.setattr(inference_gates, "resolve_catalog_model_id", lambda _m: resolution)
     monkeypatch.setattr(inference_gates, "index_is_empty", lambda: index_empty)
-    monkeypatch.setattr("src.services.pricing.model_has_pricing", lambda m: m in priced)
+    monkeypatch.setattr(_PRICING, "model_has_pricing", lambda m: m in priced)
     monkeypatch.setattr(
         "src.services.cache.model_capabilities_cache.is_free_model", lambda _m: False
     )
@@ -77,7 +90,7 @@ async def test_resolved_but_unpriced_model_stays_a_503_operator_alarm(monkeypatc
         "resolve_catalog_model_id",
         lambda _m: ModelResolution("anthropic/claude-sonnet-4-6", "exact"),
     )
-    monkeypatch.setattr("src.services.pricing.model_has_pricing", _raise)
+    monkeypatch.setattr(_PRICING, "model_has_pricing", _raise)
     monkeypatch.setattr(
         "src.services.cache.model_capabilities_cache.is_free_model", lambda _m: False
     )
