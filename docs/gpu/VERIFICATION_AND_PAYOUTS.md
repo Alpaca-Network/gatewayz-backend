@@ -152,6 +152,69 @@ Earnings math is **integer wei throughout**: `amount_wei = (prompt_tokens +
 completion_tokens) * rate_wei_per_1k // 1000`, floored. Never floating
 point at this magnitude.
 
+### Log sliding-scale volume tiers (`provider_payout_tiers`)
+
+On top of the model-class rate above, every payout is scaled by a
+**basis-points multiplier** keyed off the provider's own trailing-7-day
+**verified** token volume:
+
+```
+amount_wei = ((prompt_tokens + completion_tokens) * rate_wei_per_1k // 1000)
+             * multiplier_bps // 10000
+```
+
+Both divisions floor, same integer-only rule as the base rate. The tier
+table (`provider_payout_tiers`: `min_tokens_7d`, `multiplier_bps`, `label`)
+is seeded with these **testnet placeholders**:
+
+| Trailing-7d verified tokens | Multiplier | Label |
+|---|---|---|
+| 0 | 0.05x (500 bps) | `bot` |
+| 100,000 | 0.25x (2500 bps) | `small` |
+| 1,000,000 | 0.60x (6000 bps) | `medium` |
+| 10,000,000 | 1.00x (10000 bps) | `large` |
+| 100,000,000 | 1.50x (15000 bps) | `whale` |
+
+**Product rationale**: a one-off/"bot" node that shows up, does a
+handful of requests, and disappears should earn almost nothing, while a
+large, sustained community provider should be rewarded well above the
+flat per-token rate. A basis-points multiplier keeps every step of the
+math integer (never floats at wei magnitude).
+
+**Tunable without a deploy**: edit `provider_payout_tiers` directly
+(insert/update/delete rows) -- `src/db/gpu_payouts.py`'s
+`get_payout_tiers()` caches for only ~60s, so a change is live almost
+immediately. `src/services/gpu/earnings.py`'s `tier_multiplier_bps()`
+picks the largest tier whose `min_tokens_7d <= volume`; an empty table
+(mid-migration, or wiped by mistake) pays the full 1.0x rate rather than
+zeroing out every payout.
+
+**Sybil note -- volume is per PROVIDER, not per node.**
+`get_provider_verified_volume_7d(provider_id)` sums `provider_work` rows
+by `provider_id` (the payout wallet), never by `node_id`. Registering
+many small nodes under the same provider account does not reset or split
+anyone's tier -- all of that provider's verified traffic, across every
+node they run, counts toward the same trailing-7d volume. Splitting
+traffic across separate `gpu_providers` accounts (separate payout
+wallets, separate KYC/approval) is a different, much higher-friction
+attack that this feature does not attempt to solve.
+
+**Volume includes the work item currently being paid.** Because
+`record_earning_for_verified_work` runs BEFORE `provider_work.verification`
+is flipped to `'verified'` for that row (see `_apply_sampled_outcome`
+above), a naive query would miss a provider's very first verified item.
+`get_provider_verified_volume_7d` takes an `exclude_work_id` so the
+current row's own tokens can be added back in exactly once, correctly on
+both the common path (row not yet verified in the DB) and the
+reconciliation-retry path (row already verified in the DB).
+
+Both `multiplier_bps` and `volume_7d_at_accrual` are stored on the
+`provider_earnings` row at accrual time (nullable columns, added by
+`20260909000000_provider_payout_tiers.sql`) for auditability -- so a
+past payout's tier can always be explained without recomputing a 7-day
+window retroactively. Pre-existing rows (accrued before this migration)
+are left `NULL`, not backfilled.
+
 ### Reconciling a lost payout (I1)
 
 `create_earning`'s insert can fail for a reason that ISN'T a duplicate
@@ -243,10 +306,13 @@ provider.
 
 `GET /gpu/providers/me/earnings` (auth) returns wei-string totals
 (`accrued_wei`/`settled_wei`/`void_wei`), the last 50 `provider_work` rows
-(billing_ref, model, token counts, verification -- no hashes), and
-settlements with a `https://testnet.snowtrace.io/tx/{tx_hash}` link.
-Always scoped to the caller's own provider row -- never a client-supplied
-`provider_id`.
+(billing_ref, model, token counts, verification -- no hashes), settlements
+with a `https://testnet.snowtrace.io/tx/{tx_hash}` link, and a `tier`
+object so an operator can see where they stand on the sliding scale:
+`{current_volume_7d, multiplier_bps, next_tier_min_tokens_7d}` --
+`next_tier_min_tokens_7d` is `null` once the provider is at (or above) the
+top tier. Always scoped to the caller's own provider row -- never a
+client-supplied `provider_id`.
 
 ## Config reference
 

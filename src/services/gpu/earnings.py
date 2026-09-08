@@ -1,6 +1,20 @@
 """WAYZ earnings accrual for verified community-GPU work
 (gatewayz-backend#2266; m4/spec.md §5; PR #2288 review fix round 1).
 
+**Log sliding-scale payout tiers (m4/spec.md §5 follow-up):** on top of
+the model-class rate below, a provider's payout is scaled by a basis-points
+multiplier keyed off their own trailing-7-day VERIFIED token volume
+(`provider_payout_tiers`, seeded testnet placeholders: 0.05x at 0 tokens/7d
+up to 1.5x at 100M tokens/7d -- see the migration
+`20260909000000_provider_payout_tiers.sql` and
+`docs/gpu/VERIFICATION_AND_PAYOUTS.md`). Product intent: a big, sustained
+provider earns far more per token than a one-off "bot" node. Volume is
+looked up per PROVIDER (payout wallet), never per node
+(`src/db/gpu_payouts.py`'s `get_provider_verified_volume_7d`) -- splitting
+traffic across many small node registrations under one provider does not
+lower anyone's tier, closing the obvious sybil incentive a per-node volume
+count would create.
+
 **C1 fix (payout inflation, Critical):** model class is now resolved via
 an exact-match allow-list (`src/services/gpu/model_classes.py`), never by
 parsing the free-text model id a node self-reports -- that was an
@@ -26,8 +40,16 @@ import logging
 from dataclasses import dataclass
 
 from src.config.config import Config
-from src.db.gpu_payouts import create_earning, get_payout_rate_wei_per_1k
+from src.db.gpu_payouts import (
+    create_earning,
+    get_payout_rate_wei_per_1k,
+    get_payout_tiers,
+    get_provider_verified_volume_7d,
+)
 from src.services.gpu.model_classes import known_model_class
+
+_BPS_DENOMINATOR = 10000  # 100.00% == 10000 bps -- see provider_payout_tiers.multiplier_bps
+_FULL_MULTIPLIER_BPS = 10000  # 1.0x -- used when no tiers are configured yet
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +78,57 @@ def effective_model_class(
     return "small"
 
 
-def compute_amount_wei(prompt_tokens: int, completion_tokens: int, rate_wei_per_1k: int) -> int:
+def tier_multiplier_bps(volume_7d: int, tiers: list[dict]) -> int:
+    """Basis-points payout multiplier for a trailing-7d verified-token
+    volume, given the tier rows from get_payout_tiers(). Picks the
+    largest tier whose min_tokens_7d is <= volume_7d -- a log sliding
+    scale, so bigger sustained volume always means a bigger multiplier.
+    Pure function over whatever list it's handed -- does not assume the
+    caller's list is sorted.
+
+    An empty tier list means "tiers not configured yet" and pays the full
+    1.0x (10000 bps) rate rather than zeroing out every payout. If tiers
+    ARE configured but somehow none apply (e.g. the 0-floor row was
+    deleted) this returns 0 -- a misconfiguration should never silently
+    overpay."""
+    if not tiers:
+        return _FULL_MULTIPLIER_BPS
+    applicable = [t for t in tiers if int(t.get("min_tokens_7d", 0)) <= volume_7d]
+    if not applicable:
+        return 0
+    best = max(applicable, key=lambda t: int(t.get("min_tokens_7d", 0)))
+    return int(best.get("multiplier_bps", 0))
+
+
+def next_tier_min_tokens_7d(volume_7d: int, tiers: list[dict]) -> int | None:
+    """The min_tokens_7d of the next tier above volume_7d's current tier,
+    or None when volume_7d is already at (or above) the top tier, or when
+    no tiers are configured. Used by GET /gpu/providers/me/earnings so an
+    operator can see how much more trailing-7d volume gets them to a
+    better multiplier."""
+    thresholds = sorted(int(t.get("min_tokens_7d", 0)) for t in tiers)
+    for threshold in thresholds:
+        if threshold > volume_7d:
+            return threshold
+    return None
+
+
+def compute_amount_wei(
+    prompt_tokens: int,
+    completion_tokens: int,
+    rate_wei_per_1k: int,
+    multiplier_bps: int = _FULL_MULTIPLIER_BPS,
+) -> int:
     """Integer wei math -- (prompt_tokens + completion_tokens) * rate / 1000,
-    floor division. Never floats: rate_wei_per_1k is wei-scaled (numeric(78,0)
-    in provider_payout_rates), and a float division at this magnitude
-    silently loses precision."""
+    floor division, then scaled by the sliding-scale tier multiplier (also
+    floor division). Never floats: rate_wei_per_1k is wei-scaled
+    (numeric(78,0) in provider_payout_rates), and a float division at this
+    magnitude silently loses precision. multiplier_bps defaults to 1.0x
+    (10000) so callers that don't pass one get the pre-tier behavior
+    unchanged."""
     total_tokens = prompt_tokens + completion_tokens
-    return (total_tokens * rate_wei_per_1k) // 1000
+    base_amount_wei = (total_tokens * rate_wei_per_1k) // 1000
+    return (base_amount_wei * multiplier_bps) // _BPS_DENOMINATOR
 
 
 @dataclass
@@ -117,8 +183,32 @@ def record_earning_for_verified_work(work: dict) -> EarningResult:
         )
         return EarningResult(earning=None, outcome="rate_unseeded")
 
-    amount_wei = compute_amount_wei(
-        work.get("prompt_tokens", 0) or 0, work.get("completion_tokens", 0) or 0, rate_wei_per_1k
+    prompt_tokens = work.get("prompt_tokens", 0) or 0
+    completion_tokens = work.get("completion_tokens", 0) or 0
+    work_tokens = prompt_tokens + completion_tokens
+
+    # Trailing-7d verified volume for the sliding-scale tier lookup, scoped
+    # to provider_id (never node_id -- see this module's docstring on the
+    # sybil note). get_provider_verified_volume_7d excludes this row (it
+    # runs BEFORE provider_work.verification is flipped to 'verified' for
+    # this row on the common path -- see spot_check.py's
+    # _apply_sampled_outcome -- and is already included in the DB on the
+    # reconciliation-retry path), so this row's own tokens are added back
+    # in here exactly once either way.
+    volume_7d = (
+        get_provider_verified_volume_7d(work["provider_id"], exclude_work_id=work["id"])
+        + work_tokens
     )
-    earning, outcome = create_earning(work["provider_id"], work["id"], amount_wei)
+    multiplier_bps = tier_multiplier_bps(volume_7d, get_payout_tiers())
+
+    amount_wei = compute_amount_wei(
+        prompt_tokens, completion_tokens, rate_wei_per_1k, multiplier_bps
+    )
+    earning, outcome = create_earning(
+        work["provider_id"],
+        work["id"],
+        amount_wei,
+        multiplier_bps=multiplier_bps,
+        volume_7d_at_accrual=volume_7d,
+    )
     return EarningResult(earning=earning, outcome=outcome)

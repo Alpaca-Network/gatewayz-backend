@@ -17,11 +17,14 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.db.gpu_payouts import (
     earnings_totals,
+    get_payout_tiers,
     get_provider_for_user,
+    get_provider_verified_volume_7d,
     list_recent_work_for_provider,
     list_settlements_for_provider,
 )
 from src.security.deps import get_user_id
+from src.services.gpu.earnings import next_tier_min_tokens_7d, tier_multiplier_bps
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +79,14 @@ async def get_my_earnings(user_id: int = Depends(get_user_id)) -> dict[str, Any]
     work = list_recent_work_for_provider(provider_id, limit=_WORK_HISTORY_LIMIT)
     settlements = list_settlements_for_provider(provider_id)
 
+    # Sliding-scale payout tier standing (m4/spec.md §5 follow-up) -- so an
+    # operator can see where they sit and how much more trailing-7d
+    # verified volume it takes to reach the next multiplier.
+    volume_7d = get_provider_verified_volume_7d(provider_id)
+    tiers = get_payout_tiers()
+    multiplier_bps = tier_multiplier_bps(volume_7d, tiers)
+    next_min = next_tier_min_tokens_7d(volume_7d, tiers)
+
     return {
         "success": True,
         "data": {
@@ -86,5 +97,10 @@ async def get_my_earnings(user_id: int = Depends(get_user_id)) -> dict[str, Any]
             },
             "work": [_work_view(row) for row in work],
             "settlements": [_settlement_view(row) for row in settlements],
+            "tier": {
+                "current_volume_7d": volume_7d,
+                "multiplier_bps": multiplier_bps,
+                "next_tier_min_tokens_7d": next_min,
+            },
         },
     }

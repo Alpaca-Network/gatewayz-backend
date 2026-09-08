@@ -14,7 +14,18 @@ def sb():
 
 def _query_mock(data):
     query = MagicMock()
-    for method in ("select", "eq", "gte", "lt", "in_", "order", "limit", "insert", "update"):
+    for method in (
+        "select",
+        "eq",
+        "neq",
+        "gte",
+        "lt",
+        "in_",
+        "order",
+        "limit",
+        "insert",
+        "update",
+    ):
         getattr(query, method).return_value = query
     query.execute.return_value = MagicMock(data=data)
     return query
@@ -49,6 +60,88 @@ def test_get_payout_rate_returns_none_on_error(sb):
     client.table.side_effect = RuntimeError("boom")
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         assert gpu_payouts.get_payout_rate_wei_per_1k("small") is None
+
+
+# ---------------------------------------------------------------------------
+# provider_payout_tiers
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_payout_tiers_cache():
+    """get_payout_tiers() caches in-process for ~60s -- reset around every
+    test so one test's mock client never leaks into the next via the cache."""
+    gpu_payouts._payout_tiers_cache = None
+    gpu_payouts._payout_tiers_cache_timestamp = 0.0
+    yield
+    gpu_payouts._payout_tiers_cache = None
+    gpu_payouts._payout_tiers_cache_timestamp = 0.0
+
+
+def test_get_payout_tiers_returns_rows(sb):
+    rows = [
+        {"min_tokens_7d": 0, "multiplier_bps": 500, "label": "bot"},
+        {"min_tokens_7d": 100000, "multiplier_bps": 2500, "label": "small"},
+    ]
+    client, query = _client_with(rows)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.get_payout_tiers() == rows
+    query.order.assert_called_once_with("min_tokens_7d", desc=False)
+
+
+def test_get_payout_tiers_caches_between_calls(sb):
+    rows = [{"min_tokens_7d": 0, "multiplier_bps": 500, "label": "bot"}]
+    client, query = _client_with(rows)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client) as mock_get_client:
+        gpu_payouts.get_payout_tiers()
+        gpu_payouts.get_payout_tiers()
+    mock_get_client.assert_called_once()
+
+
+def test_get_payout_tiers_returns_empty_list_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.get_payout_tiers() == []
+
+
+# ---------------------------------------------------------------------------
+# get_provider_verified_volume_7d
+# ---------------------------------------------------------------------------
+
+
+def test_get_provider_verified_volume_7d_sums_tokens(sb):
+    rows = [
+        {"prompt_tokens": 100, "completion_tokens": 50},
+        {"prompt_tokens": 200, "completion_tokens": 0},
+    ]
+    client, query = _client_with(rows)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.get_provider_verified_volume_7d(5) == 350
+    query.eq.assert_any_call("provider_id", 5)
+    query.eq.assert_any_call("verification", "verified")
+
+
+def test_get_provider_verified_volume_7d_excludes_a_work_id(sb):
+    rows = [{"prompt_tokens": 100, "completion_tokens": 50}]
+    client, query = _client_with(rows)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        gpu_payouts.get_provider_verified_volume_7d(5, exclude_work_id=99)
+    query.neq.assert_called_once_with("id", 99)
+
+
+def test_get_provider_verified_volume_7d_treats_missing_counts_as_zero(sb):
+    rows = [{"prompt_tokens": None, "completion_tokens": None}]
+    client, query = _client_with(rows)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.get_provider_verified_volume_7d(5) == 0
+
+
+def test_get_provider_verified_volume_7d_returns_zero_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.get_provider_verified_volume_7d(5) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +296,26 @@ def test_create_earning_inserts_accrued_row(sb):
     assert outcome == "created"
     query.insert.assert_called_once_with(
         {"provider_id": 1, "work_id": 10, "amount_wei": "5000", "status": "accrued"}
+    )
+
+
+def test_create_earning_includes_tier_audit_fields_when_provided(sb):
+    """New sliding-scale-tier fields (multiplier_bps, volume_7d_at_accrual)
+    are only added to the insert payload when the caller supplies them --
+    keeps the base insert payload (and the test above) unchanged for
+    callers that don't know about tiers."""
+    client, query = _client_with([{"id": 1, "status": "accrued"}])
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        gpu_payouts.create_earning(1, 10, 5000, multiplier_bps=2500, volume_7d_at_accrual=150000)
+    query.insert.assert_called_once_with(
+        {
+            "provider_id": 1,
+            "work_id": 10,
+            "amount_wei": "5000",
+            "status": "accrued",
+            "multiplier_bps": 2500,
+            "volume_7d_at_accrual": 150000,
+        }
     )
 
 

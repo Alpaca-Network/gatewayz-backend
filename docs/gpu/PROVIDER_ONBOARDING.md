@@ -247,6 +247,35 @@ caps *how much*. Attested work (`--wallet-keyfile`, ideally
 `--attest-proxy`) is the one lever you control to get closer to full
 rate once a reference provider is configured.
 
+**Volume tiers — the more you run, the better your rate.** On top of the
+model-class rate above, every payout is scaled by a multiplier based on
+YOUR trailing-7-day verified token volume (across all your nodes
+combined — see below):
+
+| Trailing-7d verified tokens | Multiplier |
+|---|---|
+| 0 | 0.05x |
+| 100,000 | 0.25x |
+| 1,000,000 | 0.60x |
+| 10,000,000 | 1.00x (full rate) |
+| 100,000,000 | 1.50x (bonus) |
+
+These are also testnet placeholder values, tunable by Gatewayz operators
+without a deploy — check `GET /gpu/providers/me/earnings`'s `tier` field
+for your current standing (`current_volume_7d`, `multiplier_bps`, and
+`next_tier_min_tokens_7d` — how much more volume gets you to the next
+tier, or `null` if you're already at the top).
+
+**This is intentional and by design: a single small/occasional node earns
+close to nothing, while a large, sustained provider earns far more per
+token.** Volume is tracked per PROVIDER account (your payout wallet), not
+per node — running many small nodes under one provider account combines
+all their verified volume toward the same tier, it does **not** reset or
+split it. Registering multiple separate provider accounts to try to
+game a lower tier's threshold doesn't help either; it just means each of
+those accounts individually earns at the bottom tier instead of
+combining into one that reaches a better rate.
+
 - Earnings accrue only from **verified** work (see "Verification" below)
   — unsampled-and-unresolved, unverified, or failed-verification work is
   unpaid.
