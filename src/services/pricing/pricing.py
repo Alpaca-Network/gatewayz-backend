@@ -40,6 +40,43 @@ _VERSION_SUFFIX_RE = re.compile(
 )
 
 
+# Vendor families whose models are expensive enough that serving one at the
+# $0.00002 default rate is a revenue incident, not a rounding error. Matched as
+# substrings against both the raw and the normalized id.
+#
+# Kept FAMILY-level, not generation-level: the previous inline lists held
+# "claude-sonnet-4" and therefore stopped protecting Anthropic the day
+# claude-sonnet-5 shipped -- the older model was guarded, the current one was
+# not. A family entry cannot drift that way. There were three copies of that
+# list in this module; this is the single one.
+HIGH_VALUE_MODEL_PATTERNS: tuple[str, ...] = (
+    "gpt-4",
+    "gpt-5",
+    "o1-",
+    "o3-",
+    "o4-",
+    "claude-",          # every Claude generation: opus, sonnet, haiku
+    "gemini-",          # every Gemini generation
+    "command-r-plus",
+    "mixtral-8x22b",
+    "grok-",
+)
+
+# Genuinely free models have no revenue to lose, so the guard must not fire on
+# them -- it would only break a model that is supposed to cost nothing.
+_FREE_MARKERS = (":free",)
+
+
+def is_high_value_model(model_id: str, normalized_id: str = "") -> bool:
+    """True when serving `model_id` on default pricing would under-bill materially."""
+    if not model_id:
+        return False
+    haystacks = [h for h in (model_id.lower(), (normalized_id or "").lower()) if h]
+    if any(marker in h for h in haystacks for marker in _FREE_MARKERS):
+        return False
+    return any(pattern in h for h in haystacks for pattern in HIGH_VALUE_MODEL_PATTERNS)
+
+
 def _build_reverse_transform_lookup() -> dict[str, str]:
     """
     Build a reverse lookup from provider-native model IDs back to canonical IDs.
@@ -685,30 +722,10 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
         # HIGH-VALUE MODEL CHECK: Block requests for expensive models with unknown pricing
         # This prevents massive revenue loss from using default pricing on GPT-4, Claude, etc.
         # NOTE: Check against BOTH original and normalized IDs to catch transformed variants
-        HIGH_VALUE_MODEL_PATTERNS = [
-            "gpt-4",
-            "gpt-5",
-            "o1-",
-            "o3-",
-            "o4-",  # OpenAI high-end models
-            "claude-3",
-            "claude-opus",
-            "claude-sonnet-4",  # Anthropic high-end
-            "gemini-1.5-pro",
-            "gemini-2",
-            "gemini-pro",  # Google high-end
-            "command-r-plus",  # Cohere high-end
-            "mixtral-8x22b",  # Mistral high-end
-        ]
 
-        # Check both original and normalized IDs against high-value patterns
-        # (the normalized ID may reveal the true model identity from a transformed ID)
-        model_id_lower = model_id.lower()
-        normalized_lower = normalized_model_id.lower()
-        is_high_value = any(
-            pattern in model_id_lower or pattern in normalized_lower
-            for pattern in HIGH_VALUE_MODEL_PATTERNS
-        )
+        # Check both original and normalized IDs (the normalized ID may reveal
+        # the true model identity behind a provider-transformed one).
+        is_high_value = is_high_value_model(model_id, normalized_model_id)
 
         if is_high_value:
             error_msg = (
@@ -928,29 +945,10 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
         # HIGH-VALUE MODEL CHECK: Block requests for expensive models with unknown pricing
         # This prevents massive revenue loss from using default pricing on GPT-4, Claude, etc.
         # NOTE: Check against BOTH original and normalized IDs to catch transformed variants
-        HIGH_VALUE_MODEL_PATTERNS = [
-            "gpt-4",
-            "gpt-5",
-            "o1-",
-            "o3-",
-            "o4-",  # OpenAI high-end models
-            "claude-3",
-            "claude-opus",
-            "claude-sonnet-4",  # Anthropic high-end
-            "gemini-1.5-pro",
-            "gemini-2",
-            "gemini-pro",  # Google high-end
-            "command-r-plus",  # Cohere high-end
-            "mixtral-8x22b",  # Mistral high-end
-        ]
 
-        # Check both original and normalized IDs against high-value patterns
-        model_id_lower = model_id.lower()
-        normalized_lower = normalized_model_id.lower()
-        is_high_value = any(
-            pattern in model_id_lower or pattern in normalized_lower
-            for pattern in HIGH_VALUE_MODEL_PATTERNS
-        )
+        # Check both original and normalized IDs (the normalized ID may reveal
+        # the true model identity behind a provider-transformed one).
+        is_high_value = is_high_value_model(model_id, normalized_model_id)
 
         if is_high_value:
             error_msg = (
@@ -1011,22 +1009,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
         # Block the request to prevent under-billing when pricing data is missing.
         # Pattern list is a hardcoded guard — the DB is the authoritative source
         # (models with high pricing should be rejected when pricing lookup fails).
-        _HIGH_VALUE_MODEL_PATTERNS = [
-            "gpt-4",
-            "gpt-5",
-            "o1-",
-            "o3-",
-            "o4-",
-            "claude-3",
-            "claude-opus",
-            "claude-sonnet-4",
-            "gemini-1.5-pro",
-            "gemini-2",
-            "gemini-pro",
-            "command-r-plus",
-            "mixtral-8x22b",
-        ]
-        if any(pattern in model_id.lower() for pattern in _HIGH_VALUE_MODEL_PATTERNS):
+        if is_high_value_model(model_id):
             raise ValueError(
                 f"Pricing data not available for high-value model '{model_id}'. "
                 f"Request blocked to prevent under-billing."
