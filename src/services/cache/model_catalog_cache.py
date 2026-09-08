@@ -1377,8 +1377,21 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
 def invalidate_full_catalog() -> bool:
     """Invalidate the full catalog cache"""
     cache = get_model_catalog_cache()
+    # The bare-id resolution index is DERIVED from this catalog: a sync that
+    # adds or removes a model can change whether a bare name is unique, so a
+    # stale index would resolve a name the catalog no longer resolves alone.
+    _invalidate_resolution_index()
     # The epoch bump lives inside the method so the cascade path bumps too.
     return cache.invalidate_full_catalog()
+
+
+def _invalidate_resolution_index() -> None:
+    try:
+        from src.services.model_resolution import invalidate_resolution_index
+
+        invalidate_resolution_index()
+    except Exception as e:  # pragma: no cover - never fail an invalidation on this
+        logger.warning("Resolution index invalidation failed: %s", e)
 
 
 def _bump_local_cache_epoch() -> None:
