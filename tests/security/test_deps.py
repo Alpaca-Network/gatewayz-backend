@@ -106,12 +106,19 @@ async def test_get_api_key_valid_logs_usage(monkeypatch, mod):
 
 
 @pytest.mark.anyio
+# A request cap moved 429 -> 402 on 2026-09-08. A cap is TERMINAL until a human
+# raises it, while 429 means "wait"; SDKs with retry policies (Anthropic's
+# included) retried an exhausted cap forever and then reported an outage. The
+# two conditions also have to be tellable apart by a partner routing one to a
+# retry and the other to a top-up escalation -- see
+# tests/security/test_ceiling_envelopes.py. The detail is now a structured
+# envelope carrying a machine-readable `code` instead of a bare string.
 @pytest.mark.parametrize(
     "msg, expected",
     [
         ("inactive key", 401),
         ("expired token", 401),
-        ("limit reached for today", 429),
+        ("limit reached for today", 402),
         ("not allowed for this referrer", 403),
         ("IP address blocked", 403),
         ("Domain not allowed", 403),
@@ -136,7 +143,15 @@ async def test_get_api_key_valueerror_mapped(monkeypatch, mod, msg, expected):
         await mod.get_api_key(credentials=creds, request=req)
 
     assert ei.value.status_code == expected
-    assert msg in ei.value.detail
+    # Same intent as before — the caller is told what happened — but the detail
+    # is now a structured envelope, and every case carries a `code` to branch on.
+    error = ei.value.detail["error"]
+    assert error["code"]
+    if ei.value.status_code == 402:
+        # Ceilings get canned, actionable copy rather than the internal message.
+        assert error["code"] in {"request_cap_exhausted", "insufficient_credits"}
+    else:
+        assert msg in error["message"]
     # violation logged with IP
     assert fake_audit.violation_calls
     assert fake_audit.violation_calls[0]["violation_type"] == "INVALID_API_KEY"

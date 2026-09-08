@@ -235,8 +235,9 @@ DELETE /user/api-keys/{key_id}  # Delete API key
 ### Chat Completions (OpenAI-Compatible)
 ```
 POST /v1/chat/completions       # Chat completions
-POST /v1/responses              # Unified response API
+POST /v1/messages               # Anthropic-compatible messages
 POST /images/generate           # Image generation
+# /v1/responses is NOT served — documented historically, 404s in production.
 ```
 
 ### Chat History
