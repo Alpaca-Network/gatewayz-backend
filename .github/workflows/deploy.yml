@@ -1,11 +1,29 @@
 name: Auto Deploy to Railway
 
+# ⚠️ AUTOMATIC TRIGGER DISABLED 2026-09-08 — RAILWAY_TOKEN is Unauthorized.
+#
+# `railway whoami` fails with "Unauthorized. Please check that your
+# RAILWAY_TOKEN is valid and has access to the resource you're trying to use."
+# on every run. Last successful run: 2026-09-03 23:01 UTC; every run after
+# 23:05 that day has failed, i.e. nine of the last ten.
+#
+# Deployments have NOT been affected — Railway's own GitHub integration is what
+# actually deploys main, verified against production on 2026-09-08. This
+# workflow has therefore been a permanently-red job that everyone learned to
+# ignore, which is worse than no job: if Railway's integration ever stopped,
+# this signal would look exactly the same as it does today.
+#
+# The automatic trigger is off rather than the workflow deleted, so the
+# deliberate path still exists. TO RESTORE: mint a fresh Railway token, set it
+# as the RAILWAY_TOKEN repository secret, run this workflow manually to confirm
+# `railway whoami` succeeds, then uncomment the `workflow_run` block below.
+
 on:
-  # Trigger after CI Pipeline completes successfully
-  workflow_run:
-    workflows: ["CI Pipeline"]
-    types: [completed]
-    branches: [main, staging]
+  # DISABLED — see the note above. Re-enable only after RAILWAY_TOKEN is valid.
+  # workflow_run:
+  #   workflows: ["CI Pipeline"]
+  #   types: [completed]
+  #   branches: [main, staging]
   # Manual trigger for explicit deployments
   workflow_dispatch:
     inputs:
