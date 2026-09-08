@@ -95,6 +95,53 @@ def _anthropic_error(status_code: int, error_type: str, message: str) -> HTTPExc
     )
 
 
+def _detail_message(exc: HTTPException) -> str:
+    """The human-readable string out of an HTTPException detail.
+
+    Our gates raise `detail={"error": {"message": ..., "code": ...}}`. Passing
+    that dict through `json.dumps` put a JSON blob inside the Anthropic
+    envelope's own `message` field — unreadable in an SDK traceback.
+    """
+    detail = exc.detail
+    if isinstance(detail, dict):
+        inner = detail.get("error")
+        if isinstance(inner, dict) and inner.get("message"):
+            return str(inner["message"])
+        if detail.get("message"):
+            return str(detail["message"])
+        return json.dumps(detail)
+    return str(detail) if detail else "request failed"
+
+
+def _detail_code(exc: HTTPException) -> str | None:
+    """The gateway error code (`model_not_found`, ...) when the detail carries one."""
+    detail = exc.detail
+    if isinstance(detail, dict):
+        inner = detail.get("error")
+        if isinstance(inner, dict):
+            return inner.get("code")
+    return None
+
+
+def _anthropic_error_type(status_code: int, code: str | None) -> str:
+    """Map our status + error code onto an Anthropic error type."""
+    base = {
+        400: "invalid_request_error",
+        401: "authentication_error",
+        403: "permission_error",
+        404: "not_found_error",
+        429: "rate_limit_error",
+        # Provider capacity/budget exhaustion (e.g. unfunded upstream
+        # account) surfaces as 503 — Anthropic SDKs retry overloaded_error.
+        503: "overloaded_error",
+    }.get(status_code, "api_error")
+    # A 503 for missing pricing config is deterministic, not transient —
+    # don't invite SDK retries on it.
+    if base == "overloaded_error" and code == "pricing_not_configured":
+        return "api_error"
+    return base
+
+
 def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -387,27 +434,11 @@ async def create_message(
     except HTTPException as exc:
         # Re-wrap gateway errors in Anthropic's envelope so Anthropic SDKs
         # surface a useful message instead of "unknown error shape".
-        detail = exc.detail
-        message = (
-            detail
-            if isinstance(detail, str)
-            else json.dumps(detail) if detail else "request failed"
-        )
-        error_type = {
-            400: "invalid_request_error",
-            401: "authentication_error",
-            403: "permission_error",
-            404: "not_found_error",
-            429: "rate_limit_error",
-            # Provider capacity/budget exhaustion (e.g. unfunded upstream
-            # account) surfaces as 503 — Anthropic SDKs retry overloaded_error.
-            503: "overloaded_error",
-        }.get(exc.status_code, "api_error")
-        # A 503 for missing pricing config is deterministic, not transient —
-        # don't invite SDK retries on it.
-        if error_type == "overloaded_error" and "pricing_not_configured" in message:
-            error_type = "api_error"
-        raise _anthropic_error(exc.status_code, error_type, message) from exc
+        raise _anthropic_error(
+            exc.status_code,
+            _anthropic_error_type(exc.status_code, _detail_code(exc)),
+            _detail_message(exc),
+        ) from exc
 
     if req.stream:
         if not isinstance(result, StreamingResponse):
