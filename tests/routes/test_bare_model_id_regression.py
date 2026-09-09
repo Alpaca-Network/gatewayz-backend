@@ -104,12 +104,36 @@ async def test_a_genuinely_unknown_model_is_400_and_does_not_blame_us():
 
 
 async def test_a_bare_id_with_no_unambiguous_target_stays_a_400():
-    # The catalog carries claude-sonnet-4-5 only as ...-20250929, so the bare
-    # form has no single target and must NOT be guessed at.
+    # A bare id the catalog cannot match at all must not be guessed at.
     with pytest.raises(HTTPException) as exc:
-        await inference_gates.enforce_model_pricing_gate("claude-sonnet-4-5")
+        await inference_gates.enforce_model_pricing_gate("claude-sonnet-9-9")
     assert exc.value.status_code == 400
     assert exc.value.detail["error"]["code"] == "model_not_found"
+
+
+async def test_an_undated_vendor_alias_resolves_to_its_one_snapshot():
+    """SUPERSEDES an earlier decision, deliberately and with the reasoning.
+
+    This test previously asserted that `claude-sonnet-4-5` must stay a 400,
+    on the grounds that "the bare form has no single target and must NOT be
+    guessed at". In this catalog it has exactly one target
+    (`anthropic/claude-sonnet-4-5-20250929`), and `claude-sonnet-4-5` is a
+    real Anthropic id that the vendor's own docs and SDK examples use — so
+    resolving it is not a guess, it is reading the alias the vendor defines.
+    Production measurement 2026-09-09: the undated id came back 503 for a
+    model we serve today.
+
+    The deeper intent of the old test — never pick between two candidates —
+    is preserved and covered by
+    tests/services/test_model_resolution.py::TestUndatedSnapshotAlias::
+    test_two_snapshots_refuse_rather_than_pick_the_newest. Two snapshots is
+    still a refusal; picking "the newest" would move a caller between models
+    on a catalog sync without them asking for it.
+    """
+    assert (
+        await inference_gates.enforce_model_pricing_gate("claude-sonnet-4-5")
+        == "anthropic/claude-sonnet-4-5-20250929"
+    )
 
 
 def _find_function(tree: ast.AST, name: str) -> ast.AsyncFunctionDef | ast.FunctionDef:

@@ -36,8 +36,10 @@ async def enforce_model_pricing_gate(
         400 model_not_found  — no catalog model matches (the caller's mistake).
         400 model_ambiguous  — several match a bare name; we refuse to guess.
         400 model_not_priced — resolved, in catalog, deliberately unpriced.
-        503 pricing_not_configured — resolved, high-value, pricing MISSING.
-            Ours to fix, and the only branch that should page anyone.
+        503 pricing_not_configured — resolved FROM THE CATALOG, high-value,
+            pricing MISSING. Ours to fix, and the only branch that should
+            page anyone. An id the catalog never knew gets model_not_found
+            instead: a typo must not page us or look retryable to an SDK.
     """
     if not Config.REQUIRE_MODEL_PRICING:
         return model_id
@@ -100,8 +102,10 @@ async def enforce_model_pricing_gate(
                     }
                 },
             )
+        resolved_from_catalog = False
     else:
         resolved = resolution.canonical_id
+        resolved_from_catalog = True
 
     # Free models legitimately have no/zero pricing — exempt them so the
     # zero-price rejection in model_has_pricing only blocks PAID models whose
@@ -127,6 +131,26 @@ async def enforce_model_pricing_gate(
             api_key_mask,
             e,
         )
+        # Only a model the CATALOG knows can be "priced wrong" — that is ours
+        # to fix and pages someone. An id the index never knew reaching this
+        # branch is a caller typo that happened to match a high-value family
+        # pattern, and 503 tells their SDK to retry it forever. Measured in
+        # production 2026-09-09: `anthropic/claude-sonnet-4-5` -> 503 while the
+        # identical bare `claude-sonnet-4-5` -> 400.
+        if not resolved_from_catalog and not index_is_empty():
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": (
+                            f"Model '{model_id}' does not exist. "
+                            f"See GET /v1/models for available model ids."
+                        ),
+                        "type": "invalid_request_error",
+                        "code": "model_not_found",
+                    }
+                },
+            )
         raise HTTPException(
             status_code=503,
             detail={
