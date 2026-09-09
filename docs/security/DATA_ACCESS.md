@@ -97,6 +97,22 @@ wei-scale totals for staking/earnings. It does NOT expose any user's
 anything from `users`/`payments`/`chat_completion_requests` — the response
 is aggregate counts plus provider (not end-user) identifying fields only.
 
+## `gpu_providers.approved_by` is NULL for ADMIN_API_KEY-authenticated approvals
+
+`POST /gpu/admin/providers/{id}/approve|suspend` accept
+`require_admin_or_env_key` (see "Admin WAYZ ops status endpoint" above) --
+either a real admin user's API key, or the `ADMIN_API_KEY` env var (the
+admin panel's server-side proxy uses the latter, never a specific user's
+key). `gpu_providers.approved_by` is an int FK to `users(id)`; the env-key
+auth path has no user id to attribute the approval to, so `approved_by`
+is written as `NULL` for those calls -- it does not mean "unapproved" or
+"system default," it means "approved via the admin panel's shared
+`ADMIN_API_KEY`, not a traceable individual account." `src/routes/gpu.py`
+logs an explicit line (`"gpu provider %s approved/suspended via
+ADMIN_API_KEY (no user id)"`) on this path so the acting admin is still
+recoverable from request/access logs around that timestamp, even though
+the DB row itself can't name them.
+
 ## What's still open
 
 - Frontend code has never been observed talking to PostgREST with the anon

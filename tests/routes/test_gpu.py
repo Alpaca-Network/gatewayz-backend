@@ -832,11 +832,13 @@ def test_admin_endpoints_reject_non_admin():
 
 
 @patch("src.routes.gpu.set_provider_status")
-def test_admin_approve_provider_accepts_env_admin_key(mock_set_status, monkeypatch):
+def test_admin_approve_provider_accepts_env_admin_key(mock_set_status, monkeypatch, caplog):
     """require_admin_or_env_key's second accepted auth path: the admin
     panel calls these endpoints with ADMIN_API_KEY, not a user API key --
     see backend-brief.md item 3. No dependency override here; this exercises
-    the real env-key comparison branch."""
+    the real env-key comparison branch. approved_by must be None on this
+    path (no user id to attribute to -- see docs/security/DATA_ACCESS.md),
+    and the audit log line must fire so the action is still traceable."""
     mock_set_status.return_value = {**_PENDING_PROVIDER, "status": "approved"}
     monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key-for-gpu-approve")
     cleared = {
@@ -845,15 +847,49 @@ def test_admin_approve_provider_accepts_env_admin_key(mock_set_status, monkeypat
         if dep in app.dependency_overrides
     }
     try:
-        response = client.post(
-            "/gpu/admin/providers/1/approve",
-            headers={"Authorization": "Bearer test-admin-key-for-gpu-approve"},
-        )
+        with caplog.at_level("INFO", logger="src.routes.gpu"):
+            response = client.post(
+                "/gpu/admin/providers/1/approve",
+                headers={"Authorization": "Bearer test-admin-key-for-gpu-approve"},
+            )
     finally:
         app.dependency_overrides.update(cleared)
 
     assert response.status_code == 200
     assert response.json()["data"]["status"] == "approved"
+    _, kwargs = mock_set_status.call_args
+    assert kwargs["approved_by"] is None
+    assert any(
+        "provider 1 approved via ADMIN_API_KEY (no user id)" in record.message
+        for record in caplog.records
+    )
+
+
+@patch("src.routes.gpu.set_provider_status")
+def test_admin_suspend_provider_accepts_env_admin_key(mock_set_status, monkeypatch, caplog):
+    """Same env-key path as approve above, for suspend."""
+    mock_set_status.return_value = {**_APPROVED_PROVIDER, "status": "suspended"}
+    monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key-for-gpu-suspend")
+    cleared = {
+        dep: app.dependency_overrides.pop(dep)
+        for dep in (require_admin_or_env_key, get_current_user, get_api_key)
+        if dep in app.dependency_overrides
+    }
+    try:
+        with caplog.at_level("INFO", logger="src.routes.gpu"):
+            response = client.post(
+                "/gpu/admin/providers/1/suspend",
+                headers={"Authorization": "Bearer test-admin-key-for-gpu-suspend"},
+            )
+    finally:
+        app.dependency_overrides.update(cleared)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "suspended"
+    assert any(
+        "provider 1 suspended via ADMIN_API_KEY (no user id)" in record.message
+        for record in caplog.records
+    )
 
 
 @patch("src.routes.gpu.list_providers")

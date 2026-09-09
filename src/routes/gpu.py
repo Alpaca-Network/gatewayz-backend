@@ -533,7 +533,16 @@ async def node_heartbeat(
 async def admin_approve_provider(
     provider_id: int, admin_user: dict[str, Any] = Depends(require_admin_or_env_key)
 ) -> dict[str, Any]:
-    updated = set_provider_status(provider_id, "approved", approved_by=admin_user.get("id"))
+    admin_id = admin_user.get("id")
+    if admin_id is None:
+        # require_admin_or_env_key's env-key branch returns
+        # {"role": "admin", "auth": "env_key", "is_admin": True} -- no "id".
+        # gpu_providers.approved_by is an int FK to users(id) with no
+        # free-text column to record an alternate identity in, so it stays
+        # NULL for this path; log explicitly so "who approved this" is
+        # still answerable from logs (see docs/security/DATA_ACCESS.md).
+        logger.info("gpu provider %s approved via ADMIN_API_KEY (no user id)", provider_id)
+    updated = set_provider_status(provider_id, "approved", approved_by=admin_id)
     if updated is None:
         raise HTTPException(status_code=404, detail="provider_not_found")
     return {"success": True, "data": _provider_view(updated)}
@@ -541,8 +550,10 @@ async def admin_approve_provider(
 
 @router.post("/admin/providers/{provider_id}/suspend", tags=["gpu"])
 async def admin_suspend_provider(
-    provider_id: int, _admin_user: dict[str, Any] = Depends(require_admin_or_env_key)
+    provider_id: int, admin_user: dict[str, Any] = Depends(require_admin_or_env_key)
 ) -> dict[str, Any]:
+    if admin_user.get("id") is None:
+        logger.info("gpu provider %s suspended via ADMIN_API_KEY (no user id)", provider_id)
     updated = set_provider_status(provider_id, "suspended")
     if updated is None:
         raise HTTPException(status_code=404, detail="provider_not_found")
