@@ -78,6 +78,25 @@ set. `tests/security/test_rls_policies_static.py` verifies the migration
 target table without a revoke, for every table in this document — it runs
 in every test suite, no live credentials needed.
 
+## Admin WAYZ ops status endpoint
+
+`GET /admin/wayz/status` (`src/routes/admin_wayz.py`, `Depends(require_admin_or_env_key)`)
+aggregates counts and summaries across `wallet_stakes`, `faucet_claims`,
+`user_wallets`, `gpu_providers`, `gpu_nodes`, `provider_work`,
+`provider_earnings`, and `provider_settlements` — all read via the
+`service_role` client (`src/db/*`), same as every other admin route, never
+via a client-facing anon/authenticated PostgREST call. It is not a new RLS
+exposure: no table above gained a policy because of this endpoint.
+
+What it exposes to admins only (never to `anon`/`authenticated`, and never
+returned by any non-admin route): pending GPU operators' `payout_wallet_address`
+and `user_id` (`pending_approvals`), the most recent settlement's
+`provider_id`/`tx_hash`/`amount_wei` (`gpu.last_settlement`), and aggregate
+wei-scale totals for staking/earnings. It does NOT expose any user's
+`wallet_address`, individual `faucet_claims`/`provider_work` rows, or
+anything from `users`/`payments`/`chat_completion_requests` — the response
+is aggregate counts plus provider (not end-user) identifying fields only.
+
 ## What's still open
 
 - Frontend code has never been observed talking to PostgREST with the anon

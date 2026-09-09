@@ -1293,6 +1293,132 @@ workstream) plus two dedicated docs. Starting points:
   /gpu/providers/me/earnings` here once merged; `docs/gpu/
   PROVIDER_ONBOARDING.md`'s "Payouts" section has the operator-facing
   rate/settlement rules in the meantime.
+- **Admin ops status** — "Admin — WAYZ Ops Status" below: `GET
+  /admin/wayz/status`, admin-only, job health + config + counters +
+  pending provider approvals in one call.
+
+## Admin — WAYZ Ops Status
+
+```http
+GET /admin/wayz/status
+```
+
+`Depends(require_admin_or_env_key)` — accepts either a user API key
+belonging to an admin, or the `ADMIN_API_KEY` env var as a bearer token
+(the admin panel's server-side proxy uses the latter). Never cached.
+Backs the admin panel's WAYZ Ops page: job health for every scheduled
+job that touches WAYZ/GPU state, on-chain/config summary, and live
+counters (staking, faucet, wallets, GPU marketplace), plus pending GPU
+operator approvals.
+
+**Degradation contract:** every sub-block below is computed independently
+and wrapped in its own try/except. A failure in any one of them collapses
+that block to `{"error": "<ExceptionClassName>"}` — the endpoint still
+returns `200` with every OTHER block intact. This is an ops page; a
+broken counter must never take the rest of the page down with it.
+
+All wei-scale amounts are decimal strings (never floats, to avoid
+precision loss); all timestamps are ISO-8601 with a `Z`/`+00:00` offset.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "generated_at": "2026-09-09T18:00:00+00:00",
+    "config": {
+      "chain_id": 43113,
+      "token_address": null,
+      "staking_address": "0x...",
+      "deploy_block": 12345,
+      "faucet_configured": true,
+      "rewards_pool_configured": false,
+      "privy_verification_mode": "log",
+      "community_routing_enabled": false,
+      "upstream_pseudonym_enabled": false,
+      "spotcheck_reference_provider": null
+    },
+    "jobs": {
+      "wayz_staking_sync": {
+        "ok": true,
+        "ran_at": "2026-09-09T17:55:00+00:00",
+        "duration_ms": 812,
+        "interval_minutes": 15,
+        "stale": false,
+        "summary": { "wallets_synced": 3, "wallets_failed": 0 },
+        "error": null
+      }
+    },
+    "staking": {
+      "wallets": 3,
+      "total_staked_wei": "1500000000000000000000",
+      "cursor_block": 12400,
+      "last_synced_at": "2026-09-09T17:55:00+00:00",
+      "rpc_latest_block": 12402,
+      "lag_blocks": 2
+    },
+    "faucet": {
+      "claims_pending": 0,
+      "claims_sent": 12,
+      "claims_failed": 1,
+      "last_claim_at": "2026-09-09T16:00:00+00:00"
+    },
+    "wallets": { "linked_total": 20, "by_source": { "privy": 15, "siwe": 5 } },
+    "gpu": {
+      "providers": { "pending": 1, "approved": 4, "suspended": 0 },
+      "nodes": { "registered": 0, "active": 4, "degraded": 0, "offline": 1, "disabled": 0 },
+      "work_24h": {
+        "completed": 500,
+        "failed": 3,
+        "verified": 20,
+        "failed_verification": 0,
+        "skipped": 5,
+        "pending": 12
+      },
+      "earnings": {
+        "accrued_wei": "0",
+        "settling_wei": "0",
+        "settled_wei": "5000000000000000000",
+        "void_wei": "0"
+      },
+      "last_settlement": {
+        "provider_id": 1,
+        "amount_wei": "5000000000000000000",
+        "status": "sent",
+        "tx_hash": "0x...",
+        "created_at": "2026-09-09T00:00:00+00:00"
+      },
+      "rollup_last_hour": "2026-09-09T17:00:00+00:00"
+    },
+    "pending_approvals": [
+      {
+        "id": 5,
+        "display_name": "Acme GPUs",
+        "created_at": "2026-09-09T12:00:00+00:00",
+        "payout_wallet_address": "0x...",
+        "user_id": 42,
+        "nodes": 0
+      }
+    ]
+  }
+}
+```
+
+**Jobs tracked** (`jobs` map key -> the scheduled job it wraps):
+`model_sync`, `price_refresh`, `ledger_reconciliation`, `retention_cleanup`,
+`wayz_staking_sync`, `gpu_spot_check`, `gpu_settlement` (the stuck-settlement
+reconciliation pass runs inline as part of this job and is folded into its
+`summary`, not a separate entry), `pricing_drift`, `gpu_liveness_sweep`,
+`gpu_rollup`. `stale` is `true` when a job has never recorded a run, or its
+last run was more than 2× its configured `interval_minutes` ago. Backed by
+`src/services/ops/job_runs.py` (Redis, 7-day TTL, in-process fallback).
+
+**Related:** `POST /gpu/admin/providers/{id}/approve`, `POST
+/gpu/admin/providers/{id}/suspend`, `GET /gpu/admin/providers` (see "GPU
+Marketplace — Providers & Nodes" above) power the approve/suspend actions
+on the same admin page, and now also accept `require_admin_or_env_key`
+(previously user-role `require_admin` only) so the admin panel's
+`ADMIN_API_KEY`-authenticated proxy can call them directly.
 
 ## Subscription Plans
 

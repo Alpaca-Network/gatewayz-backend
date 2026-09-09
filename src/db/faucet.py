@@ -114,3 +114,37 @@ def mark_claim_failed(claim_id: int, error: str) -> None:
         ).execute()
     except Exception as e:
         logger.warning(f"faucet_claims mark-failed failed for claim {claim_id}: {e}")
+
+
+# Row cap for the admin ops status summary -- real limit rather than an
+# unbounded select, same convention as src/db/wallet_stakes.py's
+# _STAKE_TOTALS_ROW_CAP.
+_CLAIM_STATS_ROW_CAP = 10000
+
+
+def get_claim_stats() -> dict:
+    """Counts of faucet_claims by status ('pending'/'sent'/'failed') plus
+    the most recent claim's claimed_at, for the admin WAYZ ops status
+    endpoint. Zeroed counts and last_claim_at=None on any lookup error --
+    never raises."""
+    stats = {"pending": 0, "sent": 0, "failed": 0, "last_claim_at": None}
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_CLAIMS_TABLE)
+            .select("status,claimed_at")
+            .order("claimed_at", desc=True)
+            .limit(_CLAIM_STATS_ROW_CAP)
+            .execute()
+        )
+        rows = result.data or []
+        for row in rows:
+            status = row.get("status")
+            if status in stats:
+                stats[status] += 1
+        if rows:
+            stats["last_claim_at"] = rows[0].get("claimed_at")
+        return stats
+    except Exception as e:
+        logger.warning(f"faucet_claims stats lookup failed: {e}")
+        return stats

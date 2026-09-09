@@ -21,6 +21,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.config.config import Config
+from src.services.ops.job_runs import record_job_run
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +186,18 @@ async def run_scheduled_model_sync():
                 name="post_sync_offers_projection",
             )
 
+            record_job_run(
+                "model_sync",
+                ok=True,
+                summary={
+                    "models_synced": result.get("total_models_synced", 0),
+                    "models_fetched": result.get("total_models_fetched", 0),
+                    "providers_processed": result.get("providers_processed", 0),
+                    "interval_minutes": Config.MODEL_SYNC_INTERVAL_MINUTES,
+                },
+                duration_ms=int(duration * 1000),
+            )
+
         else:
             # Failed
             _last_sync_status["failed_runs"] += 1
@@ -197,6 +210,14 @@ async def run_scheduled_model_sync():
             logger.error(f"   Duration: {duration:.2f}s")
             logger.error(f"   Error: {error_msg}")
             logger.error("=" * 80)
+
+            record_job_run(
+                "model_sync",
+                ok=False,
+                error=error_msg,
+                summary={"interval_minutes": Config.MODEL_SYNC_INTERVAL_MINUTES},
+                duration_ms=int(duration * 1000),
+            )
 
     except Exception as e:
         # Unexpected error
@@ -212,6 +233,14 @@ async def run_scheduled_model_sync():
         logger.exception(f"   Duration: {duration:.2f}s")
         logger.exception(f"   Error: {e}")
         logger.exception("=" * 80)
+
+        record_job_run(
+            "model_sync",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.MODEL_SYNC_INTERVAL_MINUTES},
+            duration_ms=int(duration * 1000),
+        )
 
 
 def start_scheduler():
@@ -427,6 +456,17 @@ async def run_scheduled_price_refresh():
                     refresh_offers_projection_after("price refresh"),
                     name="post_price_refresh_offers_projection",
                 )
+            record_job_run(
+                "price_refresh",
+                ok=True,
+                summary={
+                    "prices_updated": result.get("prices_updated", 0),
+                    "prices_unchanged": result.get("prices_unchanged", 0),
+                    "providers_checked": result.get("providers_checked", 0),
+                    "interval_minutes": Config.PRICE_REFRESH_INTERVAL_MINUTES,
+                },
+                duration_ms=int(duration * 1000),
+            )
         else:
             # success=False means at least one provider failed; the rest still ran.
             _last_price_refresh_status["failed_runs"] += 1
@@ -440,6 +480,17 @@ async def run_scheduled_price_refresh():
                 result.get("prices_updated", 0),
                 result.get("errors"),
             )
+            record_job_run(
+                "price_refresh",
+                ok=False,
+                error=str(result.get("errors")),
+                summary={
+                    "prices_updated": result.get("prices_updated", 0),
+                    "providers_failed": result.get("providers_failed", 0),
+                    "interval_minutes": Config.PRICE_REFRESH_INTERVAL_MINUTES,
+                },
+                duration_ms=int(duration * 1000),
+            )
 
     except Exception as e:
         end_time = datetime.now(UTC)
@@ -448,6 +499,13 @@ async def run_scheduled_price_refresh():
         _last_price_refresh_status["last_error"] = str(e)
         _last_price_refresh_status["last_duration_seconds"] = duration
         logger.exception(f"Price refresh EXCEPTION after {duration:.2f}s: {e}")
+        record_job_run(
+            "price_refresh",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.PRICE_REFRESH_INTERVAL_MINUTES},
+            duration_ms=int(duration * 1000),
+        )
 
 
 def start_price_refresh_scheduler():
@@ -566,6 +624,7 @@ async def run_scheduled_ledger_reconciliation():
         _last_recon_status["last_ok"] = report.ok
         _last_recon_status["last_total_drift"] = str(report.total_drift)
         _last_recon_status["last_ledger_refs"] = report.ledger_ref_count
+        duration_ms = int((datetime.now(UTC) - now).total_seconds() * 1000)
 
         if report.ledger_ref_count == 0:
             logger.info(
@@ -592,8 +651,27 @@ async def run_scheduled_ledger_reconciliation():
                 len(offenders),
                 admin_count,
             )
+
+        record_job_run(
+            "ledger_reconciliation",
+            ok=bool(report.ok),
+            summary={
+                "ledger_refs": report.ledger_ref_count,
+                "total_drift": str(report.total_drift),
+                "interval_minutes": Config.LEDGER_RECONCILIATION_INTERVAL_MINUTES,
+            },
+            error=None if report.ok else f"drift={report.total_drift}",
+            duration_ms=duration_ms,
+        )
     except Exception as e:
         logger.warning("Ledger reconciliation failed (non-fatal): %s", e)
+        record_job_run(
+            "ledger_reconciliation",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.LEDGER_RECONCILIATION_INTERVAL_MINUTES},
+            duration_ms=int((datetime.now(UTC) - now).total_seconds() * 1000),
+        )
 
 
 def start_ledger_reconciliation_scheduler():
@@ -684,10 +762,27 @@ async def run_scheduled_retention_cleanup():
             activity_deleted,
             Config.ACTIVITY_LOG_RETENTION_DAYS,
         )
+        record_job_run(
+            "retention_cleanup",
+            ok=True,
+            summary={
+                "usage_records_deleted": usage_deleted,
+                "activity_log_deleted": activity_deleted,
+                "interval_minutes": Config.RETENTION_CLEANUP_INTERVAL_HOURS * 60,
+            },
+            duration_ms=int((datetime.now(UTC) - now).total_seconds() * 1000),
+        )
     except Exception as e:
         # cleanup_usage_records/cleanup_activity_log already catch and log
         # their own DB errors (returning 0); this guards the job runner itself.
         logger.warning("Retention cleanup run failed (non-fatal): %s", e)
+        record_job_run(
+            "retention_cleanup",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.RETENTION_CLEANUP_INTERVAL_HOURS * 60},
+            duration_ms=int((datetime.now(UTC) - now).total_seconds() * 1000),
+        )
 
 
 def start_retention_scheduler():
@@ -748,7 +843,8 @@ async def run_scheduled_wayz_staking_sync():
     from src.services.chain.wayz_staking_client import WayzStakingClient, WayzStakingClientError
     from src.services.chain.wayz_staking_sync import sync_once
 
-    _last_wayz_staking_sync_status["last_run_time"] = datetime.now(UTC)
+    run_started_at = datetime.now(UTC)
+    _last_wayz_staking_sync_status["last_run_time"] = run_started_at
     try:
         client = WayzStakingClient.from_config()
         result = await asyncio.to_thread(sync_once, client)
@@ -763,11 +859,37 @@ async def run_scheduled_wayz_staking_sync():
             result.from_block,
             result.to_block,
         )
+        record_job_run(
+            "wayz_staking_sync",
+            ok=True,
+            summary={
+                "wallets_discovered": result.wallets_discovered,
+                "wallets_synced": result.wallets_synced,
+                "wallets_failed": result.wallets_failed,
+                "to_block": result.to_block,
+                "interval_minutes": Config.WAYZ_STAKING_SYNC_INTERVAL_MINUTES,
+            },
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
     except WayzStakingClientError as e:
         logger.info("WAYZ staking sync skipped: %s", e)
+        record_job_run(
+            "wayz_staking_sync",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.WAYZ_STAKING_SYNC_INTERVAL_MINUTES},
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
     except Exception as e:
         _last_wayz_staking_sync_status["last_ok"] = False
         logger.warning("WAYZ staking sync failed (non-fatal): %s", e)
+        record_job_run(
+            "wayz_staking_sync",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.WAYZ_STAKING_SYNC_INTERVAL_MINUTES},
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
 
 
 def start_wayz_staking_sync_scheduler():
@@ -835,7 +957,8 @@ async def run_scheduled_gpu_spot_check():
     """Run one spot-check verification pass (src/services/gpu/spot_check.py)."""
     from src.services.gpu.spot_check import run_spot_check_verification
 
-    _last_gpu_spotcheck_status["last_run_time"] = datetime.now(UTC)
+    run_started_at = datetime.now(UTC)
+    _last_gpu_spotcheck_status["last_run_time"] = run_started_at
     try:
         stats = await run_spot_check_verification()
         _last_gpu_spotcheck_status["last_ok"] = True
@@ -848,9 +971,22 @@ async def run_scheduled_gpu_spot_check():
             stats["failed"],
             stats["skipped"],
         )
+        record_job_run(
+            "gpu_spot_check",
+            ok=True,
+            summary={**stats, "interval_minutes": Config.COMMUNITY_SPOTCHECK_INTERVAL_MINUTES},
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
     except Exception as e:
         _last_gpu_spotcheck_status["last_ok"] = False
         logger.warning("GPU spot-check verification failed (non-fatal): %s", e)
+        record_job_run(
+            "gpu_spot_check",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.COMMUNITY_SPOTCHECK_INTERVAL_MINUTES},
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
 
 
 def start_gpu_spotcheck_scheduler():
@@ -927,7 +1063,8 @@ async def run_scheduled_gpu_settlement():
     )
     from src.services.gpu.settlement import reconcile_stuck_settlements, run_settlement_once
 
-    _last_gpu_settlement_status["last_run_time"] = datetime.now(UTC)
+    run_started_at = datetime.now(UTC)
+    _last_gpu_settlement_status["last_run_time"] = run_started_at
     try:
         client = WayzProviderRewardsClient.from_config()
 
@@ -950,11 +1087,46 @@ async def run_scheduled_gpu_settlement():
             result.settlements_failed,
             result.total_sent_wei,
         )
+        # No separate scheduled pass exists for stuck-settlement reconciliation
+        # (it always runs inline, first, in this same job) -- its outcome is
+        # folded into this job's own summary rather than recorded under a
+        # second "gpu_settlement_reconcile" job name.
+        record_job_run(
+            "gpu_settlement",
+            ok=True,
+            summary={
+                "providers_considered": result.providers_considered,
+                "settlements_sent": result.settlements_sent,
+                "settlements_failed": result.settlements_failed,
+                "total_sent_wei": str(result.total_sent_wei),
+                "reconcile": {
+                    "checked": reconcile_result.settlements_checked,
+                    "confirmed_sent": reconcile_result.settlements_confirmed_sent,
+                    "marked_failed": reconcile_result.settlements_marked_failed,
+                },
+                "interval_minutes": Config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS * 60,
+            },
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
     except WayzProviderRewardsClientError as e:
         logger.info("GPU settlement skipped: %s", e)
+        record_job_run(
+            "gpu_settlement",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS * 60},
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
     except Exception as e:
         _last_gpu_settlement_status["last_ok"] = False
         logger.warning("GPU settlement failed (non-fatal): %s", e)
+        record_job_run(
+            "gpu_settlement",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS * 60},
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
 
 
 def start_gpu_settlement_scheduler():
@@ -1045,10 +1217,21 @@ async def run_scheduled_pricing_drift_audit():
         _last_pricing_drift_status["last_worst_deficit_pct"] = result.get("worst_deficit_pct")
         _last_pricing_drift_status["last_error"] = None
 
+        duration_ms = int((datetime.now(UTC) - now).total_seconds() * 1000)
+
         if result.get("ok"):
             logger.info(
                 "✅ Pricing drift audit OK | checked=%s no drift, no unpriced models",
                 result.get("checked", 0),
+            )
+            record_job_run(
+                "pricing_drift",
+                ok=True,
+                summary={
+                    "checked": result.get("checked", 0),
+                    "interval_minutes": Config.PRICING_DRIFT_INTERVAL_MINUTES,
+                },
+                duration_ms=duration_ms,
             )
             return
 
@@ -1076,9 +1259,30 @@ async def run_scheduled_pricing_drift_audit():
         except Exception as sentry_error:
             logger.warning("Failed to capture pricing drift to Sentry: %s", sentry_error)
 
+        record_job_run(
+            "pricing_drift",
+            ok=False,
+            error=f"drift={len(drift)} unpriced={len(unpriced)}",
+            summary={
+                "checked": result.get("checked", 0),
+                "drift_count": len(drift),
+                "unpriced_count": len(unpriced),
+                "worst_deficit_pct": result.get("worst_deficit_pct", 0.0),
+                "interval_minutes": Config.PRICING_DRIFT_INTERVAL_MINUTES,
+            },
+            duration_ms=duration_ms,
+        )
+
     except Exception as e:
         _last_pricing_drift_status["last_error"] = str(e)
         logger.exception("Pricing drift audit EXCEPTION: %s", e)
+        record_job_run(
+            "pricing_drift",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.PRICING_DRIFT_INTERVAL_MINUTES},
+            duration_ms=int((datetime.now(UTC) - now).total_seconds() * 1000),
+        )
 
 
 def start_pricing_drift_scheduler():
@@ -1162,9 +1366,26 @@ async def run_gpu_liveness_sweep() -> tuple[int, int]:
         _last_gpu_liveness_status["last_offline"] = n_offline
         if n_degraded or n_offline:
             logger.info("GPU liveness sweep: degraded=%s offline=%s", n_degraded, n_offline)
+        record_job_run(
+            "gpu_liveness_sweep",
+            ok=True,
+            summary={
+                "degraded": n_degraded,
+                "offline": n_offline,
+                "interval_minutes": Config.GPU_LIVENESS_SWEEP_INTERVAL_MINUTES,
+            },
+            duration_ms=int((datetime.now(UTC) - now).total_seconds() * 1000),
+        )
         return n_degraded, n_offline
     except Exception as e:
         logger.warning("GPU liveness sweep failed (non-fatal): %s", e)
+        record_job_run(
+            "gpu_liveness_sweep",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": Config.GPU_LIVENESS_SWEEP_INTERVAL_MINUTES},
+            duration_ms=int((datetime.now(UTC) - now).total_seconds() * 1000),
+        )
         return 0, 0
 
 

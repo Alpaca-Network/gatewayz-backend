@@ -346,6 +346,110 @@ def _get_provider_verified_volume_7d_fallback(provider_id: int, exclude_work_id:
         return 0
 
 
+def work_24h_stats() -> dict[str, int]:
+    """Counts of provider_work rows created in the trailing 24h, split by
+    call outcome (`status`) and verification outcome (`verification`), for
+    the admin WAYZ ops status endpoint:
+
+    - completed / failed        -- provider_work.status (did the call itself succeed)
+    - verified / failed_verification / skipped / pending
+                                 -- provider_work.verification ('failed_verification'
+                                    maps to verification='failed'; 'pending' folds in
+                                    both 'pending' and 'sampled', mirroring
+                                    list_agable_pending_work's grouping)
+
+    Zeroed on any lookup error or once _WORK_QUERY_ROW_CAP rows are hit in a
+    single 24h window (logged, not silently wrong) -- never raises.
+    """
+    stats = {
+        "completed": 0,
+        "failed": 0,
+        "verified": 0,
+        "failed_verification": 0,
+        "skipped": 0,
+        "pending": 0,
+    }
+    try:
+        since_iso = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+        client = get_supabase_client()
+        result = (
+            client.table(_WORK_TABLE)
+            .select("status,verification")
+            .gte("created_at", since_iso)
+            .limit(_WORK_QUERY_ROW_CAP)
+            .execute()
+        )
+        rows = result.data or []
+        if len(rows) >= _WORK_QUERY_ROW_CAP:
+            logger.warning(
+                f"work_24h_stats hit the {_WORK_QUERY_ROW_CAP}-row cap; counts may be incomplete"
+            )
+        for row in rows:
+            if row.get("status") == "completed":
+                stats["completed"] += 1
+            elif row.get("status") == "failed":
+                stats["failed"] += 1
+            verification = row.get("verification")
+            if verification == "verified":
+                stats["verified"] += 1
+            elif verification == "failed":
+                stats["failed_verification"] += 1
+            elif verification == "skipped":
+                stats["skipped"] += 1
+            elif verification in ("pending", "sampled"):
+                stats["pending"] += 1
+        return stats
+    except Exception as e:
+        logger.warning(f"provider_work 24h stats lookup failed: {e}")
+        return stats
+
+
+def earnings_totals_all() -> dict[str, int]:
+    """{'accrued': wei, 'settling': wei, 'settled': wei, 'void': wei} totals
+    across ALL providers, for the admin WAYZ ops status endpoint. Unlike
+    earnings_totals(provider_id), this also includes 'settling' (money
+    claimed by an in-flight settlement but not yet confirmed sent).
+    Zeroed on error."""
+    totals = {"accrued": 0, "settling": 0, "settled": 0, "void": 0}
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_EARNINGS_TABLE)
+            .select("amount_wei,status")
+            .limit(_WORK_QUERY_ROW_CAP)
+            .execute()
+        )
+        for row in result.data or []:
+            status = row.get("status")
+            if status in totals:
+                totals[status] += int(row["amount_wei"])
+        return totals
+    except Exception as e:
+        logger.warning(f"provider_earnings global totals failed: {e}")
+        return totals
+
+
+def get_last_settlement_overall() -> dict | None:
+    """The most recently created provider_settlements row across ALL
+    providers, for the admin WAYZ ops status endpoint. None if there are no
+    settlements yet (or on any lookup error)."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_SETTLEMENTS_TABLE)
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"provider_settlements last-overall lookup failed: {e}")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # gpu_nodes health (no W-A1 equivalent planned -- owned here permanently)
 # ---------------------------------------------------------------------------
