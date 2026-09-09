@@ -162,6 +162,16 @@ _STREAM_ERROR_TYPE_MAP = {
 _NON_FATAL_STREAM_ERROR_TYPES = frozenset({"stream_normalization_warning"})
 
 
+async def _aclose_stream(openai_stream) -> None:
+    """Close the inner generator so its finally blocks (provider connection
+    release, cleanup) run now, not at GC time."""
+    if hasattr(openai_stream, "aclose"):
+        try:
+            await openai_stream.aclose()
+        except Exception:
+            pass
+
+
 async def _stream_anthropic_events(
     openai_stream,
     model: str,
@@ -208,120 +218,140 @@ async def _stream_anthropic_events(
         "content_filter": "refusal",
     }
 
-    async for raw in openai_stream:
-        # The OpenAI adapter yields fully-formed SSE lines.
-        if not raw or not raw.startswith("data: "):
-            continue
-        payload = raw[len("data: ") :].strip()
-        if not payload or payload == "[DONE]":
-            continue
-        try:
-            chunk = json.loads(payload)
-        except json.JSONDecodeError:
-            continue
-
-        # A provider failure travels through the inner stream as an error chunk
-        # (see stream_normalizer.create_error_sse_chunk). Before this check it
-        # fell into the no-choices `continue` below and the stream ended with a
-        # clean zero-usage message_stop — a fabricated success (issue #2236).
-        # Surface it as Anthropic's own SSE error event and stop.
-        if chunk.get("error"):
-            err = chunk["error"] if isinstance(chunk["error"], dict) else {}
-            if err.get("type") in _NON_FATAL_STREAM_ERROR_TYPES:
+    try:
+        async for raw in openai_stream:
+            # The OpenAI adapter yields fully-formed SSE lines.
+            if not raw or not raw.startswith("data: "):
                 continue
-            yield _sse(
-                "error",
-                {
-                    "type": "error",
-                    "error": {
-                        "type": _STREAM_ERROR_TYPE_MAP.get(err.get("type"), "api_error"),
-                        # Never fall back to repr-ing the raw error object —
-                        # it may carry internal fields (provider, request_id).
-                        "message": err.get("message") or "upstream provider error",
-                    },
-                },
-            )
-            # Close the inner generator so its finally blocks (provider
-            # connection release, cleanup) run now, not at GC time.
-            if hasattr(openai_stream, "aclose"):
-                try:
-                    await openai_stream.aclose()
-                except Exception:
-                    pass
-            return
+            payload = raw[len("data: ") :].strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
 
-        if chunk.get("usage"):
-            usage = chunk["usage"]
-
-        choices = chunk.get("choices") or []
-        if not choices:
-            continue
-        choice = choices[0]
-        delta = choice.get("delta") or {}
-
-        if choice.get("finish_reason"):
-            stop_reason = finish_map.get(choice["finish_reason"], "end_turn")
-
-        content = delta.get("content")
-        if content:
-            if not text_block_open:
-                block_index += 1
-                text_block_open = True
+            # A provider failure travels through the inner stream as an error chunk
+            # (see stream_normalizer.create_error_sse_chunk). Before this check it
+            # fell into the no-choices `continue` below and the stream ended with a
+            # clean zero-usage message_stop — a fabricated success (issue #2236).
+            # Surface it as Anthropic's own SSE error event and stop.
+            if chunk.get("error"):
+                err = chunk["error"] if isinstance(chunk["error"], dict) else {}
+                if err.get("type") in _NON_FATAL_STREAM_ERROR_TYPES:
+                    continue
                 yield _sse(
-                    "content_block_start",
+                    "error",
                     {
-                        "type": "content_block_start",
-                        "index": block_index,
-                        "content_block": {"type": "text", "text": ""},
-                    },
-                )
-            yield _sse(
-                "content_block_delta",
-                {
-                    "type": "content_block_delta",
-                    "index": block_index,
-                    "delta": {"type": "text_delta", "text": content},
-                },
-            )
-
-        for tool_call in delta.get("tool_calls") or []:
-            tc_index = tool_call.get("index", 0)
-            fn = tool_call.get("function") or {}
-
-            if tc_index not in tool_blocks:
-                # A tool call starting means any open text block is finished.
-                if text_block_open:
-                    yield _sse(
-                        "content_block_stop",
-                        {"type": "content_block_stop", "index": block_index},
-                    )
-                    text_block_open = False
-                block_index += 1
-                tool_blocks[tc_index] = block_index
-                yield _sse(
-                    "content_block_start",
-                    {
-                        "type": "content_block_start",
-                        "index": block_index,
-                        "content_block": {
-                            "type": "tool_use",
-                            "id": tool_call.get("id", f"toolu_{uuid.uuid4().hex[:16]}"),
-                            "name": fn.get("name", ""),
-                            "input": {},
+                        "type": "error",
+                        "error": {
+                            "type": _STREAM_ERROR_TYPE_MAP.get(err.get("type"), "api_error"),
+                            # Never fall back to repr-ing the raw error object —
+                            # it may carry internal fields (provider, request_id).
+                            "message": err.get("message") or "upstream provider error",
                         },
                     },
                 )
+                await _aclose_stream(openai_stream)
+                return
 
-            arguments = fn.get("arguments")
-            if arguments:
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            choice = choices[0]
+            delta = choice.get("delta") or {}
+
+            if choice.get("finish_reason"):
+                stop_reason = finish_map.get(choice["finish_reason"], "end_turn")
+
+            content = delta.get("content")
+            if content:
+                if not text_block_open:
+                    block_index += 1
+                    text_block_open = True
+                    yield _sse(
+                        "content_block_start",
+                        {
+                            "type": "content_block_start",
+                            "index": block_index,
+                            "content_block": {"type": "text", "text": ""},
+                        },
+                    )
                 yield _sse(
                     "content_block_delta",
                     {
                         "type": "content_block_delta",
-                        "index": tool_blocks[tc_index],
-                        "delta": {"type": "input_json_delta", "partial_json": arguments},
+                        "index": block_index,
+                        "delta": {"type": "text_delta", "text": content},
                     },
                 )
+
+            for tool_call in delta.get("tool_calls") or []:
+                tc_index = tool_call.get("index", 0)
+                fn = tool_call.get("function") or {}
+
+                if tc_index not in tool_blocks:
+                    # A tool call starting means any open text block is finished.
+                    if text_block_open:
+                        yield _sse(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": block_index},
+                        )
+                        text_block_open = False
+                    block_index += 1
+                    tool_blocks[tc_index] = block_index
+                    yield _sse(
+                        "content_block_start",
+                        {
+                            "type": "content_block_start",
+                            "index": block_index,
+                            "content_block": {
+                                "type": "tool_use",
+                                "id": tool_call.get("id", f"toolu_{uuid.uuid4().hex[:16]}"),
+                                "name": fn.get("name", ""),
+                                "input": {},
+                            },
+                        },
+                    )
+
+                arguments = fn.get("arguments")
+                if arguments:
+                    yield _sse(
+                        "content_block_delta",
+                        {
+                            "type": "content_block_delta",
+                            "index": tool_blocks[tc_index],
+                            "delta": {"type": "input_json_delta", "partial_json": arguments},
+                        },
+                    )
+    except Exception:
+        # An upstream failure reaches us either as an error-shaped chunk
+        # (handled above) or as a raised exception on the inner iterator —
+        # a reset provider connection, a read timeout, a transport error.
+        # StreamingResponse has already flushed 200 and possibly content, so
+        # an escaping exception cannot become an HTTP error: the client just
+        # sees the stream stop, which is indistinguishable from a short
+        # successful answer. Same fabricated success as #2236, other door.
+        # CancelledError/GeneratorExit are BaseException and deliberately
+        # excluded — those mean the CLIENT went away, not the provider.
+        logger.exception("Upstream stream raised mid-flight for model %s", model)
+        yield _sse(
+            "error",
+            {
+                "type": "error",
+                # Never surface the exception text — it can carry DSNs,
+                # provider hostnames and request ids.
+                "error": {
+                    "type": "api_error",
+                    "message": "The upstream provider connection failed mid-stream. The response is incomplete.",
+                },
+            },
+        )
+        await _aclose_stream(openai_stream)
+        return
 
     # Close whichever block is still open.
     if text_block_open or tool_blocks:

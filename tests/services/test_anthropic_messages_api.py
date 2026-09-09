@@ -6,6 +6,7 @@ markers survive translation, the response comes back in Anthropic shape, and
 x-api-key authenticates.
 """
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -448,3 +449,79 @@ class TestNonStreaming503Mapping:
             },
         )
         assert error_type == "api_error"
+
+
+class TestStreamUpstreamRaisesMidFlight:
+    """The other door into the #2236 fabrication.
+
+    An upstream failure reaches us two ways: as an error-shaped CHUNK (covered
+    above), or as a raised EXCEPTION on the inner iterator — a reset provider
+    connection, a read timeout, a transport error. The chunk path was fixed;
+    the raise path was not. Because StreamingResponse has already flushed 200
+    and some events, an escaping exception cannot become an HTTP error: the
+    client just sees the stream stop. A partial answer with no terminal event
+    is indistinguishable from a short successful one to a naive consumer, and
+    that is exactly the failure mode Flashy asked us to pin down (ask G).
+    """
+
+    async def _collect(self, stream, model="claude-sonnet-4"):
+        events = []
+        async for e in _stream_anthropic_events(stream, model, "msg_1"):
+            events.append(e)
+        return events
+
+    def _parse(self, events):
+        parsed = []
+        for e in events:
+            for line in e.strip().split("\n"):
+                if line.startswith("data: "):
+                    parsed.append(json.loads(line[len("data: ") :]))
+        return parsed
+
+    @staticmethod
+    def _raising_stream(exc, before=None):
+        async def _gen():
+            for c in before or []:
+                yield c
+            raise exc
+
+        return _gen()
+
+    @pytest.mark.asyncio
+    async def test_midstream_exception_becomes_an_error_event(self):
+        events = await self._collect(
+            self._raising_stream(
+                ConnectionResetError("provider connection reset"),
+                before=['data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}'],
+            )
+        )
+        parsed = self._parse(events)
+        types = [p["type"] for p in parsed]
+        assert "error" in types, "a mid-stream raise must surface as an Anthropic error event"
+        err = [p for p in parsed if p["type"] == "error"][0]["error"]
+        assert err["type"] == "api_error"
+        assert "message_stop" not in types, "a failed stream must not report clean completion"
+
+    @pytest.mark.asyncio
+    async def test_midstream_exception_does_not_escape_the_generator(self):
+        # An escaping exception is what truncates the stream silently.
+        await self._collect(self._raising_stream(TimeoutError("read timed out")))
+
+    @pytest.mark.asyncio
+    async def test_error_message_does_not_leak_internal_exception_text(self):
+        parsed = self._parse(
+            await self._collect(
+                self._raising_stream(RuntimeError("postgresql://user:pw@internal-host/db"))
+            )
+        )
+        err = [p for p in parsed if p["type"] == "error"][0]["error"]
+        assert "internal-host" not in err["message"]
+        assert "postgresql" not in err["message"]
+
+    @pytest.mark.asyncio
+    async def test_client_disconnect_still_propagates(self):
+        # CancelledError means the CLIENT went away. Swallowing it and writing
+        # an error event to a dead socket would turn a normal disconnect into
+        # a fabricated failure (and hide cancellation from the server).
+        with pytest.raises(asyncio.CancelledError):
+            await self._collect(self._raising_stream(asyncio.CancelledError()))
