@@ -92,3 +92,81 @@ def test_cold_catalog_leaves_the_id_unresolved(monkeypatch):
     r = resolve_catalog_model_id("claude-sonnet-4-6")
     assert r.canonical_id is None
     assert r.matched_by == "unresolved"
+
+
+class TestUndatedSnapshotAlias:
+    """An undated vendor id must reach its dated snapshot.
+
+    Anthropic publishes both `claude-sonnet-4-5` and the dated snapshot
+    `claude-sonnet-4-5-20250929`, and the undated form is what its own docs
+    and most SDK examples use. Our catalog carries only the dated row, so the
+    undated id resolved to nothing — measured in production 2026-09-09,
+    `anthropic/claude-sonnet-4-5` came back 503 for a model we actually serve.
+
+    This is resolution, not substitution: the alias denotes exactly one
+    catalog model. Where it would denote two, we refuse and name them, the
+    same rule the rest of this module follows.
+    """
+
+    DATED = [
+        {"id": "anthropic/claude-sonnet-4-5-20250929"},
+        {"id": "anthropic/claude-haiku-4-5-20251001"},
+        {"id": "openai/gpt-4o-mini"},
+    ]
+
+    @pytest.fixture(autouse=True)
+    def _dated_catalog(self, monkeypatch):
+        monkeypatch.setattr(
+            model_resolution, "_load_catalog_ids", lambda: [r["id"] for r in self.DATED]
+        )
+        monkeypatch.setattr(model_resolution, "_load_alias_map", dict)
+        model_resolution.invalidate_resolution_index()
+        yield
+        model_resolution.invalidate_resolution_index()
+
+    def test_qualified_undated_id_resolves_to_the_snapshot(self):
+        r = resolve_catalog_model_id("anthropic/claude-sonnet-4-5")
+        assert r.canonical_id == "anthropic/claude-sonnet-4-5-20250929"
+        assert r.matched_by == "undated"
+
+    def test_bare_undated_id_resolves_to_the_snapshot(self):
+        r = resolve_catalog_model_id("claude-sonnet-4-5")
+        assert r.canonical_id == "anthropic/claude-sonnet-4-5-20250929"
+
+    def test_free_suffix_survives_the_alias(self):
+        r = resolve_catalog_model_id("claude-sonnet-4-5:free")
+        assert r.canonical_id == "anthropic/claude-sonnet-4-5-20250929:free"
+
+    def test_two_snapshots_refuse_rather_than_pick_the_newest(self, monkeypatch):
+        # Picking "latest" would silently move a caller between models on a
+        # catalog sync. Two candidates is a refusal everywhere else here.
+        monkeypatch.setattr(
+            model_resolution,
+            "_load_catalog_ids",
+            lambda: [
+                "anthropic/claude-sonnet-4-5-20250929",
+                "anthropic/claude-sonnet-4-5-20251215",
+            ],
+        )
+        model_resolution.invalidate_resolution_index()
+        r = resolve_catalog_model_id("claude-sonnet-4-5")
+        assert r.canonical_id is None
+        assert r.matched_by == "ambiguous"
+        assert len(r.candidates) == 2
+
+    def test_a_genuinely_unknown_id_is_still_unresolved(self):
+        assert resolve_catalog_model_id("claude-sonnet-9-9").canonical_id is None
+
+    def test_exact_still_wins_over_the_alias(self, monkeypatch):
+        monkeypatch.setattr(
+            model_resolution,
+            "_load_catalog_ids",
+            lambda: [
+                "anthropic/claude-sonnet-4-5",
+                "anthropic/claude-sonnet-4-5-20250929",
+            ],
+        )
+        model_resolution.invalidate_resolution_index()
+        r = resolve_catalog_model_id("anthropic/claude-sonnet-4-5")
+        assert r.canonical_id == "anthropic/claude-sonnet-4-5"
+        assert r.matched_by == "exact"

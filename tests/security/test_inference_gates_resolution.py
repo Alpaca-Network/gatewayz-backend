@@ -154,3 +154,79 @@ async def test_gate_disabled_returns_the_input_unchanged(monkeypatch):
     assert (
         await inference_gates.enforce_model_pricing_gate("claude-sonnet-4-6") == "claude-sonnet-4-6"
     )
+
+
+class TestUnresolvedQualifiedIdIsNotAnOperatorPage:
+    """A fully-qualified id that resolves to nothing is the CALLER's mistake.
+
+    The 503 `pricing_not_configured` branch is documented as "resolved,
+    high-value, pricing MISSING -- ours to fix, and the only branch that
+    should page anyone." Unresolved ids were leaking into it: because the gate
+    kept pre-resolution treatment for anything containing "/", a fictional
+    `anthropic/claude-totally-fake-xyz` matched the high-value family pattern,
+    raised ValueError out of the pricing lookup, and came back 503 "contact
+    support" -- retryable, so SDKs retried a typo forever, and it paged us.
+
+    Measured against production 2026-09-09: `anthropic/claude-sonnet-4-5` ->
+    503 while the identical bare `claude-sonnet-4-5` -> 400. Same condition,
+    two statuses, and the worse one went to the form our own catalog
+    advertises.
+    """
+
+    @pytest.mark.asyncio
+    async def test_unresolved_qualified_id_is_404_shaped_not_a_503(self, monkeypatch):
+        def _boom(_m):
+            raise ValueError("high-value model has no pricing row")
+
+        _stub(monkeypatch, ModelResolution(None, "unresolved"), priced=set())
+        monkeypatch.setattr(_PRICING, "model_has_pricing", _boom)
+
+        with pytest.raises(HTTPException) as exc:
+            await inference_gates.enforce_model_pricing_gate("anthropic/claude-totally-fake-xyz")
+
+        assert exc.value.status_code == 400
+        assert exc.value.detail["error"]["code"] == "model_not_found"
+
+    @pytest.mark.asyncio
+    async def test_no_shape_of_unknown_id_is_retryable(self, monkeypatch):
+        # The codes may legitimately differ -- `model_not_priced` is accurate
+        # for an id we could not resolve and cannot price. What must never
+        # differ is retryability: an SDK keys its retry policy off the STATUS,
+        # so any 5xx here is a typo retried forever.
+        _stub(monkeypatch, ModelResolution(None, "unresolved"), priced=set())
+        for mid in ("claude-nope-9", "anthropic/claude-nope-9"):
+            with pytest.raises(HTTPException) as exc:
+                await inference_gates.enforce_model_pricing_gate(mid)
+            assert exc.value.status_code == 400, f"{mid} came back {exc.value.status_code}"
+
+    @pytest.mark.asyncio
+    async def test_cold_catalog_still_falls_through(self, monkeypatch):
+        # A cache outage must not answer "that model does not exist" to the
+        # whole API -- the pre-resolution path is retained when the index is
+        # empty, which is the one case where "/" treatment still applies.
+        _stub(
+            monkeypatch,
+            ModelResolution(None, "unresolved"),
+            priced={"anthropic/claude-sonnet-4-6"},
+            index_empty=True,
+        )
+        assert (
+            await inference_gates.enforce_model_pricing_gate("anthropic/claude-sonnet-4-6")
+            == "anthropic/claude-sonnet-4-6"
+        )
+
+    @pytest.mark.asyncio
+    async def test_catalogued_high_value_model_still_pages(self, monkeypatch):
+        # The 503 branch keeps its documented purpose: a model we DO resolve,
+        # whose pricing row we forgot to add, is ours to fix and should page.
+        def _boom(_m):
+            raise ValueError("high-value model has no pricing row")
+
+        _stub(monkeypatch, ModelResolution("anthropic/claude-opus-5", "exact"), priced=set())
+        monkeypatch.setattr(_PRICING, "model_has_pricing", _boom)
+
+        with pytest.raises(HTTPException) as exc:
+            await inference_gates.enforce_model_pricing_gate("anthropic/claude-opus-5")
+
+        assert exc.value.status_code == 503
+        assert exc.value.detail["error"]["code"] == "pricing_not_configured"
