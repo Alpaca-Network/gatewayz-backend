@@ -18,6 +18,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.db.gpu_rollups import aggregate_hour, is_utilization_empty, upsert_hourly_rows
+from src.services.ops.job_runs import record_job_run
 
 logger = logging.getLogger(__name__)
 
@@ -42,20 +43,42 @@ def run_hourly_rollup() -> None:
     """
     now = datetime.now(UTC)
     previous_hour = (now - timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    backfilled = False
 
-    if is_utilization_empty():
-        logger.info(
-            f"gpu_utilization_hourly is empty; backfilling the last {_BACKFILL_HOURS} hours"
+    try:
+        if is_utilization_empty():
+            logger.info(
+                f"gpu_utilization_hourly is empty; backfilling the last {_BACKFILL_HOURS} hours"
+            )
+            backfilled = True
+            # previous_hour itself is computed by the unconditional _run_hour()
+            # call below -- backfill only the _BACKFILL_HOURS-1 hours before it,
+            # so the total distinct hours computed is exactly _BACKFILL_HOURS,
+            # not _BACKFILL_HOURS+1 with previous_hour recomputed twice.
+            oldest = previous_hour - timedelta(hours=_BACKFILL_HOURS - 1)
+            for i in range(_BACKFILL_HOURS - 1):
+                _run_hour(oldest + timedelta(hours=i))
+
+        _run_hour(previous_hour)
+        record_job_run(
+            "gpu_rollup",
+            ok=True,
+            summary={
+                "hour": previous_hour.isoformat(),
+                "backfilled": backfilled,
+                "interval_minutes": 60,
+            },
+            duration_ms=int((datetime.now(UTC) - now).total_seconds() * 1000),
         )
-        # previous_hour itself is computed by the unconditional _run_hour()
-        # call below -- backfill only the _BACKFILL_HOURS-1 hours before it,
-        # so the total distinct hours computed is exactly _BACKFILL_HOURS,
-        # not _BACKFILL_HOURS+1 with previous_hour recomputed twice.
-        oldest = previous_hour - timedelta(hours=_BACKFILL_HOURS - 1)
-        for i in range(_BACKFILL_HOURS - 1):
-            _run_hour(oldest + timedelta(hours=i))
-
-    _run_hour(previous_hour)
+    except Exception as e:
+        logger.warning(f"GPU utilization hourly rollup failed (non-fatal): {e}")
+        record_job_run(
+            "gpu_rollup",
+            ok=False,
+            error=str(e),
+            summary={"interval_minutes": 60},
+            duration_ms=int((datetime.now(UTC) - now).total_seconds() * 1000),
+        )
 
 
 def start_gpu_rollup_scheduler() -> None:

@@ -35,7 +35,7 @@ from src.db.gpu import (
     update_node,
 )
 from src.db.user_wallets import get_wallet
-from src.security.deps import get_user_id, require_admin
+from src.security.deps import get_user_id, require_admin_or_env_key
 from src.security.node_auth import get_node as get_auth_node
 from src.security.wallet_signature import verify_wallet_signature
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
@@ -531,9 +531,18 @@ async def node_heartbeat(
 
 @router.post("/admin/providers/{provider_id}/approve", tags=["gpu"])
 async def admin_approve_provider(
-    provider_id: int, admin_user: dict[str, Any] = Depends(require_admin)
+    provider_id: int, admin_user: dict[str, Any] = Depends(require_admin_or_env_key)
 ) -> dict[str, Any]:
-    updated = set_provider_status(provider_id, "approved", approved_by=admin_user.get("id"))
+    admin_id = admin_user.get("id")
+    if admin_id is None:
+        # require_admin_or_env_key's env-key branch returns
+        # {"role": "admin", "auth": "env_key", "is_admin": True} -- no "id".
+        # gpu_providers.approved_by is an int FK to users(id) with no
+        # free-text column to record an alternate identity in, so it stays
+        # NULL for this path; log explicitly so "who approved this" is
+        # still answerable from logs (see docs/security/DATA_ACCESS.md).
+        logger.info("gpu provider %s approved via ADMIN_API_KEY (no user id)", provider_id)
+    updated = set_provider_status(provider_id, "approved", approved_by=admin_id)
     if updated is None:
         raise HTTPException(status_code=404, detail="provider_not_found")
     return {"success": True, "data": _provider_view(updated)}
@@ -541,8 +550,10 @@ async def admin_approve_provider(
 
 @router.post("/admin/providers/{provider_id}/suspend", tags=["gpu"])
 async def admin_suspend_provider(
-    provider_id: int, _admin_user: dict[str, Any] = Depends(require_admin)
+    provider_id: int, admin_user: dict[str, Any] = Depends(require_admin_or_env_key)
 ) -> dict[str, Any]:
+    if admin_user.get("id") is None:
+        logger.info("gpu provider %s suspended via ADMIN_API_KEY (no user id)", provider_id)
     updated = set_provider_status(provider_id, "suspended")
     if updated is None:
         raise HTTPException(status_code=404, detail="provider_not_found")
@@ -551,7 +562,7 @@ async def admin_suspend_provider(
 
 @router.get("/admin/providers", tags=["gpu"])
 async def admin_list_providers(
-    status: str | None = None, _admin_user: dict[str, Any] = Depends(require_admin)
+    status: str | None = None, _admin_user: dict[str, Any] = Depends(require_admin_or_env_key)
 ) -> dict[str, Any]:
     providers = list_providers(status=status)
     return {"success": True, "data": {"providers": [_provider_view(p) for p in providers]}}

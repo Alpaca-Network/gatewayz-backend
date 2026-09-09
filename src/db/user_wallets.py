@@ -103,6 +103,45 @@ def link_wallet(
         return None
 
 
+def count_all_wallets() -> int:
+    """Total number of linked wallets across all users, for the admin WAYZ
+    ops status endpoint. 0 on any lookup error."""
+    try:
+        client = get_supabase_client()
+        result = client.table(_TABLE).select("id", count="exact").execute()
+        return result.count or 0
+    except Exception as e:
+        logger.warning(f"user_wallets total count failed: {e}")
+        return 0
+
+
+_BY_SOURCE_ROW_CAP = 10000
+
+
+def count_wallets_by_source() -> dict[str, int]:
+    """{'privy': n, 'siwe': n, ...} counts of linked wallets grouped by
+    `source`, for the admin WAYZ ops status endpoint. Empty dict on any
+    lookup error -- never raises. Row-capped like every other summary read
+    in this codebase (see src/db/wallet_stakes.py's _STAKE_TOTALS_ROW_CAP)."""
+    try:
+        client = get_supabase_client()
+        result = client.table(_TABLE).select("source").limit(_BY_SOURCE_ROW_CAP).execute()
+        rows = result.data or []
+        if len(rows) >= _BY_SOURCE_ROW_CAP:
+            logger.warning(
+                f"count_wallets_by_source hit the {_BY_SOURCE_ROW_CAP}-row cap; "
+                "counts may be incomplete"
+            )
+        counts: dict[str, int] = {}
+        for row in rows:
+            source = row.get("source") or "unknown"
+            counts[source] = counts.get(source, 0) + 1
+        return counts
+    except Exception as e:
+        logger.warning(f"user_wallets by-source count failed: {e}")
+        return {}
+
+
 def unlink_wallet(user_id: int, address: str) -> bool:
     """Remove a wallet link owned by this user. Returns True iff a row was
     deleted; False on no match (wrong owner / not linked) or any error."""

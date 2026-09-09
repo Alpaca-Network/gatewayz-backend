@@ -134,6 +134,39 @@ def list_providers(status: str | None = None) -> list[dict[str, Any]]:
         return []
 
 
+_PROVIDER_STATUSES = ("pending", "approved", "suspended")
+
+# Row cap for the admin ops status summary -- real limit rather than an
+# unbounded select, same convention as src/db/wallet_stakes.py's
+# _STAKE_TOTALS_ROW_CAP.
+_STATUS_COUNT_ROW_CAP = 10000
+
+
+def count_providers_by_status() -> dict[str, int]:
+    """{'pending': n, 'approved': n, 'suspended': n} counts, for the admin
+    WAYZ ops status endpoint. Zeroed on any lookup error -- never raises."""
+    counts = dict.fromkeys(_PROVIDER_STATUSES, 0)
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_PROVIDERS_TABLE).select("status").limit(_STATUS_COUNT_ROW_CAP).execute()
+        )
+        rows = result.data or []
+        if len(rows) >= _STATUS_COUNT_ROW_CAP:
+            logger.warning(
+                f"count_providers_by_status hit the {_STATUS_COUNT_ROW_CAP}-row cap; "
+                "counts may be incomplete"
+            )
+        for row in rows:
+            status = row.get("status")
+            if status in counts:
+                counts[status] += 1
+        return counts
+    except Exception as e:
+        logger.warning(f"gpu_providers status count failed: {e}")
+        return counts
+
+
 # ---------------------------------------------------------------------------
 # gpu_nodes
 # ---------------------------------------------------------------------------
@@ -369,6 +402,33 @@ def list_active_nodes() -> list[dict[str, Any]]:
     except Exception as e:
         logger.warning(f"gpu_nodes list_active_nodes failed: {e}")
         return []
+
+
+_NODE_STATUSES = ("registered", "active", "degraded", "offline", "disabled")
+
+
+def count_nodes_by_status() -> dict[str, int]:
+    """{'registered': n, 'active': n, 'degraded': n, 'offline': n,
+    'disabled': n} counts, for the admin WAYZ ops status endpoint. Zeroed
+    on any lookup error -- never raises."""
+    counts = dict.fromkeys(_NODE_STATUSES, 0)
+    try:
+        client = get_supabase_client()
+        result = client.table(_NODES_TABLE).select("status").limit(_STATUS_COUNT_ROW_CAP).execute()
+        rows = result.data or []
+        if len(rows) >= _STATUS_COUNT_ROW_CAP:
+            logger.warning(
+                f"count_nodes_by_status hit the {_STATUS_COUNT_ROW_CAP}-row cap; "
+                "counts may be incomplete"
+            )
+        for row in rows:
+            status = row.get("status")
+            if status in counts:
+                counts[status] += 1
+        return counts
+    except Exception as e:
+        logger.warning(f"gpu_nodes status count failed: {e}")
+        return counts
 
 
 def sweep_liveness(now: datetime, degraded_after_s: int, offline_after_s: int) -> tuple[int, int]:

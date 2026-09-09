@@ -13,7 +13,12 @@ from fastapi.testclient import TestClient
 
 from src.main import app
 from src.routes.gpu import _earnings_summary, _invalidate_node_adapter
-from src.security.deps import get_api_key, get_current_user, get_user_id, require_admin
+from src.security.deps import (
+    get_api_key,
+    get_current_user,
+    get_user_id,
+    require_admin_or_env_key,
+)
 from src.security.node_auth import get_node as get_auth_node
 
 # create_node's node_token_hash and node_auth's lookup both hash via
@@ -62,16 +67,16 @@ def _override_user_id():
 
 
 def _override_admin():
-    previous = app.dependency_overrides.get(require_admin)
-    app.dependency_overrides[require_admin] = lambda: {"id": 999, "is_admin": True}
+    previous = app.dependency_overrides.get(require_admin_or_env_key)
+    app.dependency_overrides[require_admin_or_env_key] = lambda: {"id": 999, "is_admin": True}
     return previous
 
 
 def _restore_admin(previous):
     if previous is None:
-        app.dependency_overrides.pop(require_admin, None)
+        app.dependency_overrides.pop(require_admin_or_env_key, None)
     else:
-        app.dependency_overrides[require_admin] = previous
+        app.dependency_overrides[require_admin_or_env_key] = previous
 
 
 def _override_node(node_row):
@@ -798,26 +803,24 @@ def test_admin_approve_provider_404_when_missing(mock_set_status):
 
 
 def test_admin_endpoints_reject_non_admin():
-    """No require_admin override -- exercises the real dependency chain
-    (require_admin -> get_current_user -> get_api_key), which must reject
-    an unauthenticated request with 401/403.
+    """No require_admin_or_env_key override -- exercises the real dependency
+    chain (require_admin_or_env_key -> [env key compare, then] get_current_user
+    -> get_api_key), which must reject an unauthenticated request with
+    401/403.
 
     app.dependency_overrides is a shared, module-level dict (same lesson
     as _override_user_id's save/restore above): at least one other test
     module (tests/routes/test_admin_model_usage_analytics.py) sets
     `dependency_overrides[require_admin]` at IMPORT time and never restores
     it, so under xdist -- wherever that module lands in the same worker
-    process before this test runs -- require_admin silently resolves to a
-    fake admin here too. That let this request reach the real (unmocked)
-    handler, which called the real set_provider_status, got None back from
-    its safe-default-on-any-error DB path, and 404'd -- a false pass turned
-    into an unrelated-looking CI failure, not a bug in the route's ordering.
+    process before this test runs -- require_admin_or_env_key could silently
+    resolve to a fake admin here too if it were the same dependency object.
     Explicitly clearing the whole auth dependency chain here makes this
     test's result reflect ITS OWN request, regardless of what any other
     module left behind."""
     cleared = {
         dep: app.dependency_overrides.pop(dep)
-        for dep in (require_admin, get_current_user, get_api_key)
+        for dep in (require_admin_or_env_key, get_current_user, get_api_key)
         if dep in app.dependency_overrides
     }
     try:
@@ -826,6 +829,67 @@ def test_admin_endpoints_reject_non_admin():
         app.dependency_overrides.update(cleared)
 
     assert response.status_code in (401, 403)
+
+
+@patch("src.routes.gpu.set_provider_status")
+def test_admin_approve_provider_accepts_env_admin_key(mock_set_status, monkeypatch, caplog):
+    """require_admin_or_env_key's second accepted auth path: the admin
+    panel calls these endpoints with ADMIN_API_KEY, not a user API key --
+    see backend-brief.md item 3. No dependency override here; this exercises
+    the real env-key comparison branch. approved_by must be None on this
+    path (no user id to attribute to -- see docs/security/DATA_ACCESS.md),
+    and the audit log line must fire so the action is still traceable."""
+    mock_set_status.return_value = {**_PENDING_PROVIDER, "status": "approved"}
+    monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key-for-gpu-approve")
+    cleared = {
+        dep: app.dependency_overrides.pop(dep)
+        for dep in (require_admin_or_env_key, get_current_user, get_api_key)
+        if dep in app.dependency_overrides
+    }
+    try:
+        with caplog.at_level("INFO", logger="src.routes.gpu"):
+            response = client.post(
+                "/gpu/admin/providers/1/approve",
+                headers={"Authorization": "Bearer test-admin-key-for-gpu-approve"},
+            )
+    finally:
+        app.dependency_overrides.update(cleared)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "approved"
+    _, kwargs = mock_set_status.call_args
+    assert kwargs["approved_by"] is None
+    assert any(
+        "provider 1 approved via ADMIN_API_KEY (no user id)" in record.message
+        for record in caplog.records
+    )
+
+
+@patch("src.routes.gpu.set_provider_status")
+def test_admin_suspend_provider_accepts_env_admin_key(mock_set_status, monkeypatch, caplog):
+    """Same env-key path as approve above, for suspend."""
+    mock_set_status.return_value = {**_APPROVED_PROVIDER, "status": "suspended"}
+    monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key-for-gpu-suspend")
+    cleared = {
+        dep: app.dependency_overrides.pop(dep)
+        for dep in (require_admin_or_env_key, get_current_user, get_api_key)
+        if dep in app.dependency_overrides
+    }
+    try:
+        with caplog.at_level("INFO", logger="src.routes.gpu"):
+            response = client.post(
+                "/gpu/admin/providers/1/suspend",
+                headers={"Authorization": "Bearer test-admin-key-for-gpu-suspend"},
+            )
+    finally:
+        app.dependency_overrides.update(cleared)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "suspended"
+    assert any(
+        "provider 1 suspended via ADMIN_API_KEY (no user id)" in record.message
+        for record in caplog.records
+    )
 
 
 @patch("src.routes.gpu.list_providers")
