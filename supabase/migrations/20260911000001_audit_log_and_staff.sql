@@ -97,7 +97,7 @@ GRANT ALL ON SEQUENCE public.audit_log_id_seq TO service_role;
 CREATE TABLE IF NOT EXISTS public.admin_invites (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email           TEXT NOT NULL,
-    role            user_role NOT NULL,
+    role            varchar(32) NOT NULL CHECK (role IN ('admin','superadmin')),  -- users.role is varchar in prod
     token_hash      TEXT NOT NULL UNIQUE,
     invited_by      BIGINT NULL REFERENCES public.users(id) ON DELETE SET NULL,
     expires_at      TIMESTAMPTZ NOT NULL,
