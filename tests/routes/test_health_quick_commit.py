@@ -20,9 +20,9 @@ from src.config.config import Config
 
 
 def _client():
-    from src.routes import health
-
     from fastapi import FastAPI
+
+    from src.routes import health
 
     app = FastAPI()
     app.include_router(health.router)
