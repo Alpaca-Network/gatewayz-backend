@@ -95,6 +95,20 @@ def _get_tier_display_name(tier: str | None) -> str | None:
     return tier_display_map.get(tier) if tier else None
 
 
+def _resolve_role_fields(user: dict[str, Any]) -> tuple[str, bool]:
+    """Resolve (role, is_admin) for the /auth response (gatewayz-backend
+    unified-identity Phase A, A5).
+
+    Mirrors the exact is_admin check in src.security.deps.require_admin so
+    the admin panel's client-side gate and the backend's own admin check
+    never disagree. Defaults to ("user", False) for a row that has no role
+    yet (a brand-new account, or one created before the role migration).
+    """
+    role = user.get("role") or "user"
+    is_admin = bool(user.get("is_admin", False)) or role == "admin"
+    return role, is_admin
+
+
 async def _get_subscription_status_for_email(email: str) -> tuple[str, bool]:
     """
     Determine subscription status for an email using Emailable API + local checks.
@@ -479,6 +493,8 @@ def _handle_existing_user(
 
     _ingest_privy_wallets(existing_user["id"], request.user.linked_accounts, token_verified)
 
+    role, is_admin = _resolve_role_fields(existing_user)
+
     return PrivyAuthResponse(
         success=True,
         message="Login successful",
@@ -492,6 +508,8 @@ def _handle_existing_user(
         phone_number=phone_number or existing_user.get("phone_number"),
         credits=user_credits_cents,  # In cents — matches /user/profile
         timestamp=datetime.now(UTC),
+        role=role,
+        is_admin=is_admin,
         subscription_status=subscription_status_value,
         tier=tier,
         tier_display_name=tier_display_name,
@@ -1409,6 +1427,8 @@ async def privy_auth(
                     detail="Account created but API key generation failed. Please try again or contact support.",
                 )
 
+            role, is_admin = _resolve_role_fields(user_data)
+
             return PrivyAuthResponse(
                 success=True,
                 message="Account created successfully",
@@ -1422,6 +1442,8 @@ async def privy_auth(
                 phone_number=phone_number,
                 credits=new_user_credits_cents,  # In cents — matches /user/profile
                 timestamp=datetime.now(UTC),
+                role=role,
+                is_admin=is_admin,
                 subscription_status=user_data.get("subscription_status", "inactive"),
                 tier=tier_value,
                 tier_display_name=_get_tier_display_name(tier_value),

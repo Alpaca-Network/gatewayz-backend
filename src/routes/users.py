@@ -254,6 +254,15 @@ async def get_user_profile_endpoint(api_key: str = Depends(get_api_key)):
 
         # credits is float (1 credit = $1) — no coercion needed
 
+        # RBAC (gatewayz-backend unified-identity Phase A, A5): get_user_profile()
+        # doesn't carry role/is_admin, but the `user` row fetched above does —
+        # same fields, same fallback, as the /auth response (src/routes/auth.py
+        # _resolve_role_fields).
+        if "role" not in profile:
+            profile["role"] = user.get("role") or "user"
+        if "is_admin" not in profile:
+            profile["is_admin"] = bool(user.get("is_admin", False)) or profile["role"] == "admin"
+
         return profile
 
     except HTTPException:
