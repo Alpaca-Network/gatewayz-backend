@@ -219,6 +219,37 @@ For every secret below, unless its section says otherwise:
   bridge handshake -- treat as a full trust-boundary breach between the two
   services.
 
+### `UPSTREAM_PSEUDONYM_SECRET`
+
+- **Protects:** the per-request pseudonym sent upstream (as `user`) to
+  providers' own abuse detection when `UPSTREAM_ABUSE_PSEUDONYM=true`
+  (`src/services/upstream/anonymize.py`) -- an HMAC key, not a feature flag;
+  `UPSTREAM_ABUSE_PSEUDONYM` itself is just the boolean that turns this
+  behavior on and holds no secret material. `src/services/startup.py`'s
+  `_validate_upstream_pseudonym_config` fails startup loudly if the flag is
+  on and this secret is missing or under 32 characters, rather than raising
+  on every chat completion.
+- **Set:** Railway `api` -> `UPSTREAM_PSEUDONYM_SECRET`.
+- **Mint:** `openssl rand -hex 32` (or longer -- the only requirement
+  enforced at startup is >=32 characters).
+- **Order of operations:** simpler than most secrets here -- there is no
+  "revoke the old value" step. Set the new value, redeploy. Pseudonyms are
+  HMAC-derived per request and never stored, so rotating this secret simply
+  means every pseudonym computed after the redeploy stops correlating with
+  ones computed before it -- which is often the point of rotating it (to
+  break any accumulated cross-request correlation), not a side effect to
+  work around.
+- **Verify:** `GET /admin/status` -> confirm
+  `secrets.UPSTREAM_PSEUDONYM_SECRET.first_seen_at` reset after redeploy.
+  There is no live integration check for this one (it's never called
+  out-of-process) -- a chat completion succeeding with
+  `UPSTREAM_ABUSE_PSEUDONYM=true` set is the functional verification.
+- **Blast radius if leaked:** an attacker who knows this secret could
+  compute the same pseudonym Gatewayz would for a given request and
+  potentially correlate/deanonymize traffic upstream providers see -- see
+  `docs/security/ANONYMITY_THREAT_MODEL.md` for the full threat model this
+  secret is part of.
+
 ## Never
 
 - **Never `vercel deploy --prod` from a local checkout.** It uploads

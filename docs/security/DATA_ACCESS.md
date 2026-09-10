@@ -115,7 +115,7 @@ allow-list of secret env var names (`ADMIN_API_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_KEY`, `RESEND_API_KEY`,
 `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`, `WAYZ_FAUCET_MINTER_PRIVATE_KEY`,
 `WAYZ_REWARDS_POOL_PRIVATE_KEY`, `STRIPE_SECRET_KEY`, `SENTRY_DSN`,
-`GATEWAYZ_AUTH_BRIDGE_SECRET`, `UPSTREAM_ABUSE_PSEUDONYM` --
+`GATEWAYZ_AUTH_BRIDGE_SECRET`, `UPSTREAM_PSEUDONYM_SECRET` --
 `src/services/secrets_registry.py::SECRET_NAMES`) as
 `{present, source: "env", first_seen_at, age_days, rotate_due,
 fingerprint_known}`, plus the health status of each external integration.

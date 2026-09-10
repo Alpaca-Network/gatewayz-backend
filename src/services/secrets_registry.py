@@ -48,7 +48,7 @@ SECRET_NAMES: list[str] = [
     "STRIPE_SECRET_KEY",
     "SENTRY_DSN",
     "GATEWAYZ_AUTH_BRIDGE_SECRET",
-    "UPSTREAM_ABUSE_PSEUDONYM",
+    "UPSTREAM_PSEUDONYM_SECRET",
 ]
 
 # Default salt mixed into the fingerprint below. Overridable via the
