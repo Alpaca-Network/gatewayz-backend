@@ -754,13 +754,30 @@ async def run_scheduled_retention_cleanup():
         _last_retention_status["last_usage_records_deleted"] = usage_deleted
         _last_retention_status["last_activity_log_deleted"] = activity_deleted
 
+        # stripe_webhook_events, in its OWN guard: this table is payment
+        # webhook payloads, not inference data, and a failure here must not
+        # cost us the two cleanups above that already succeeded.
+        webhook_deleted = 0
+        try:
+            from src.db.webhook_events import cleanup_old_events
+
+            webhook_deleted = await asyncio.to_thread(
+                cleanup_old_events, Config.STRIPE_WEBHOOK_EVENTS_RETENTION_DAYS
+            )
+        except Exception as we:  # noqa: BLE001 - never fail the run for this
+            logger.warning("stripe_webhook_events cleanup failed (non-fatal): %s", we)
+        _last_retention_status["last_webhook_events_deleted"] = webhook_deleted
+
         logger.info(
             "Retention cleanup: usage_records deleted=%s (older than %sd), "
-            "activity_log deleted=%s (older than %sd)",
+            "activity_log deleted=%s (older than %sd), "
+            "stripe_webhook_events deleted=%s (older than %sd)",
             usage_deleted,
             Config.USAGE_RECORDS_RETENTION_DAYS,
             activity_deleted,
             Config.ACTIVITY_LOG_RETENTION_DAYS,
+            webhook_deleted,
+            Config.STRIPE_WEBHOOK_EVENTS_RETENTION_DAYS,
         )
         record_job_run(
             "retention_cleanup",
@@ -768,6 +785,7 @@ async def run_scheduled_retention_cleanup():
             summary={
                 "usage_records_deleted": usage_deleted,
                 "activity_log_deleted": activity_deleted,
+                "stripe_webhook_events_deleted": webhook_deleted,
                 "interval_minutes": Config.RETENTION_CLEANUP_INTERVAL_HOURS * 60,
             },
             duration_ms=int((datetime.now(UTC) - now).total_seconds() * 1000),

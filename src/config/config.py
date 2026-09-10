@@ -157,6 +157,12 @@ class Config:
     USAGE_RECORDS_RETENTION_DAYS = int(os.environ.get("USAGE_RECORDS_RETENTION_DAYS", "400"))
     ACTIVITY_LOG_RETENTION_DAYS = int(os.environ.get("ACTIVITY_LOG_RETENTION_DAYS", "400"))
     RETENTION_CLEANUP_INTERVAL_HOURS = int(os.environ.get("RETENTION_CLEANUP_INTERVAL_HOURS", "24"))
+    # stripe_webhook_events: cleanup_old_events() has existed with a 90-day
+    # default since before M3 but had no caller, so the table grew unbounded
+    # while our own retention doc listed it as unscheduled. Now wired.
+    STRIPE_WEBHOOK_EVENTS_RETENTION_DAYS = int(
+        os.environ.get("STRIPE_WEBHOOK_EVENTS_RETENTION_DAYS", "90")
+    )
     # WAYZ staking on-chain sync (gatewayz-backend#2244). Unset contract
     # address (the default -- nothing is deployed to Fuji yet) means the
     # scheduler no-ops at startup rather than erroring.
