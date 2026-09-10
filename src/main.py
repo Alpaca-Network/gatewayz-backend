@@ -508,6 +508,7 @@ def create_app() -> FastAPI:
         ("api_keys", "API Key Management"),
         ("admin", "Admin Operations"),
         ("admin_wayz", "Admin WAYZ Ops"),
+        ("admin_status", "Admin Status"),  # Unified status: jobs + integrations + secrets presence
         ("live_model_test", "Live Model Test"),  # Admin live inference sweep
         # ("admin_pricing_analytics", "Admin Pricing Analytics"),  # REMOVED - Phase 2 deprecation
         ("api_key_monitoring", "API Key Tracking Monitoring"),  # API key tracking quality metrics
