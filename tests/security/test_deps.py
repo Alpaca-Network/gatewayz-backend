@@ -274,6 +274,96 @@ async def test_require_admin_denied_logs_violation(monkeypatch, mod):
     assert fake_audit.violation_calls[0]["violation_type"] == "UNAUTHORIZED_ADMIN_ACCESS"
 
 
+@pytest.mark.anyio
+async def test_require_admin_via_superadmin_role(monkeypatch, mod):
+    """superadmin is a strict superset of admin -- require_admin must accept it."""
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
+    user = {"id": 4, "role": "superadmin"}
+    out = await mod.require_admin(user=user)
+    assert out["id"] == 4
+    assert not fake_audit.violation_calls
+
+
+# ---------------- require_superadmin ----------------
+
+
+@pytest.mark.anyio
+async def test_require_superadmin_allows_superadmin(monkeypatch, mod):
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
+    user = {"id": 5, "role": "superadmin"}
+    out = await mod.require_superadmin(user=user)
+    assert out["id"] == 5
+    assert not fake_audit.violation_calls
+
+
+@pytest.mark.anyio
+async def test_require_superadmin_denies_plain_admin(monkeypatch, mod):
+    """A plain admin is not enough -- require_superadmin is strictly narrower
+    than require_admin."""
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
+    user = {"id": 6, "role": "admin", "is_admin": True}
+    with pytest.raises(HTTPException) as ei:
+        await mod.require_superadmin(user=user)
+    assert ei.value.status_code == 403
+    assert fake_audit.violation_calls
+    assert fake_audit.violation_calls[0]["violation_type"] == "UNAUTHORIZED_SUPERADMIN_ACCESS"
+
+
+@pytest.mark.anyio
+async def test_require_superadmin_denies_non_admin(monkeypatch, mod):
+    fake_audit = FakeAuditLogger()
+    monkeypatch.setattr(mod, "audit_logger", fake_audit)
+    user = {"id": 7, "role": "user"}
+    with pytest.raises(HTTPException) as ei:
+        await mod.require_superadmin(user=user)
+    assert ei.value.status_code == 403
+
+
+# ---------------- require_admin_or_env_key ----------------
+
+
+@pytest.mark.anyio
+async def test_require_admin_or_env_key_accepts_superadmin_user(monkeypatch, mod):
+    """The env-key fallback path already worked; the user-key path must also
+    accept role='superadmin', not just role='admin'."""
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="gw_live_some_key")
+    monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+
+    async def fake_get_api_key(creds):
+        return creds.credentials
+
+    async def fake_get_current_user(api_key):
+        return {"id": 8, "role": "superadmin"}
+
+    monkeypatch.setattr(mod, "get_api_key", fake_get_api_key)
+    monkeypatch.setattr(mod, "get_current_user", fake_get_current_user)
+
+    out = await mod.require_admin_or_env_key(credentials=credentials)
+    assert out["id"] == 8
+
+
+@pytest.mark.anyio
+async def test_require_admin_or_env_key_rejects_plain_user(monkeypatch, mod):
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="gw_live_some_key")
+    monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+
+    async def fake_get_api_key(creds):
+        return creds.credentials
+
+    async def fake_get_current_user(api_key):
+        return {"id": 9, "role": "user"}
+
+    monkeypatch.setattr(mod, "get_api_key", fake_get_api_key)
+    monkeypatch.setattr(mod, "get_current_user", fake_get_current_user)
+
+    with pytest.raises(HTTPException) as ei:
+        await mod.require_admin_or_env_key(credentials=credentials)
+    assert ei.value.status_code == 403
+
+
 # ---------------- get_optional_api_key ----------------
 
 
