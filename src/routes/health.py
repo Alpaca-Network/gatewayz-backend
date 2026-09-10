@@ -153,10 +153,16 @@ async def health_quick():
     - Returns immediately with HTTP 200
 
     For detailed health status including database connectivity, use /health instead.
+
+    `commit` is the git SHA of the build serving the request, so "is my change
+    live?" is one call rather than an inference from behaviour. It is short
+    (12 chars), reads `unknown` when the host injects nothing, and costs no
+    I/O -- the value is resolved once at import.
     """
     return {
         "status": "healthy",
         "timestamp": datetime.now(UTC).isoformat(),
+        "commit": Config.BUILD_COMMIT[:12],
     }
 
 

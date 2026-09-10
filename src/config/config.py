@@ -537,6 +537,16 @@ class Config:
     SENTRY_PROFILES_SAMPLE_RATE = float(os.environ.get("SENTRY_PROFILES_SAMPLE_RATE", "1.0"))
     # Release tracking - automatically inferred from version or environment variable
     SENTRY_RELEASE = os.environ.get("SENTRY_RELEASE", "2.0.3")
+    # The commit actually serving this process. Railway injects
+    # RAILWAY_GIT_COMMIT_SHA into every build; the other names cover
+    # local runs and other hosts. "unknown" is honest -- it means the
+    # process cannot tell you, which is different from claiming a value.
+    BUILD_COMMIT = (
+        os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+        or os.environ.get("GIT_COMMIT_SHA")
+        or os.environ.get("SOURCE_COMMIT")
+        or "unknown"
+    )
     # Version string for release tracking
     APP_VERSION = os.environ.get("APP_VERSION", "2.0.3")
 
