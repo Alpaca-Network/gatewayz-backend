@@ -16,4 +16,12 @@
 -- 'user_role' was created in 20251009060000_add_user_roles.sql as
 -- ENUM ('user', 'developer', 'admin').
 
-ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'superadmin';
+-- Production (verified 2026-09-10): users.role is a plain varchar with no
+-- enum and no CHECK constraint — the 2025 user_role enum never landed there.
+-- Only touch the enum where it actually exists.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+    ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'superadmin';
+  END IF;
+END $$;
