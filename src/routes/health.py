@@ -166,6 +166,39 @@ async def health_quick():
     }
 
 
+@router.get("/health/model-resolution", tags=["health"])
+async def health_model_resolution(model: str):
+    """Report how `model` resolves against the live catalog index.
+
+    Added while chasing #2298, where an undated vendor alias failed to resolve
+    in production and every attempt to explain it was an inference from the
+    wording of a 400. The index is built from `get_cached_unique_models()`,
+    which nothing else calls and no endpoint exposes, so its contents could
+    only be guessed at from the outside.
+
+    `matched_by` settles the guess in one call:
+      exact   — the catalog carries this id verbatim
+      alias   — a curated `model_aliases` row did the work
+      suffix  — the id is a bare name under exactly one prefixed catalog id
+      undated — an undated vendor alias reached its dated snapshot
+      ambiguous / unresolved — no single answer
+
+    Returns identifiers only: model ids are already public on GET /v1/models,
+    and no pricing, key, user or account data is touched.
+    """
+    from src.services.model_resolution import index_is_empty, resolve_catalog_model_id
+
+    r = resolve_catalog_model_id(model)
+    return {
+        "input": model,
+        "canonical_id": r.canonical_id,
+        "matched_by": r.matched_by,
+        "candidates": list(r.candidates),
+        "index_is_empty": index_is_empty(),
+        "commit": Config.BUILD_COMMIT[:12],
+    }
+
+
 @router.get("/health/railway", tags=["health"])
 async def health_railway():
     """
