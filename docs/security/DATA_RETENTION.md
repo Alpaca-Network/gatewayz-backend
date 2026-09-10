@@ -14,7 +14,7 @@
 | `usage_records` | 400 days (default) | App-level APScheduler, `run_scheduled_retention_cleanup` | `USAGE_RECORDS_RETENTION_DAYS` | New in M3 (this doc). Legacy table; window intentionally >1 year to cover payment disputes. Batched (5000/batch, 20 batches/run cap) — see `src/db/retention.py`. |
 | `activity_log` | 400 days (default) | App-level APScheduler, `run_scheduled_retention_cleanup` | `ACTIVITY_LOG_RETENTION_DAYS` | New in M3 (this doc). Same batching as `usage_records`. |
 | `credit_transactions` | **never pruned** | — | — | Financial audit ledger. Deliberately excluded from both the SQL and app-level jobs. |
-| `stripe_webhook_events` | 90 days (function exists) | none currently scheduled | — | `cleanup_old_events()` in `src/db/webhook_events.py` exists but has no caller/scheduler wired up — noted here for accuracy, not part of this milestone's scope. |
+| `stripe_webhook_events` | 90 days (default) | App-level APScheduler, `run_scheduled_retention_cleanup` | `STRIPE_WEBHOOK_EVENTS_RETENTION_DAYS` | `cleanup_old_events()` in `src/db/webhook_events.py` had no caller until 2026-09-10; now wired into the same job as `usage_records`/`activity_log`, inside its own guard so a failure here cannot discard those two. Payment webhook payloads, not inference content. |
 | Sentry events | 90 days | Sentry's own project retention setting | external (Sentry dashboard) | Not configured by this codebase; see `SENTRY_ENABLED`/`SENTRY_DSN` in `.env.example` for what we send (and `docs/security/ANONYMITY_THREAT_MODEL.md` G5 for what we deliberately don't). |
 | `chat_history` / `chat_messages` / `shared_chats` | unbounded, opt-in | — | — | Explicit user feature; out of scope (threat model N1/G3 — using chat history is choosing to be identified to Gatewayz). |
 
@@ -42,6 +42,7 @@ Every run is logged to `reconciliation_logs` (job names `ttl_cleanup_*` / `ttl_r
 |---|---|---|
 | `USAGE_RECORDS_RETENTION_DAYS` | `400` | Delete `usage_records` rows older than this. |
 | `ACTIVITY_LOG_RETENTION_DAYS` | `400` | Delete `activity_log` rows older than this. |
+| `STRIPE_WEBHOOK_EVENTS_RETENTION_DAYS` | `90` | Delete `stripe_webhook_events` rows older than this. |
 | `RETENTION_CLEANUP_INTERVAL_HOURS` | `24` | How often the app-level job runs. |
 
 ## Why `credit_transactions` is never pruned
