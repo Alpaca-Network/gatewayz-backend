@@ -161,3 +161,9 @@ class PrivyAuthResponse(BaseModel):
     purchased_credits: float | None = None  # One-time purchased credits
     total_credits: float | None = None  # Sum of subscription_allowance + purchased_credits
     allowance_reset_date: str | None = None  # When allowance was last reset
+    # RBAC (gatewayz-backend unified-identity Phase A, A5): lets the admin
+    # panel gate on the caller's role straight from the /auth response
+    # instead of a separate lookup. "user" is the default for every account
+    # that isn't staff.
+    role: str | None = "user"
+    is_admin: bool | None = False

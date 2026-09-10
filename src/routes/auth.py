@@ -28,6 +28,7 @@ from src.security.privy_token import (
     privy_verification_mode,
     verify_privy_access_token,
 )
+from src.security.roles import resolve_role_fields
 from src.services.auth_cache import (
     cache_user_by_privy_id,
     cache_user_by_username,
@@ -479,6 +480,8 @@ def _handle_existing_user(
 
     _ingest_privy_wallets(existing_user["id"], request.user.linked_accounts, token_verified)
 
+    role, is_admin = resolve_role_fields(existing_user)
+
     return PrivyAuthResponse(
         success=True,
         message="Login successful",
@@ -492,6 +495,8 @@ def _handle_existing_user(
         phone_number=phone_number or existing_user.get("phone_number"),
         credits=user_credits_cents,  # In cents — matches /user/profile
         timestamp=datetime.now(UTC),
+        role=role,
+        is_admin=is_admin,
         subscription_status=subscription_status_value,
         tier=tier,
         tier_display_name=tier_display_name,
@@ -1409,6 +1414,8 @@ async def privy_auth(
                     detail="Account created but API key generation failed. Please try again or contact support.",
                 )
 
+            role, is_admin = resolve_role_fields(user_data)
+
             return PrivyAuthResponse(
                 success=True,
                 message="Account created successfully",
@@ -1422,6 +1429,8 @@ async def privy_auth(
                 phone_number=phone_number,
                 credits=new_user_credits_cents,  # In cents — matches /user/profile
                 timestamp=datetime.now(UTC),
+                role=role,
+                is_admin=is_admin,
                 subscription_status=user_data.get("subscription_status", "inactive"),
                 tier=tier_value,
                 tier_display_name=_get_tier_display_name(tier_value),

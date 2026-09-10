@@ -73,6 +73,11 @@ class UserProfileResponse(BaseModel):
     created_at: str | None
     updated_at: str | None
     settings: dict[str, Any] | None = None  # User settings including auto top-up configuration
+    # RBAC (gatewayz-backend unified-identity Phase A, A5) — same fields as
+    # the /auth response, so the frontend doesn't need a second lookup to
+    # know whether the signed-in user is staff.
+    role: str | None = "user"
+    is_admin: bool | None = False
 
 
 class DeleteAccountRequest(BaseModel):

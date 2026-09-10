@@ -508,6 +508,7 @@ def create_app() -> FastAPI:
         ("api_keys", "API Key Management"),
         ("admin", "Admin Operations"),
         ("admin_wayz", "Admin WAYZ Ops"),
+        ("admin_status", "Admin Status"),  # Unified status: jobs + integrations + secrets presence
         (
             "admin_staff",
             "Admin Staff Management",

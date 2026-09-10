@@ -11,11 +11,6 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 
-try:
-    import resend  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - handled in send_email_notification
-    resend = None
-
 import src.config.supabase_config as supabase_config
 from src.services.professional_email_templates import email_templates
 
@@ -31,20 +26,14 @@ class EnhancedNotificationService:
         except Exception as exc:
             logger.warning("Supabase client unavailable during notification service init: %s", exc)
             self.supabase = None
+        # RESEND_API_KEY is read here only for the diagnostic log line in
+        # send_welcome_email() -- actual sending goes through
+        # src.services.email.send_email, which reads its own env var and
+        # holds the one Resend client for the whole backend.
         self.resend_api_key = os.environ.get("RESEND_API_KEY")
         self.from_email = os.environ.get("FROM_EMAIL", "noreply@yourdomain.com")
         self.app_name = os.environ.get("APP_NAME", "AI Gateway")
         self.app_url = os.environ.get("APP_URL", "https://gatewayz.ai")
-
-        # Initialize Resend client if dependency is available
-        self.email_client_available = bool(self.resend_api_key and resend is not None)
-        if self.email_client_available:
-            resend.api_key = self.resend_api_key  # type: ignore[union-attr]
-        elif self.resend_api_key:
-            logger.warning(
-                "RESEND_API_KEY configured but 'resend' package is not installed. "
-                "Email notifications will be disabled."
-            )
 
         # Rate limiting for Resend API (2 requests per second limit)
         # We use 0.6 seconds (600ms) between requests to safely stay under 2/sec
@@ -419,7 +408,8 @@ The {self.app_name} Team
     def send_email_notification(
         self, to_email: str, subject: str, html_content: str, text_content: str = None
     ) -> bool:
-        """Send email notification using Resend SDK (if available)"""
+        """Send email notification via the shared email service
+        (src/services/email.py) -- the one place that talks to Resend."""
         try:
             # Validate email before attempting to send
             if not self._is_valid_email_for_sending(to_email):
@@ -428,7 +418,6 @@ The {self.app_name} Team
 
             logger.info(f"Attempting to send email to: {to_email}")
             logger.info(f"Subject: {subject}")
-            logger.info(f"Email client available: {self.email_client_available}")
             logger.info(f"From email: {self.from_email}")
 
             # Validate email address before attempting to send
@@ -439,38 +428,18 @@ The {self.app_name} Team
                 )
                 return False
 
-            if not self.email_client_available:
-                logger.warning(
-                    "❌ Email client is unavailable (missing dependency or API key). "
-                    "Skipping email notification."
-                )
-                return False
-
-            # Ensure API key is set before each send (in case it changed)
-            resend.api_key = self.resend_api_key  # type: ignore[union-attr]
-
             # Apply rate limiting to respect Resend's 2 requests/second limit
             self._wait_for_rate_limit()
 
-            # Use Resend SDK
-            logger.info("Sending email via Resend SDK...")
-            response = resend.Emails.send(
-                {
-                    "from": self.from_email,
-                    "to": [to_email],
-                    "subject": subject,
-                    "html": html_content,
-                    "text": text_content,
-                }
-            )
+            from src.services.email import send_email
 
-            logger.info(f"Resend response: {response}")
+            result = send_email(to_email, subject, html_content, text=text_content)
 
-            if response.get("id"):
-                logger.info(f"✅ Email sent successfully to {to_email}, ID: {response['id']}")
+            if result.sent:
+                logger.info(f"✅ Email sent successfully to {to_email}, ID: {result.id}")
                 return True
             else:
-                logger.error(f"❌ Failed to send email to {to_email}: {response}")
+                logger.warning(f"❌ Failed to send email to {to_email}: {result.error}")
                 return False
 
         except Exception as e:

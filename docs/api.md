@@ -181,9 +181,17 @@ Authenticate using Privy authentication.
   "email": "user@example.com",
   "api_key": "gw_live_...",
   "credits": 10.0,
-  "subscription_status": "trial"
+  "subscription_status": "trial",
+  "role": "user",
+  "is_admin": false
 }
 ```
+
+`role` (default `"user"`) and `is_admin` (gatewayz-backend unified-identity
+Phase A, A5) let the caller — the admin panel, in particular — know
+immediately whether the signed-in account is staff, without a second
+lookup. Populated for both new and existing accounts; `GET /user/profile`
+returns the same two fields for the same reason.
 
 ### Get User Balance
 
@@ -1419,6 +1427,76 @@ Marketplace — Providers & Nodes" above) power the approve/suspend actions
 on the same admin page, and now also accept `require_admin_or_env_key`
 (previously user-role `require_admin` only) so the admin panel's
 `ADMIN_API_KEY`-authenticated proxy can call them directly.
+
+## Admin — Unified Status
+
+```http
+GET /admin/status
+```
+
+`Depends(require_admin_or_env_key)` — same auth as `GET /admin/wayz/status`.
+Never cached. Generalizes the WAYZ ops page into the admin panel's broader
+operational surface (gatewayz-backend unified-identity design, Phase A):
+scheduled-job health, external integration health, and secret *presence*
+(never values). `GET /admin/wayz/status` keeps working unchanged; this is
+additive, not a replacement.
+
+**Degradation contract:** identical to `GET /admin/wayz/status` — every
+sub-block (`jobs`, `integrations`, `secrets`, and each block inside `wayz`)
+is computed independently and wrapped in its own try/except, collapsing to
+`{"error": "<ExceptionClassName>"}` on failure without affecting any other
+block or the `200` status.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "generated_at": "2026-09-10T18:00:00+00:00",
+    "jobs": { "...": "same shape as GET /admin/wayz/status's jobs block" },
+    "integrations": {
+      "resend": { "status": "degraded", "latency_ms": 210, "detail": "suspended_or_invalid_key" },
+      "privy": { "status": "ok", "latency_ms": 1, "detail": "log" },
+      "fuji_rpc": { "status": "ok", "latency_ms": 340, "detail": "block=12402" },
+      "supabase": { "status": "ok", "latency_ms": 45, "detail": null },
+      "redis": { "status": "ok", "latency_ms": 3, "detail": null },
+      "stripe": { "status": "ok", "latency_ms": null, "detail": "configured" },
+      "sentry": { "status": "not_configured", "latency_ms": null, "detail": null }
+    },
+    "secrets": {
+      "ADMIN_API_KEY": { "present": true, "source": "env" },
+      "SUPABASE_SERVICE_ROLE_KEY": { "present": true, "source": "env" },
+      "RESEND_API_KEY": { "present": true, "source": "env" },
+      "PRIVY_APP_ID": { "present": false, "source": "env" },
+      "PRIVY_VERIFICATION_KEY": { "present": false, "source": "env" },
+      "WAYZ_FAUCET_MINTER_PRIVATE_KEY": { "present": true, "source": "env" },
+      "WAYZ_REWARDS_POOL_PRIVATE_KEY": { "present": false, "source": "env" },
+      "STRIPE_SECRET_KEY": { "present": true, "source": "env" },
+      "SENTRY_DSN": { "present": false, "source": "env" }
+    },
+    "wayz": {
+      "config": { "...": "same as GET /admin/wayz/status's config block" },
+      "staking": { "...": "..." },
+      "faucet": { "...": "..." },
+      "wallets": { "...": "..." },
+      "gpu": { "...": "..." },
+      "pending_approvals": []
+    }
+  }
+}
+```
+
+**`integrations` status values:** `ok`, `degraded` (reachable but impaired
+— e.g. a suspended Resend key), `down` (unreachable or erroring), or
+`not_configured` (no credentials set, not a failure). Checked: `resend`
+(`GET /domains`), `privy` (verification-key parse, no network call),
+`fuji_rpc` (`eth_blockNumber`, only when a WAYZ contract address is
+configured), `supabase` (a cheap `select id limit 1`), `redis` (`PING`),
+`stripe` (presence only — no outbound call), `sentry` (presence only).
+Cached in-process 30s (`src/services/integrations_health.py`).
+
+**`secrets`:** presence-only for a fixed allow-list of env var names —
+never a value, length, or hash. See `docs/security/DATA_ACCESS.md`.
 
 ## Subscription Plans
 
