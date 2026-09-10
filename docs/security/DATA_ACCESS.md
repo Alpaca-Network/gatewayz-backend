@@ -70,6 +70,7 @@ migrations missed:
 | `usage_records` | RLS enabled, table + sequence grants revoked, explicit deny policy (20260903100000) | full access |
 | 15 operational tables (`model_pricing`, `system_config`, `subscription_products`, …) | RLS enabled, grants revoked (20260527000001) | full access |
 | `user_wallets`, `wallet_stakes`, `faucet_claims` | RLS enabled, never granted a policy (default-deny by omission) | full access |
+| `audit_log`, `admin_invites` | RLS enabled, table grants revoked (`audit_log`'s sequence too) (20260911000001) | full access |
 
 `tests/security/test_rls_anon_lockdown.py` verifies the revoked/denied tables
 live, against the real anon key, when `SUPABASE_URL`/`SUPABASE_ANON_KEY` are
@@ -134,6 +135,30 @@ logs an explicit line (`"gpu provider %s approved/suspended via
 ADMIN_API_KEY (no user id)"`) on this path so the acting admin is still
 recoverable from request/access logs around that timestamp, even though
 the DB row itself can't name them.
+
+## Unified admin identity: staff API and audit_log (Phase A)
+
+`docs/superpowers/specs/2026-09-10-unified-admin-identity-design.md` §3
+Phase A adds `role='superadmin'` and two service-role-only tables:
+
+- `audit_log` -- append-only record of admin/superadmin actions (staff
+  changes, GPU approve/suspend, role changes, key revocations), written
+  only by `src/db/audit.py::record_audit`. Readable via `GET /admin/audit`
+  by `admin` or `superadmin`; never exposed to the user it's about.
+- `admin_invites` -- pending staff invitations. Stores a sha256 hash of a
+  32-byte random token (`token_hash`, `UNIQUE`), never the raw token. The
+  raw token is returned exactly once, in the `POST /admin/staff/invite`
+  response (or emailed), and is the sole credential needed to claim the
+  invite via `POST /auth/accept-invite` -- claiming additionally requires
+  the accepting user's verified account email to match `admin_invites.email`.
+
+`src/routes/admin_staff.py` (all `require_superadmin` except
+`GET /admin/staff`, which is `require_admin`) is the only writer of
+`users.role` outside `src/routes/roles.py`'s legacy `/admin/roles/update`.
+Both paths invalidate the in-memory user cache
+(`src/db/users.py::invalidate_user_cache_by_id`) on every role change --
+without that, a just-demoted admin's stale cached user object would keep
+passing `require_admin` for up to the cache's 60s TTL.
 
 ## What's still open
 

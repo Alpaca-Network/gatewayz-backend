@@ -404,6 +404,44 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                     error_message="API key found but data structure invalid",
                     validate_keys=["id", "user_id"],
                 )
+
+                # Revocation must hold here too, not just in
+                # validate_api_key_security -- anything that calls get_user()
+                # directly (bypassing the per-request security-check chain)
+                # would otherwise keep authenticating a deactivated/expired
+                # key for up to _user_cache_ttl seconds. See
+                # docs/superpowers/specs/2026-09-10-unified-admin-identity-design.md
+                # §5 risks: "Backend get_user() ignores is_active".
+                if not key_data.get("is_active", True):
+                    logger.info(
+                        "API key %s is inactive; treating as no user",
+                        sanitize_for_logging(api_key[:10] + "..."),
+                    )
+                    return None
+
+                expiration_date = key_data.get("expiration_date")
+                if expiration_date:
+                    try:
+                        expiration_str = expiration_date
+                        if "Z" in expiration_str:
+                            expiration_str = expiration_str.replace("Z", "+00:00")
+                        elif not expiration_str.endswith("+00:00"):
+                            expiration_str = expiration_str + "+00:00"
+                        expiration = datetime.fromisoformat(expiration_str)
+                        now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                        if expiration < now:
+                            logger.info(
+                                "API key %s has expired; treating as no user",
+                                sanitize_for_logging(api_key[:10] + "..."),
+                            )
+                            return None
+                    except Exception as date_error:
+                        logger.warning(
+                            "Error checking expiration for key %s: %s",
+                            sanitize_for_logging(api_key[:10] + "..."),
+                            sanitize_for_logging(str(date_error)),
+                        )
+
                 user_id = key_data["user_id"]
 
                 # Get user info from users table
@@ -442,6 +480,26 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
             except (DatabaseResultError, KeyError) as e:
                 logger.error(f"Error extracting legacy user data: {e}")
                 return None
+
+            # Same revocation gap as the api_keys_new branch above, for the
+            # legacy users.api_key column: a deactivated user must not keep
+            # authenticating via their legacy key. revoke_user_keys
+            # (src/db/staff.py) clears both api_keys_new.is_active AND
+            # users.api_key for exactly this reason -- but is_active is
+            # checked here too, defense in depth, for any row deactivated by
+            # another path.
+            if not user.get("is_active", True):
+                logger.info(
+                    "Legacy API key %s belongs to an inactive user; treating as no user",
+                    sanitize_for_logging(api_key[:10] + "..."),
+                )
+                return None
+
+            logger.info(
+                "Legacy users.api_key column used for user %s (key %s...)",
+                user.get("id"),
+                sanitize_for_logging(api_key[:10]),
+            )
 
             # Check if this is a temporary key that should be replaced
             if _is_temporary_api_key(api_key):
@@ -590,6 +648,31 @@ def get_user_by_email(email: str) -> dict[str, Any] | None:
 
     except Exception as e:
         logger.error("Error getting user by email: %s", sanitize_for_logging(str(e)))
+        return None
+
+
+def get_user_by_email_ci(email: str) -> dict[str, Any] | None:
+    """Get user by email, case-insensitively.
+
+    get_user_by_email does an exact match, which misses a stored email that
+    differs only in case from the one a caller normalizes to lowercase
+    (e.g. a user who signed up as "Admin@Example.com" being looked up as
+    "admin@example.com" -- src/routes/admin_staff.py's invite flow, which
+    must find an existing account regardless of how its email was cased at
+    signup rather than silently creating a duplicate invite).
+    """
+    try:
+        client = get_supabase_client()
+
+        result = client.table("users").select("*").ilike("email", email).execute()
+
+        if result.data:
+            return result.data[0]
+
+        return None
+
+    except Exception as e:
+        logger.error("Error getting user by email (ci): %s", sanitize_for_logging(str(e)))
         return None
 
 

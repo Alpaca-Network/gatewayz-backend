@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from src.db.audit import record_audit
 from src.db.roles import (
     UserRole,
     get_role_audit_log,
@@ -96,6 +97,15 @@ async def update_role(request: UpdateRoleRequest, http_request: Request):
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update role")
+
+        record_audit(
+            admin_user,
+            action="role.updated",
+            target_type="user",
+            target_id=request.user_id,
+            request=http_request,
+            metadata={"new_role": request.new_role, "reason": request.reason},
+        )
 
         return {
             "success": True,
