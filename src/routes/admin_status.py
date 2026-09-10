@@ -16,7 +16,6 @@ takes the rest of the page down. Never cached -- ops pages need live data.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -34,37 +33,26 @@ from src.routes.admin_wayz import (
 )
 from src.security.deps import require_admin_or_env_key
 from src.services.integrations_health import check_all
+from src.services.secrets_registry import SECRET_NAMES, secret_ages
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Fixed allow-list of secret env vars to report presence for. Never add a
-# name here without also confirming _build_secrets_block below can only
-# ever report {present, source} for it -- never its value or length.
-_SECRET_ALLOWLIST: list[str] = [
-    "ADMIN_API_KEY",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "RESEND_API_KEY",
-    "PRIVY_APP_ID",
-    "PRIVY_VERIFICATION_KEY",
-    "WAYZ_FAUCET_MINTER_PRIVATE_KEY",
-    "WAYZ_REWARDS_POOL_PRIVATE_KEY",
-    "STRIPE_SECRET_KEY",
-    "SENTRY_DSN",
-]
-
 
 def _build_secrets_block() -> dict[str, Any]:
-    """{name: {present, source}} for the fixed allow-list above.
+    """{name: {present, source, first_seen_at, age_days, rotate_due,
+    fingerprint_known}} for the fixed allow-list in
+    src/services/secrets_registry.py (SECRET_NAMES).
 
-    Deliberately reports only a boolean -- never the value, never its
-    length, never a hash. Anything more specific than "is it set" is a
-    stronger leak than this block exists to prevent.
+    Deliberately reports only presence, a fixed source label, and a
+    fingerprint-derived age -- never the value, never its length, never the
+    fingerprint itself. Anything more specific than "is it set, and how long
+    has it looked the same" is a stronger leak than this block exists to
+    prevent (see secrets_registry.secret_ages()).
     """
-    return {
-        name: {"present": bool(os.environ.get(name)), "source": "env"} for name in _SECRET_ALLOWLIST
-    }
+    ages = secret_ages()
+    return {name: {"source": "env", **ages[name]} for name in SECRET_NAMES}
 
 
 def _build_wayz_block(jobs_block: dict[str, Any]) -> dict[str, Any]:

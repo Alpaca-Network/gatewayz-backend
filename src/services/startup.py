@@ -855,6 +855,19 @@ async def lifespan(app):
     except Exception:
         pass
 
+    # Record secret fingerprints for rotation-age tracking (Phase D, D1).
+    # GET /admin/status.secrets reads these back via secret_ages() -- see
+    # src/services/secrets_registry.py. Never fails startup: a missing/down
+    # Redis just means ages fall back to the in-process store for this
+    # process's lifetime.
+    try:
+        from src.services.secrets_registry import record_secret_fingerprints
+
+        record_secret_fingerprints()
+        logger.info("  [OK] Secret fingerprints recorded (rotation-age tracking)")
+    except Exception as e:
+        logger.warning(f"Secret fingerprint recording warning (non-fatal): {e}")
+
     # Set default admin user in background (non-blocking)
     async def _setup_admin_user_background():
         try:

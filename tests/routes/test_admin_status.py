@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 import src.routes.admin_status as admin_status
 import src.services.integrations_health as integrations_health
+import src.services.secrets_registry as secrets_registry
 from src.main import app
 from src.security.deps import require_admin_or_env_key
 
@@ -40,6 +41,12 @@ def _reset_integrations_cache():
     into another's assertions via a stale cache entry."""
     integrations_health._cache = None
     integrations_health._cache_computed_at = 0.0
+
+
+def _reset_secrets_registry_fallback():
+    """secrets_registry's in-process fallback store is module-level state,
+    shared across tests in this file same as integrations_health's cache."""
+    secrets_registry._fallback_store.clear()
 
 
 def _override_admin():
@@ -75,10 +82,12 @@ class TestResponseShape:
     def setup_method(self, _method):
         _override_admin()
         _reset_integrations_cache()
+        _reset_secrets_registry_fallback()
 
     def teardown_method(self, _method):
         _clear_override()
         _reset_integrations_cache()
+        _reset_secrets_registry_fallback()
 
     def test_envelope_and_top_level_keys(self):
         response = client.get("/admin/status")
@@ -123,36 +132,38 @@ class TestResponseShape:
     def test_secrets_block_lists_the_fixed_allowlist(self):
         response = client.get("/admin/status")
         secrets = response.json()["data"]["secrets"]
-        for name in (
-            "ADMIN_API_KEY",
-            "SUPABASE_SERVICE_ROLE_KEY",
-            "RESEND_API_KEY",
-            "PRIVY_APP_ID",
-            "PRIVY_VERIFICATION_KEY",
-            "WAYZ_FAUCET_MINTER_PRIVATE_KEY",
-            "WAYZ_REWARDS_POOL_PRIVATE_KEY",
-            "STRIPE_SECRET_KEY",
-            "SENTRY_DSN",
-        ):
+        for name in secrets_registry.SECRET_NAMES:
             assert name in secrets
-            assert set(secrets[name].keys()) == {"present", "source"}
+            assert set(secrets[name].keys()) == {
+                "present",
+                "source",
+                "first_seen_at",
+                "age_days",
+                "rotate_due",
+                "fingerprint_known",
+            }
             assert secrets[name]["source"] == "env"
             assert isinstance(secrets[name]["present"], bool)
+            assert isinstance(secrets[name]["rotate_due"], bool)
+            assert isinstance(secrets[name]["fingerprint_known"], bool)
 
 
 class TestSecretsNeverLeakValues:
     def setup_method(self, _method):
         _override_admin()
         _reset_integrations_cache()
+        _reset_secrets_registry_fallback()
 
     def teardown_method(self, _method):
         _clear_override()
         _reset_integrations_cache()
+        _reset_secrets_registry_fallback()
 
     def test_no_secret_value_appears_anywhere_in_response_body(self, monkeypatch):
         fake_values = {
             "ADMIN_API_KEY": "super-secret-admin-value-zzz1",
             "SUPABASE_SERVICE_ROLE_KEY": "super-secret-service-role-zzz2",
+            "SUPABASE_KEY": "super-secret-supabase-key-zzz10",
             "RESEND_API_KEY": "super-secret-resend-zzz3",
             "PRIVY_APP_ID": "super-secret-privy-app-zzz4",
             "PRIVY_VERIFICATION_KEY": "super-secret-privy-key-zzz5",
@@ -160,9 +171,15 @@ class TestSecretsNeverLeakValues:
             "WAYZ_REWARDS_POOL_PRIVATE_KEY": "super-secret-rewards-zzz7",
             "STRIPE_SECRET_KEY": "super-secret-stripe-zzz8",
             "SENTRY_DSN": "super-secret-sentry-zzz9",
+            "GATEWAYZ_AUTH_BRIDGE_SECRET": "super-secret-bridge-zzz11",
         }
         for name, value in fake_values.items():
             monkeypatch.setenv(name, value)
+
+        # Actually record fingerprints for these fake values (falls back to
+        # the in-process store -- no Redis in this test env) so the
+        # assertions below exercise a real fingerprint, not an absent one.
+        secrets_registry.record_secret_fingerprints()
 
         # RESEND_API_KEY being present makes _check_resend call out to
         # Resend for real -- mock that call rather than hitting the live
@@ -175,19 +192,27 @@ class TestSecretsNeverLeakValues:
         for value in fake_values.values():
             assert value not in body_text
 
+        # Never leaks the fingerprint either -- only presence/age may appear.
+        for value in fake_values.values():
+            assert secrets_registry.fingerprint(value) not in body_text
+
         secrets = response.json()["data"]["secrets"]
         for name in fake_values:
             assert secrets[name]["present"] is True
+            assert "fp" not in secrets[name]
+            assert "fingerprint" not in secrets[name]
 
 
 class TestSubBlockDegradation:
     def setup_method(self, _method):
         _override_admin()
         _reset_integrations_cache()
+        _reset_secrets_registry_fallback()
 
     def teardown_method(self, _method):
         _clear_override()
         _reset_integrations_cache()
+        _reset_secrets_registry_fallback()
 
     def test_jobs_block_degrades_independently_and_never_500s(self):
         with patch("src.routes.admin_wayz.get_job_runs", side_effect=RuntimeError("boom")):
