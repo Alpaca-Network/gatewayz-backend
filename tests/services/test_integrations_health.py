@@ -269,3 +269,44 @@ class TestCheckAllCaching:
         assert result["privy"]["status"] == "down"
         assert result["privy"]["detail"] == "RuntimeError"
         assert "resend" in result
+
+    def test_cache_recomputes_once_ttl_elapses(self, monkeypatch):
+        """Fake the clock rather than sleeping 30s: a check_all() call after
+        the TTL has elapsed must recompute, not keep serving the stale
+        result forever. A single mutable "now" (not a short list of values)
+        so every internal time.monotonic() call within one check_all() --
+        not just check_all()'s own -- sees a consistent, controlled clock."""
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+
+        class _FakeClock:
+            def __init__(self, t):
+                self.t = t
+
+            def __call__(self):
+                return self.t
+
+        clock = _FakeClock(1000.0)
+
+        with (
+            patch.object(integrations_health.time, "monotonic", side_effect=clock),
+            patch.object(integrations_health.Config, "PRIVY_APP_ID", None),
+            patch.object(integrations_health.Config, "WAYZ_STAKING_CONTRACT_ADDRESS", None),
+            patch.object(integrations_health.Config, "SUPABASE_URL", None),
+            patch.object(integrations_health.Config, "REDIS_ENABLED", False),
+            patch.object(integrations_health.Config, "SENTRY_DSN", None),
+            patch.object(integrations_health, "_check_privy") as mock_privy,
+        ):
+            mock_privy.return_value = {
+                "status": "not_configured",
+                "latency_ms": None,
+                "detail": None,
+            }
+
+            check_all()  # t=1000: cache miss, computes and stores at 1000
+            clock.t = 1005.0
+            check_all()  # 5s elapsed, still within the 30s TTL -- cached
+            assert mock_privy.call_count == 1
+
+            clock.t = 1035.0
+            check_all()  # 35s elapsed since 1000 -- TTL expired, recomputes
+            assert mock_privy.call_count == 2

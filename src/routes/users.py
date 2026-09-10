@@ -14,6 +14,7 @@ from src.schemas import (
     UserProfileUpdate,
 )
 from src.security.deps import get_api_key
+from src.security.roles import resolve_role_fields
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.utils.security_validators import sanitize_for_logging
 
@@ -256,12 +257,11 @@ async def get_user_profile_endpoint(api_key: str = Depends(get_api_key)):
 
         # RBAC (gatewayz-backend unified-identity Phase A, A5): get_user_profile()
         # doesn't carry role/is_admin, but the `user` row fetched above does —
-        # same fields, same fallback, as the /auth response (src/routes/auth.py
-        # _resolve_role_fields).
-        if "role" not in profile:
-            profile["role"] = user.get("role") or "user"
-        if "is_admin" not in profile:
-            profile["is_admin"] = bool(user.get("is_admin", False)) or profile["role"] == "admin"
+        # same shared resolver as the /auth response (src.security.roles).
+        if "role" not in profile or "is_admin" not in profile:
+            role, is_admin = resolve_role_fields(user)
+            profile.setdefault("role", role)
+            profile.setdefault("is_admin", is_admin)
 
         return profile
 

@@ -8,50 +8,12 @@ from fastapi.testclient import TestClient
 
 import src.routes.auth as auth_module
 from src.main import app
-from src.routes.auth import _resolve_role_fields
 from src.schemas import AuthMethod, PrivyAuthRequest, PrivyUserData
 
 client = TestClient(app)
 
-
-class TestResolveRoleFields:
-    """Unit tests for the shared (role, is_admin) resolver -- mirrors the
-    is_admin check in src.security.deps.require_admin so the two never
-    disagree."""
-
-    def test_plain_user_defaults(self):
-        role, is_admin = _resolve_role_fields({"id": 1})
-        assert role == "user"
-        assert is_admin is False
-
-    def test_explicit_user_role(self):
-        role, is_admin = _resolve_role_fields({"role": "user"})
-        assert role == "user"
-        assert is_admin is False
-
-    def test_admin_role_implies_is_admin(self):
-        role, is_admin = _resolve_role_fields({"role": "admin"})
-        assert role == "admin"
-        assert is_admin is True
-
-    def test_superadmin_role_is_not_auto_admin_flagged(self):
-        # is_admin only follows role == "admin" explicitly -- superadmin
-        # rows still need their own is_admin flag or role check downstream;
-        # this resolver doesn't invent truthiness for roles it doesn't know.
-        role, is_admin = _resolve_role_fields({"role": "superadmin"})
-        assert role == "superadmin"
-        assert is_admin is False
-
-    def test_is_admin_flag_true_with_user_role(self):
-        # Legacy rows may carry is_admin=True without role having caught up.
-        role, is_admin = _resolve_role_fields({"role": "user", "is_admin": True})
-        assert role == "user"
-        assert is_admin is True
-
-    def test_empty_or_none_role_defaults_to_user(self):
-        role, is_admin = _resolve_role_fields({"role": None})
-        assert role == "user"
-        assert is_admin is False
+# Unit tests for the shared (role, is_admin) resolver itself live in
+# tests/security/test_roles.py -- this file exercises it through the routes.
 
 
 class TestAuthResponseIncludesRoleForExistingUser:
@@ -133,6 +95,25 @@ class TestAuthResponseIncludesRoleForExistingUser:
             )
         assert response.role == "user"
         assert response.is_admin is False
+
+    def test_superadmin_role_surfaces_as_admin(self):
+        # Regression: require_admin (#2307) accepts role in
+        # ("admin", "superadmin") -- the /auth response must agree.
+        existing_user = self._existing_user(role="superadmin")
+        with patch(
+            "src.routes.auth.supabase_config.get_supabase_client",
+            return_value=self._mock_supabase_client(),
+        ):
+            response = auth_module._handle_existing_user(
+                existing_user=existing_user,
+                request=self._request(),
+                background_tasks=BackgroundTasks(),
+                auth_method=AuthMethod.EMAIL,
+                display_name=None,
+                email="existing@example.com",
+            )
+        assert response.role == "superadmin"
+        assert response.is_admin is True
 
 
 class TestUserProfileIncludesRole:

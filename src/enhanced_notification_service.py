@@ -11,11 +11,6 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 
-try:
-    import resend  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - handled in send_email_notification
-    resend = None
-
 import src.config.supabase_config as supabase_config
 from src.services.professional_email_templates import email_templates
 
@@ -31,20 +26,14 @@ class EnhancedNotificationService:
         except Exception as exc:
             logger.warning("Supabase client unavailable during notification service init: %s", exc)
             self.supabase = None
+        # RESEND_API_KEY is read here only for the diagnostic log line in
+        # send_welcome_email() -- actual sending goes through
+        # src.services.email.send_email, which reads its own env var and
+        # holds the one Resend client for the whole backend.
         self.resend_api_key = os.environ.get("RESEND_API_KEY")
         self.from_email = os.environ.get("FROM_EMAIL", "noreply@yourdomain.com")
         self.app_name = os.environ.get("APP_NAME", "AI Gateway")
         self.app_url = os.environ.get("APP_URL", "https://gatewayz.ai")
-
-        # Initialize Resend client if dependency is available
-        self.email_client_available = bool(self.resend_api_key and resend is not None)
-        if self.email_client_available:
-            resend.api_key = self.resend_api_key  # type: ignore[union-attr]
-        elif self.resend_api_key:
-            logger.warning(
-                "RESEND_API_KEY configured but 'resend' package is not installed. "
-                "Email notifications will be disabled."
-            )
 
         # Rate limiting for Resend API (2 requests per second limit)
         # We use 0.6 seconds (600ms) between requests to safely stay under 2/sec

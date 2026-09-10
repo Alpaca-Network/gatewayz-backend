@@ -28,6 +28,7 @@ from src.security.privy_token import (
     privy_verification_mode,
     verify_privy_access_token,
 )
+from src.security.roles import resolve_role_fields
 from src.services.auth_cache import (
     cache_user_by_privy_id,
     cache_user_by_username,
@@ -93,20 +94,6 @@ def _get_tier_display_name(tier: str | None) -> str | None:
     """Return a user-friendly display name for a subscription tier."""
     tier_display_map = {"basic": "Basic", "pro": "Pro", "max": "MAX"}
     return tier_display_map.get(tier) if tier else None
-
-
-def _resolve_role_fields(user: dict[str, Any]) -> tuple[str, bool]:
-    """Resolve (role, is_admin) for the /auth response (gatewayz-backend
-    unified-identity Phase A, A5).
-
-    Mirrors the exact is_admin check in src.security.deps.require_admin so
-    the admin panel's client-side gate and the backend's own admin check
-    never disagree. Defaults to ("user", False) for a row that has no role
-    yet (a brand-new account, or one created before the role migration).
-    """
-    role = user.get("role") or "user"
-    is_admin = bool(user.get("is_admin", False)) or role == "admin"
-    return role, is_admin
 
 
 async def _get_subscription_status_for_email(email: str) -> tuple[str, bool]:
@@ -493,7 +480,7 @@ def _handle_existing_user(
 
     _ingest_privy_wallets(existing_user["id"], request.user.linked_accounts, token_verified)
 
-    role, is_admin = _resolve_role_fields(existing_user)
+    role, is_admin = resolve_role_fields(existing_user)
 
     return PrivyAuthResponse(
         success=True,
@@ -1427,7 +1414,7 @@ async def privy_auth(
                     detail="Account created but API key generation failed. Please try again or contact support.",
                 )
 
-            role, is_admin = _resolve_role_fields(user_data)
+            role, is_admin = resolve_role_fields(user_data)
 
             return PrivyAuthResponse(
                 success=True,
