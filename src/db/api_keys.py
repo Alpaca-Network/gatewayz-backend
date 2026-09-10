@@ -465,6 +465,9 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
 
 def delete_api_key(api_key: str, user_id: int) -> bool:
     """Delete an API key for a user"""
+    # Lazy import to avoid circular dependency (src.db.users imports this module)
+    from src.db.users import invalidate_user_cache
+
     try:
         client = get_supabase_client()
 
@@ -523,6 +526,11 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
                 )
             else:
                 logger.debug("api_key_audit_logs table not found - skipping audit log")
+
+        # A deleted key must stop authenticating immediately, not up to
+        # _user_cache_ttl seconds later -- see the is_active revocation fix
+        # in _get_user_uncached/get_user (src/db/users.py).
+        invalidate_user_cache(api_key)
 
         return True
 
@@ -817,6 +825,9 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
 
 def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
     """Update an API key's details"""
+    # Lazy import to avoid circular dependency (src.db.users imports this module)
+    from src.db.users import invalidate_user_cache
+
     try:
         client = get_supabase_client()
 
@@ -931,6 +942,12 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
                 )
             else:
                 logger.debug("api_key_audit_logs table not found - skipping audit log")
+
+        # is_active flips (deactivation, or reactivation) must be reflected
+        # immediately, not up to _user_cache_ttl seconds later -- same
+        # revocation-must-be-real fix as delete_api_key.
+        if "is_active" in update_data:
+            invalidate_user_cache(api_key)
 
         return True
 

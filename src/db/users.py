@@ -404,6 +404,44 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                     error_message="API key found but data structure invalid",
                     validate_keys=["id", "user_id"],
                 )
+
+                # Revocation must hold here too, not just in
+                # validate_api_key_security -- anything that calls get_user()
+                # directly (bypassing the per-request security-check chain)
+                # would otherwise keep authenticating a deactivated/expired
+                # key for up to _user_cache_ttl seconds. See
+                # docs/superpowers/specs/2026-09-10-unified-admin-identity-design.md
+                # §5 risks: "Backend get_user() ignores is_active".
+                if not key_data.get("is_active", True):
+                    logger.info(
+                        "API key %s is inactive; treating as no user",
+                        sanitize_for_logging(api_key[:10] + "..."),
+                    )
+                    return None
+
+                expiration_date = key_data.get("expiration_date")
+                if expiration_date:
+                    try:
+                        expiration_str = expiration_date
+                        if "Z" in expiration_str:
+                            expiration_str = expiration_str.replace("Z", "+00:00")
+                        elif not expiration_str.endswith("+00:00"):
+                            expiration_str = expiration_str + "+00:00"
+                        expiration = datetime.fromisoformat(expiration_str)
+                        now = datetime.now(UTC).replace(tzinfo=expiration.tzinfo)
+                        if expiration < now:
+                            logger.info(
+                                "API key %s has expired; treating as no user",
+                                sanitize_for_logging(api_key[:10] + "..."),
+                            )
+                            return None
+                    except Exception as date_error:
+                        logger.warning(
+                            "Error checking expiration for key %s: %s",
+                            sanitize_for_logging(api_key[:10] + "..."),
+                            sanitize_for_logging(str(date_error)),
+                        )
+
                 user_id = key_data["user_id"]
 
                 # Get user info from users table
