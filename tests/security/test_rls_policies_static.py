@@ -79,6 +79,13 @@ TARGET_TABLES = frozenset(
         # Sliding-scale payout tiers (PR #2295 review round 1, Important #3)
         # -- same service-role-only, no-policy posture as the rest of M4.
         "provider_payout_tiers",
+        # Unified admin identity (Phase A,
+        # docs/superpowers/specs/2026-09-10-unified-admin-identity-design.md)
+        # -- audit_log and admin_invites are service-role-only with an
+        # explicit REVOKE ALL from anon/authenticated (belt and suspenders
+        # on top of RLS), added in 20260911000001_audit_log_and_staff.sql.
+        "audit_log",
+        "admin_invites",
     }
 )
 

@@ -2195,6 +2195,116 @@ Authorization: Bearer admin_api_key_here
 }
 ```
 
+## Staff Management (Admin/Superadmin)
+
+Phase A of the unified admin identity design
+(`docs/superpowers/specs/2026-09-10-unified-admin-identity-design.md`).
+"Staff" is a `users` row with `role` in `admin`/`superadmin` -- there is no
+separate staff account system. All routes below except `GET /admin/staff`
+require `role=superadmin`.
+
+### List Staff
+
+```http
+GET /admin/staff
+```
+
+Requires `role` in (`admin`, `superadmin`).
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "staff": [
+      {
+        "id": 42,
+        "email": "root@example.com",
+        "username": "root",
+        "role": "superadmin",
+        "is_active": true,
+        "last_login": "2026-09-01T00:00:00Z",
+        "created_at": "2026-01-01T00:00:00Z",
+        "has_privy_link": true
+      }
+    ]
+  }
+}
+```
+
+### Invite Staff
+
+```http
+POST /admin/staff/invite
+```
+
+Requires `role=superadmin`. If a `users` row already exists for `email`,
+its role is set directly (`invited: false`). Otherwise a 72-hour invite is
+created and emailed via Resend; if the email service isn't available the
+response includes `invite_link` instead so the caller can relay it manually.
+
+**Request Body:**
+```json
+{ "email": "new-staff@example.com", "role": "admin" }
+```
+
+**Response (existing account):**
+```json
+{ "success": true, "data": { "user": { "id": 9, "role": "admin" }, "invited": false } }
+```
+
+**Response (new invite, email not sent):**
+```json
+{
+  "success": true,
+  "data": {
+    "invite": { "id": "...", "email": "new-staff@example.com", "role": "admin", "expires_at": "..." },
+    "invite_link": "https://beta.gatewayz.ai/admin/accept-invite?token=..."
+  }
+}
+```
+
+### Update Staff Role
+
+```http
+PATCH /admin/staff/{user_id}
+```
+
+Requires `role=superadmin`. Body: `{ "role": "admin" | "superadmin" }`.
+Rejected with `409` (`cannot_change_own_role`) if `user_id` is the caller's
+own id, or (`last_superadmin`) if it would demote the last active superadmin.
+
+### Remove Staff
+
+```http
+DELETE /admin/staff/{user_id}
+```
+
+Requires `role=superadmin`. Sets the user's role back to `user` (does not
+delete the account). Same guards as Update Staff Role.
+
+### Revoke Staff API Keys
+
+```http
+POST /admin/staff/{user_id}/revoke-keys
+```
+
+Requires `role=superadmin`. Deactivates every active API key for the user.
+
+### Accept Staff Invite
+
+```http
+POST /auth/accept-invite
+```
+
+Requires a valid Gatewayz session (any authenticated user). The caller's
+verified account email must match the invite's email.
+
+**Request Body:**
+```json
+{ "token": "the-raw-invite-token" }
+```
+
 ## Activity Tracking
 
 ### Log Activity
@@ -2513,6 +2623,53 @@ Authorization: Bearer admin_api_key_here
 ```
 
 ---
+
+## Unified Admin Audit Log (Admin/Superadmin)
+
+Not to be confused with the per-key "Audit Logs (Admin)" section above
+(`GET /admin/audit-logs`, a user's own API key activity). This is
+`audit_log` -- the internal, append-only record of privileged actions
+(staff changes, GPU provider approve/suspend, role changes, key
+revocations), written by `src/db/audit.py::record_audit` and never exposed
+to the user it's about.
+
+### Get Admin Audit Log
+
+```http
+GET /admin/audit
+```
+
+Requires `role` in (`admin`, `superadmin`).
+
+**Query Parameters:**
+- `limit` (optional): max rows, 1-500 (default: 100)
+- `action` (optional): exact-match filter, e.g. `staff.role_changed`
+- `actor_user_id` (optional): filter to one actor
+- `before` (optional): ISO timestamp cursor -- only entries created strictly before it
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "entries": [
+      {
+        "id": 1,
+        "actor_user_id": 1,
+        "actor_email": "root@example.com",
+        "actor_auth": "api_key",
+        "action": "staff.role_changed",
+        "target_type": "user",
+        "target_id": "9",
+        "ip": "203.0.113.5",
+        "user_agent": "curl/8.0",
+        "metadata": { "previous_role": "user", "new_role": "admin" },
+        "created_at": "2026-09-11T00:00:00Z"
+      }
+    ]
+  }
+}
+```
 
 ## Best Practices
 

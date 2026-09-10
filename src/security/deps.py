@@ -272,9 +272,15 @@ async def get_current_user(api_key: str = Depends(get_api_key)) -> dict[str, Any
     return user
 
 
+# Roles that satisfy an admin-gated endpoint. 'superadmin' is a strict
+# superset of 'admin' -- see docs/superpowers/specs/2026-09-10-unified-admin-identity-design.md
+# §3 Phase A1.
+_ADMIN_ROLES = ("admin", "superadmin")
+
+
 async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     """
-    Require admin role
+    Require admin role (admin OR superadmin)
 
     Args:
         user: Current user
@@ -285,7 +291,7 @@ async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dic
     Raises:
         HTTPException: 403 if not admin
     """
-    is_admin = user.get("is_admin", False) or user.get("role") == "admin"
+    is_admin = user.get("is_admin", False) or user.get("role") in _ADMIN_ROLES
 
     if not is_admin:
         audit_logger.log_security_violation(
@@ -294,6 +300,35 @@ async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dic
             details="Non-admin attempted admin endpoint",
         )
         raise HTTPException(status_code=403, detail="Administrator privileges required")
+
+    return user
+
+
+async def require_superadmin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    """
+    Require superadmin role specifically (not satisfied by plain admin).
+
+    Used for the most sensitive operations: staff management (granting/
+    revoking admin access) and other actions where "an admin" isn't enough
+    authority -- see docs/superpowers/specs/2026-09-10-unified-admin-identity-design.md
+    §3 Phase A2.
+
+    Args:
+        user: Current user
+
+    Returns:
+        User dictionary if superadmin
+
+    Raises:
+        HTTPException: 403 if not superadmin
+    """
+    if user.get("role") != "superadmin":
+        audit_logger.log_security_violation(
+            violation_type="UNAUTHORIZED_SUPERADMIN_ACCESS",
+            user_id=user.get("id"),
+            details="Non-superadmin attempted superadmin endpoint",
+        )
+        raise HTTPException(status_code=403, detail="Superadmin privileges required")
 
     return user
 
@@ -324,7 +359,7 @@ async def require_admin_or_env_key(
     try:
         api_key = await get_api_key(credentials)
         user = await get_current_user(api_key)
-        is_admin = user.get("is_admin", False) or user.get("role") == "admin"
+        is_admin = user.get("is_admin", False) or user.get("role") in _ADMIN_ROLES
         if not is_admin:
             raise HTTPException(status_code=403, detail="Administrator privileges required")
         return user
