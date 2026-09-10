@@ -50,7 +50,6 @@ class ModelResolution:
 _index_lock = threading.RLock()
 _exact: set[str] | None = None
 _by_suffix: dict[str, tuple[str, ...]] | None = None
-_by_undated: dict[str, tuple[str, ...]] | None = None
 _aliases: dict[str, str] | None = None
 
 
@@ -69,34 +68,31 @@ def _load_alias_map() -> dict[str, str]:
 
 
 def _build_index() -> None:
-    global _exact, _by_suffix, _by_undated, _aliases
+    global _exact, _by_suffix, _aliases
     ids = _load_catalog_ids()
     exact: set[str] = set()
     suffix: dict[str, list[str]] = {}
-    undated: dict[str, list[str]] = {}
     for mid in ids:
         low = mid.lower()
         exact.add(low)
         bare = low.rsplit("/", 1)[-1]
         if bare != low:
             suffix.setdefault(bare, []).append(mid)
-        m = _DATE_SUFFIX.match(low)
-        if m:
-            base = m.group(1)
-            undated.setdefault(base, []).append(mid)
-            bare_base = base.rsplit("/", 1)[-1]
-            if bare_base != base:
-                undated.setdefault(bare_base, []).append(mid)
     _exact = exact
     _by_suffix = {k: tuple(sorted(v)) for k, v in suffix.items()}
-    _by_undated = {k: tuple(sorted(v)) for k, v in undated.items()}
     _aliases = _load_alias_map()
+    logger.info(
+        "[MODEL_RESOLVE] index built: %d ids, %d bare suffixes, %d curated aliases",
+        len(_exact),
+        len(_by_suffix),
+        len(_aliases),
+    )
 
 
 def _ensure_index() -> None:
-    if _exact is None or _by_suffix is None or _by_undated is None or _aliases is None:
+    if _exact is None or _by_suffix is None or _aliases is None:
         with _index_lock:
-            if _exact is None or _by_suffix is None or _by_undated is None or _aliases is None:
+            if _exact is None or _by_suffix is None or _aliases is None:
                 _build_index()
 
 
@@ -113,12 +109,30 @@ def index_is_empty() -> bool:
 
 def invalidate_resolution_index() -> None:
     """Drop the index; rebuilt lazily on the next resolve. Call on catalog sync."""
-    global _exact, _by_suffix, _by_undated, _aliases
+    global _exact, _by_suffix, _aliases
     with _index_lock:
         _exact = None
         _by_suffix = None
-        _by_undated = None
         _aliases = None
+
+
+def _undated_snapshots(low: str, exact: set[str]) -> tuple[str, ...]:
+    """Catalog ids that `low` denotes as an undated vendor alias.
+
+    Derived from the exact-id set on each call rather than kept as a parallel
+    index. The catalog is a few dozen ids, so the scan is free, and a derived
+    answer cannot drift out of step with the set it is derived from — which a
+    second index built in the same loop demonstrably can.
+    """
+    out = []
+    for mid in exact:
+        m = _DATE_SUFFIX.match(mid)
+        if not m:
+            continue
+        base = m.group(1)
+        if base == low or base.rsplit("/", 1)[-1] == low:
+            out.append(mid)
+    return tuple(sorted(out))
 
 
 def resolve_catalog_model_id(model_id: str) -> ModelResolution:
@@ -137,7 +151,6 @@ def resolve_catalog_model_id(model_id: str) -> ModelResolution:
     _ensure_index()
     exact = _exact or set()
     by_suffix = _by_suffix or {}
-    by_undated = _by_undated or {}
     aliases = _aliases or {}
 
     if low in exact:
@@ -159,7 +172,7 @@ def resolve_catalog_model_id(model_id: str) -> ModelResolution:
     # curated alias and a unique suffix all win first. Still fails closed:
     # two snapshots is a refusal, because picking "the newest" would move a
     # caller between models on a catalog sync without them asking.
-    dated = by_undated.get(low, ())
+    dated = _undated_snapshots(low, exact)
     if len(dated) == 1:
         logger.info("[MODEL_RESOLVE] '%s' -> '%s' (undated alias)", raw, dated[0])
         return _finish(dated[0], "undated")
