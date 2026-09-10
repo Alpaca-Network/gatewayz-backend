@@ -76,7 +76,7 @@ class TestInviteStaff:
         existing = {"id": 9, "email": "existing@x.com", "role": "user"}
         updated = {"id": 9, "email": "existing@x.com", "role": "admin"}
         with (
-            patch("src.routes.admin_staff.get_user_by_email", return_value=existing),
+            patch("src.routes.admin_staff.get_user_by_email_ci", return_value=existing),
             patch("src.routes.admin_staff.set_role", return_value=updated) as mock_set_role,
             patch("src.routes.admin_staff.record_audit") as mock_audit,
         ):
@@ -98,7 +98,7 @@ class TestInviteStaff:
             "expires_at": "2026-09-14T00:00:00Z",
         }
         with (
-            patch("src.routes.admin_staff.get_user_by_email", return_value=None),
+            patch("src.routes.admin_staff.get_user_by_email_ci", return_value=None),
             patch(
                 "src.routes.admin_staff.create_invite",
                 return_value=(invite_row, "raw-token-value"),

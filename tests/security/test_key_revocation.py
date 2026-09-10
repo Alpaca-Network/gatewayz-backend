@@ -108,6 +108,21 @@ class TestGetUserUncachedHonoursIsActive:
             user = users_mod._get_user_uncached("gw_live_test")
         assert user is not None
 
+    def test_legacy_fallback_honours_is_active(self):
+        """The legacy users.api_key column is a second, independent
+        authentication path -- an inactive user must not authenticate
+        through it either, even when api_keys_new has no matching row."""
+        client = _mock_client_for(key_row=None, user_row={**_user_row(), "is_active": False})
+        with patch("src.db.users.get_supabase_client", return_value=client):
+            user = users_mod._get_user_uncached("gw_legacy_test")
+        assert user is None
+
+    def test_legacy_fallback_allows_active_user(self):
+        client = _mock_client_for(key_row=None, user_row={**_user_row(), "is_active": True})
+        with patch("src.db.users.get_supabase_client", return_value=client):
+            user = users_mod._get_user_uncached("gw_legacy_test")
+        assert user is not None
+
 
 class TestGetUserCachesOnlyLiveResults:
     def test_get_user_does_not_cache_a_revoked_key(self):

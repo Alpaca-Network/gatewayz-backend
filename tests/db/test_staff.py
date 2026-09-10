@@ -40,12 +40,23 @@ class TestListStaff:
 class TestCountActiveSuperadmins:
     def test_returns_count(self):
         client = MagicMock()
-        query = client.table.return_value.select.return_value.eq.return_value.eq.return_value
+        query = client.table.return_value.select.return_value.eq.return_value.or_.return_value
         query.execute.return_value.count = 2
         query.execute.return_value.data = [{"id": 1}, {"id": 2}]
 
         with patch("src.db.staff.get_supabase_client", return_value=client):
             assert count_active_superadmins() == 2
+
+    def test_treats_null_is_active_as_active(self):
+        """A NULL is_active must count as active, not be excluded -- an
+        undercount here could let the last real superadmin be demoted."""
+        client = MagicMock()
+        query = client.table.return_value.select.return_value.eq.return_value
+
+        with patch("src.db.staff.get_supabase_client", return_value=client):
+            count_active_superadmins()
+
+        query.or_.assert_called_once_with("is_active.is.null,is_active.eq.true")
 
     def test_fails_closed_to_zero_on_error(self):
         client = MagicMock()
@@ -196,13 +207,39 @@ class TestAcceptInvite:
         assert updated is None
 
 
+def _revoke_client(active_keys, legacy_key):
+    """A per-table mock: api_keys_new.select -> active_keys rows,
+    users.select -> {"api_key": legacy_key}. The per-table mocks are cached
+    by name (a MagicMock with side_effect otherwise builds a fresh,
+    unrelated mock on every call, so `.table("users")` in the select vs.
+    the later update call would return two different mocks)."""
+    client = MagicMock()
+    tables: dict[str, MagicMock] = {}
+
+    def table(name):
+        if name not in tables:
+            m = MagicMock()
+            if name == "api_keys_new":
+                m.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+                    active_keys
+                )
+            elif name == "users":
+                m.select.return_value.eq.return_value.execute.return_value.data = (
+                    [{"api_key": legacy_key}] if legacy_key is not None else [{"api_key": None}]
+                )
+            tables[name] = m
+        return tables[name]
+
+    client.table.side_effect = table
+    client._tables = tables
+    return client
+
+
 class TestRevokeUserKeys:
     def test_deactivates_active_keys_and_invalidates_cache(self):
-        client = MagicMock()
-        client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
-            {"api_key": "gw_live_a"},
-            {"api_key": "gw_live_b"},
-        ]
+        client = _revoke_client(
+            active_keys=[{"api_key": "gw_live_a"}, {"api_key": "gw_live_b"}], legacy_key=None
+        )
 
         with (
             patch("src.db.staff.get_supabase_client", return_value=client),
@@ -214,10 +251,51 @@ class TestRevokeUserKeys:
         assert mock_invalidate.call_count == 2
 
     def test_returns_zero_when_no_active_keys(self):
-        client = MagicMock()
-        client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
-            []
-        )
+        client = _revoke_client(active_keys=[], legacy_key=None)
 
         with patch("src.db.staff.get_supabase_client", return_value=client):
             assert revoke_user_keys(5) == 0
+
+    def test_clears_legacy_users_api_key_column(self):
+        """The legacy users.api_key column is a second, independent
+        authentication path -- it must be cleared too, not just
+        api_keys_new rows."""
+        client = _revoke_client(active_keys=[], legacy_key="gw_legacy_key")
+
+        with (
+            patch("src.db.staff.get_supabase_client", return_value=client),
+            patch("src.db.users.invalidate_user_cache") as mock_invalidate,
+        ):
+            revoke_user_keys(5)
+
+        client._tables["users"].update.assert_any_call({"api_key": None})
+        mock_invalidate.assert_any_call("gw_legacy_key")
+
+    def test_legacy_key_no_longer_resolves_after_revoke(self):
+        """End-to-end: after revoke_user_keys clears users.api_key,
+        _get_user_uncached's legacy fallback must no longer find the user
+        for that key (mocks both tables, as it would see post-revoke)."""
+        from src.db.users import _get_user_uncached
+
+        # Pre-revoke: legacy key resolves.
+        pre_revoke_client = _revoke_client(active_keys=[], legacy_key="gw_legacy_key")
+        with patch("src.db.staff.get_supabase_client", return_value=pre_revoke_client):
+            revoke_user_keys(5)
+
+        # Post-revoke: api_keys_new has no row for this key, and
+        # users.api_key is NULL -- _get_user_uncached's legacy fallback
+        # must return None.
+        post_revoke_client = MagicMock()
+
+        def table(name):
+            m = MagicMock()
+            if name == "api_keys_new":
+                m.select.return_value.eq.return_value.execute.return_value.data = []
+            elif name == "users":
+                m.select.return_value.eq.return_value.execute.return_value.data = []
+            return m
+
+        post_revoke_client.table.side_effect = table
+
+        with patch("src.db.users.get_supabase_client", return_value=post_revoke_client):
+            assert _get_user_uncached("gw_legacy_key") is None

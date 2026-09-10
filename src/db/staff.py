@@ -47,15 +47,21 @@ def list_staff() -> list[dict[str, Any]]:
 
 
 def count_active_superadmins() -> int:
-    """Count of users with role='superadmin' and is_active=true -- used to
-    guard against demoting/removing the last one."""
+    """Count of users with role='superadmin' that are active -- used to
+    guard against demoting/removing the last one.
+
+    A NULL is_active counts as active: the column defaults to true and
+    older rows predating it may never have had it explicitly set, so
+    treating NULL as "inactive" could undercount and let the last real
+    superadmin be demoted.
+    """
     try:
         client = get_supabase_client()
         result = (
             client.table("users")
             .select("id", count="exact")
             .eq("role", "superadmin")
-            .eq("is_active", True)
+            .or_("is_active.is.null,is_active.eq.true")
             .execute()
         )
         return result.count if result.count is not None else len(result.data or [])
@@ -202,8 +208,16 @@ def accept_invite(raw_token: str, user_id: int, user_email: str) -> dict[str, An
 
 
 def revoke_user_keys(user_id: int) -> int:
-    """Deactivate every api_keys_new row for a user (e.g. on staff removal).
-    Returns the number of keys deactivated."""
+    """Deactivate every api_keys_new row for a user, AND clear their legacy
+    users.api_key column (e.g. on staff removal).
+
+    The legacy column is a second, independent way to authenticate
+    (_get_user_uncached's fallback path) -- deactivating only api_keys_new
+    left it live, which is exactly how a leaked key had to be killed by
+    hand rather than through this endpoint. Returns the number of
+    api_keys_new rows deactivated (the legacy column, if present, is
+    counted separately and always cleared regardless).
+    """
     from src.db.users import invalidate_user_cache
 
     try:
@@ -216,15 +230,23 @@ def revoke_user_keys(user_id: int) -> int:
             .execute()
         )
         keys = [row["api_key"] for row in (result.data or [])]
-        if not keys:
-            return 0
 
-        client.table("api_keys_new").update(
-            {"is_active": False, "updated_at": datetime.now(UTC).isoformat()}
-        ).eq("user_id", user_id).eq("is_active", True).execute()
+        if keys:
+            client.table("api_keys_new").update(
+                {"is_active": False, "updated_at": datetime.now(UTC).isoformat()}
+            ).eq("user_id", user_id).eq("is_active", True).execute()
 
-        for api_key in keys:
-            invalidate_user_cache(api_key)
+            for api_key in keys:
+                invalidate_user_cache(api_key)
+
+        # Clear the legacy key too, whether or not it happens to equal one
+        # of the api_keys_new rows above -- users.api_key is a separate
+        # authentication path (_get_user_uncached's legacy fallback).
+        user_result = client.table("users").select("api_key").eq("id", user_id).execute()
+        legacy_key = (user_result.data or [{}])[0].get("api_key") if user_result.data else None
+        if legacy_key:
+            client.table("users").update({"api_key": None}).eq("id", user_id).execute()
+            invalidate_user_cache(legacy_key)
 
         return len(keys)
     except Exception as e:

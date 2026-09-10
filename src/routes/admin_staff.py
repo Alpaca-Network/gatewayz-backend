@@ -26,7 +26,7 @@ from src.db.staff import (
     revoke_user_keys,
     set_role,
 )
-from src.db.users import get_user_by_email, get_user_by_id
+from src.db.users import get_user_by_email_ci, get_user_by_id
 from src.schemas.staff import AcceptInviteRequest, InviteStaffRequest, UpdateStaffRoleRequest
 from src.security.deps import get_current_user, require_admin, require_superadmin
 
@@ -84,7 +84,7 @@ async def invite_staff(
     a pending invite (and email it) for one that doesn't exist yet."""
     email = body.email.strip().lower()
 
-    existing_user = get_user_by_email(email)
+    existing_user = get_user_by_email_ci(email)
     if existing_user is not None:
         updated = set_role(existing_user["id"], body.role, actor=admin_user)
         if updated is None:
