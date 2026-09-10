@@ -1,381 +1,153 @@
-# Database Migrations Guide
+# Database Migrations
 
-## Overview
+**Status:** rewritten in Phase D (D3) of
+`docs/superpowers/specs/2026-09-10-unified-admin-identity-design.md` to
+match what `.github/workflows/supabase-migrations.yml` actually does today
+-- the previous version of this doc described a staging/production
+branch-split workflow with manual environment selection that no longer
+exists in this repo. Related:
+`docs/security/DATA_ACCESS.md`, `supabase/staged-migrations/README.md`.
 
-The Gatewayz backend uses **Supabase** for database management and has an **automated migration system** via GitHub Actions. This guide explains how migrations work and how to apply them.
+## The one supported path: merge to `main`
 
-## Automated Migration System
+There is exactly one supported way for a migration to reach production:
 
-### How It Works
+1. Write the migration as `supabase/migrations/<YYYYMMDDHHMMSS>_<description>.sql`.
+2. Open a PR. On push, the `validate` job in
+   `.github/workflows/supabase-migrations.yml` checks the filename format
+   and scans for destructive operations (`DROP DATABASE`, `DROP SCHEMA
+   public`, `TRUNCATE ... CASCADE`) -- these fail the PR outright and must
+   be fixed or deliberately restructured, not bypassed.
+3. Merge to `main`. The `sync` job runs automatically:
+   - Links the Supabase project (`SUPABASE_PROJECT_REF` /
+     `SUPABASE_DB_PASSWORD` / `SUPABASE_ACCESS_TOKEN` secrets).
+   - Runs `supabase migration list` to check for **drift** (remote has a
+     migration version the repo doesn't) and **pending** migrations (repo
+     has a version the remote doesn't).
+   - If drift is detected, it runs `supabase db pull` and opens a PR with
+     the pulled SQL instead of pushing anything -- **review that SQL
+     carefully**, it means someone changed the schema outside this
+     workflow (see "Emergency hand-apply" below).
+   - If there's no drift and there are pending migrations, it runs
+     `supabase db push --include-all`, which applies every migration file
+     the remote doesn't have a record of yet, then re-runs `supabase
+     migration list` to confirm.
 
-The `.github/workflows/supabase-migrations.yml` workflow **automatically applies migrations** when:
+There is **no separate staging branch or environment-selection input** in
+the current workflow -- it triggers only on pushes to `main` that touch
+`supabase/migrations/*.sql`, plus a 6-hourly scheduled drift check and a
+manual `workflow_dispatch` (with a `dry_run` toggle) for validation-only
+runs. `gh run list --workflow supabase-migrations.yml` shows recent runs;
+`gh run view <id> --log` shows exactly what was applied.
 
-1. **Merged to `main` branch**: Migrations are applied to **production**
-2. **Merged to `staging` branch**: Migrations are applied to **staging**
-3. **Pull Request**: Migrations are **validated** (not applied)
+**This is the only path.** Don't add a new CI trigger or hand-roll a
+different apply mechanism without updating this doc.
 
-### Workflow Features
+## The staged-migrations gate
 
-✅ **Automatic Detection**: Triggers when `supabase/migrations/*.sql` files change
-✅ **Validation**: Checks SQL syntax and detects destructive operations
-✅ **Environment-Aware**: Applies to correct environment based on branch
-✅ **Safety Checks**: Blocks dangerous operations in production
-✅ **Rollback Support**: Provides rollback instructions on failure
-✅ **Notifications**: Comments on PRs and provides detailed logs
+`supabase/staged-migrations/` (see its own `README.md`) holds migrations
+that are **correct SQL but not yet safe to auto-apply on merge** -- usually
+because they drop a column/table that a very recent code change stopped
+writing to, and the team wants that code change to soak in production
+first. Files here are *not* under `supabase/migrations/`, so the CI
+workflow above never touches them; nothing in `staged-migrations/` is
+applied automatically by anything.
 
-### Migration File Naming
+To apply one:
 
-Migration files follow this pattern:
+1. Confirm the code change it depends on has been deployed and has soaked
+   (no fixed time requirement -- judgment call per migration; the `drop_*`
+   ones are irreversible, so err slow).
+2. Move the file from `supabase/staged-migrations/` to
+   `supabase/migrations/`, adding a header note recording when/how it was
+   actually applied if it was already run by hand (see below) -- **always
+   commit the move as a PR**, even if the SQL was already run against
+   production. `supabase db push` skips migrations the remote already has a
+   record of, so re-adding an already-applied file to `supabase/migrations/`
+   is safe as long as the file is idempotent (`DROP COLUMN IF EXISTS`,
+   `CREATE TABLE IF NOT EXISTS`, `ON CONFLICT ... DO NOTHING`, etc.) --
+   `supabase db push --include-all` may re-run it if its version isn't in
+   the remote's migration-history table yet (this happens whenever a
+   migration was hand-applied via the Management API instead of through the
+   CLI/CI path -- see below).
+3. Merge like any other migration PR; the normal `sync` job takes it from
+   there.
+
+Example: `supabase/migrations/20260903100000_drop_usage_records_api_key.sql`
+was promoted this way in Phase D -- see its header comment for the exact
+history (staged 2026-09-03, hand-applied 2026-09-10, promoted to
+`migrations/` 2026-09-11).
+
+## Emergency hand-apply
+
+Sometimes a migration needs to land **before** a PR can be reviewed and
+merged (an active incident, or -- as happened on 2026-09-10 -- a
+`.gitignore` pattern silently excluding a migration file from a PR that had
+already been reviewed and needed to ship). The only supported emergency
+path is the **Supabase Management API**:
+
 ```
-supabase/migrations/<timestamp>_<description>.sql
-```
-
-Example:
-```
-20251225000000_restore_rate_limit_configs_and_audit_logs.sql
-```
-
-The timestamp format is: `YYYYMMDDhhmmss`
-
----
-
-## Current Migration Status
-
-### Pending Migration
-
-**Migration**: `20251225000000_restore_rate_limit_configs_and_audit_logs.sql`
-
-**Status**: ⚠️ **Not yet applied to production**
-
-**Purpose**: Restores two critical tables:
-- `rate_limit_configs` - Per-API-key rate limit configurations
-- `api_key_audit_logs` - Audit trail for API key operations
-
-**Why It's Needed**: These tables were accidentally dropped in a previous migration and are referenced by the API key creation code.
-
----
-
-## Applying Migrations
-
-### Option 1: Automatic (Recommended)
-
-Migrations are **automatically applied** when changes are merged to `main` or `staging`:
-
-1. **Merge PR to main**: The workflow automatically applies to production
-2. **Check workflow**: Go to [Actions tab](https://github.com/Alpaca-Network/gatewayz-backend/actions/workflows/supabase-migrations.yml)
-3. **Verify success**: Look for green checkmark ✅
-
-**For the pending migration**:
-- It was added in PR #689 but may not have triggered
-- Solution: Manually trigger the workflow (see Option 2) OR wait for next merge to main
-
-### Option 2: Manual Trigger via GitHub UI
-
-You can manually trigger the migration workflow:
-
-1. **Go to**: [Actions → Supabase Migrations](https://github.com/Alpaca-Network/gatewayz-backend/actions/workflows/supabase-migrations.yml)
-
-2. **Click**: "Run workflow" button
-
-3. **Select**:
-   - **Environment**: `production` or `staging`
-   - **Dry run**: `false` (to actually apply)
-
-4. **Click**: "Run workflow"
-
-5. **Monitor**: Watch the workflow execution in real-time
-
-### Option 3: Manual via Supabase CLI (Local)
-
-For developers with Supabase CLI installed:
-
-```bash
-# Install Supabase CLI (if not already installed)
-brew install supabase/tap/supabase  # macOS
-# OR
-npm install -g supabase             # npm
-
-# Login to Supabase
-supabase login
-
-# Link to your project
-supabase link --project-ref <your-project-ref>
-
-# Check migration status
-supabase migration list
-
-# Apply pending migrations
-supabase db push
-
-# Verify
-supabase migration list
+POST https://api.supabase.com/v1/projects/<project-ref>/database/query
+Authorization: Bearer <personal access token>
 ```
 
-### Option 4: Manual via Supabase Dashboard
-
-For one-off migrations or emergencies:
-
-1. **Go to**: [Supabase Dashboard](https://supabase.com/dashboard)
-2. **Select**: Your project
-3. **Navigate to**: SQL Editor
-4. **Open**: `supabase/migrations/20251225000000_restore_rate_limit_configs_and_audit_logs.sql`
-5. **Copy**: The entire SQL content
-6. **Paste**: Into the SQL Editor
-7. **Click**: "Run"
-8. **Verify**: Check that tables were created
-
----
-
-## Creating New Migrations
-
-### Step 1: Generate Migration File
-
-```bash
-# Using Supabase CLI
-supabase migration new <description>
-
-# Example
-supabase migration new add_user_preferences_table
-```
-
-This creates a new file: `supabase/migrations/<timestamp>_add_user_preferences_table.sql`
-
-### Step 2: Write Migration SQL
-
-Edit the generated file with your SQL:
-
-```sql
--- Example migration
-CREATE TABLE IF NOT EXISTS "public"."user_preferences" (
-    "id" bigserial PRIMARY KEY,
-    "user_id" bigint NOT NULL REFERENCES "public"."users"("id") ON DELETE CASCADE,
-    "preferences" jsonb DEFAULT '{}'::jsonb,
-    "created_at" timestamptz DEFAULT now(),
-    "updated_at" timestamptz DEFAULT now()
-);
-
--- Add index
-CREATE INDEX IF NOT EXISTS "user_preferences_user_id_idx"
-    ON "public"."user_preferences" ("user_id");
-
--- Enable RLS
-ALTER TABLE "public"."user_preferences" ENABLE ROW LEVEL SECURITY;
-
--- Add RLS policies
-CREATE POLICY "Users can manage their own preferences"
-    ON "public"."user_preferences"
-    FOR ALL
-    TO authenticated
-    USING (user_id = (SELECT id FROM public.users WHERE auth_id = auth.uid()))
-    WITH CHECK (user_id = (SELECT id FROM public.users WHERE auth_id = auth.uid()));
-```
-
-### Step 3: Test Locally (Optional)
-
-```bash
-# Start local Supabase
-supabase start
-
-# Apply migration locally
-supabase db push
-
-# Test your changes
-# ... run your application locally ...
-
-# Stop local Supabase
-supabase stop
-```
-
-### Step 4: Create Pull Request
-
-```bash
-git add supabase/migrations/<your-migration>.sql
-git commit -m "feat(db): add user preferences table"
-git push origin your-branch
-```
-
-### Step 5: Automatic Validation
-
-The GitHub Actions workflow will:
-- ✅ Validate SQL syntax
-- ✅ Check for destructive operations
-- ✅ Run on staging (if merged to staging first)
-- ✅ Comment on PR with validation results
-
-### Step 6: Merge to Apply
-
-- Merge to `staging`: Applied to staging environment
-- Merge to `main`: Applied to production environment
-
----
-
-## Migration Best Practices
-
-### ✅ DO:
-
-1. **Use IF NOT EXISTS**: Makes migrations idempotent
-   ```sql
-   CREATE TABLE IF NOT EXISTS "public"."my_table" (...);
-   ```
-
-2. **Use IF EXISTS for drops**: Prevents errors
-   ```sql
-   DROP TABLE IF EXISTS "public"."old_table";
-   ```
-
-3. **Add indexes separately**: For better performance
-   ```sql
-   CREATE INDEX IF NOT EXISTS "idx_name" ON "table" ("column");
-   ```
-
-4. **Enable RLS**: For security
-   ```sql
-   ALTER TABLE "public"."my_table" ENABLE ROW LEVEL SECURITY;
-   ```
-
-5. **Test locally first**: Use `supabase start` and `supabase db push`
-
-6. **Add comments**: Explain complex migrations
-   ```sql
-   -- This migration adds support for user preferences
-   -- Related to: https://github.com/org/repo/issues/123
-   ```
-
-7. **One logical change per migration**: Don't mix unrelated changes
-
-### ❌ DON'T:
-
-1. **Don't use destructive operations without IF EXISTS**:
-   ```sql
-   DROP TABLE my_table;  -- BAD: Will fail if table doesn't exist
-   ```
-
-2. **Don't modify existing migrations**: Create a new migration instead
-
-3. **Don't add data migrations in schema migrations**: Separate concerns
-
-4. **Don't forget to grant permissions**:
-   ```sql
-   GRANT SELECT, INSERT, UPDATE, DELETE ON "public"."my_table" TO "authenticated";
-   ```
-
-5. **Don't skip migration testing**: Always test on staging first
-
----
-
-## Troubleshooting
-
-### Migration Failed in Production
-
-1. **Check workflow logs**: [Actions tab](https://github.com/Alpaca-Network/gatewayz-backend/actions)
-2. **Review error message**: Look for SQL syntax errors or constraint violations
-3. **Fix locally**: Create a new migration to fix the issue
-4. **Or rollback**: Use Supabase Dashboard → Database → Backups
-
-### Migration Not Triggering
-
-**Symptoms**: Migration file added but workflow didn't run
-
-**Causes**:
-- File not in correct path (`supabase/migrations/`)
-- Committed to branch other than `main` or `staging`
-- Workflow YAML has syntax error
-
-**Solution**:
-1. Verify file path: `ls supabase/migrations/`
-2. Check branch: `git branch`
-3. Manually trigger: Use "Run workflow" button in GitHub Actions
-4. Check workflow syntax: Review `.github/workflows/supabase-migrations.yml`
-
-### "Could not find the table" Errors
-
-**Symptoms**: Logs show `PGRST205` errors about missing tables
-
-**Cause**: Migration not applied yet
-
-**Solution**: Apply the pending migration using one of the options above
-
-### Authentication Failed
-
-**Symptoms**: `Failed to link to Supabase project`
-
-**Cause**: Missing or incorrect secrets
-
-**Solution**:
-1. Check GitHub repository secrets:
-   - `SUPABASE_ACCESS_TOKEN`
-   - `SUPABASE_PROJECT_REF`
-   - `SUPABASE_DB_PASSWORD`
-2. Regenerate access token in Supabase Dashboard
-3. Update secrets in GitHub: Settings → Secrets and variables → Actions
-
----
-
-## Migration Workflow Reference
-
-### Environment Mapping
-
-| Branch    | Environment | Auto-Apply |
-|-----------|-------------|------------|
-| `main`    | production  | ✅ Yes     |
-| `staging` | staging     | ✅ Yes     |
-| Other     | staging     | ❌ No (validation only) |
-| PR        | staging     | ❌ No (validation only) |
-
-### Required Secrets
-
-#### Production
-- `SUPABASE_ACCESS_TOKEN` - Supabase API access token
-- `SUPABASE_PROJECT_REF` - Production project reference ID
-- `SUPABASE_DB_PASSWORD` - Production database password
-
-#### Staging
-- `SUPABASE_STAGING_PROJECT_REF` - Staging project reference ID
-- `SUPABASE_STAGING_DB_PASSWORD` - Staging database password
-
-### Workflow Jobs
-
-1. **setup-environment**: Determines target environment
-2. **validate-migrations**: Checks SQL syntax and destructive operations
-3. **apply-migrations**: Applies migrations to database
-4. **rollback-on-failure**: Provides rollback instructions
-5. **notify**: Sends status notifications
-
----
-
-## Quick Reference
-
-### Check Migration Status
-```bash
-# Via CLI
-supabase migration list
-
-# Via API (if available)
-curl https://api.gatewayz.ai/admin/migration-status
-```
-
-### Apply Pending Migration NOW
-
-**Fastest method**: Manual trigger via GitHub UI
-
-1. Go to: https://github.com/Alpaca-Network/gatewayz-backend/actions/workflows/supabase-migrations.yml
-2. Click "Run workflow"
-3. Select environment: `production`
-4. Select dry_run: `false`
-5. Click "Run workflow"
-6. Wait ~2-3 minutes
-7. Check logs for ✅ success
-
----
-
-## Related Documentation
-
-- **Supabase CLI**: https://supabase.com/docs/guides/cli
-- **Migration Guide**: https://supabase.com/docs/guides/cli/local-development
-- **RLS Policies**: https://supabase.com/docs/guides/auth/row-level-security
-- **Workflow File**: `.github/workflows/supabase-migrations.yml`
-
----
-
-**Last Updated**: 2025-12-26
-**Workflow Version**: 2.62.10
+with the migration's SQL as the request body. This runs immediately against
+production, bypassing CI entirely.
+
+**The rule: never apply a migration by hand without also committing the
+file, in the same incident, before you consider the emergency closed.**
+Concretely:
+
+1. Apply the SQL via the Management API.
+2. **Immediately** commit the exact SQL you ran to
+   `supabase/migrations/<timestamp>_<description>.sql` (or promote it from
+   `staged-migrations/` if that's where it came from), with a header
+   comment noting it was hand-applied and the date. Open the PR even if the
+   incident is already resolved -- an applied-but-uncommitted migration is
+   schema drift waiting to be silently overwritten or re-run oddly, and
+   makes `supabase migration list` disagree with the repo on the very next
+   sync.
+3. Expect the scheduled drift check (every 6 hours) to catch an
+   uncommitted hand-apply and open an auto-generated "sync schema drift"
+   PR if you miss step 2 -- treat that as a safety net, not the primary
+   process. **Do not rely on it**; it means someone else now has to
+   reconstruct what happened from a raw `db pull` diff instead of your own
+   commit message and context.
+4. If the migration wasn't tracked by the CLI's migration-history table
+   (typical for a Management-API hand-apply), the next `supabase db push`
+   will see it as "pending" and try to re-run it -- this is fine *only if
+   the file is idempotent*. Write every migration, hand-applied or not, as
+   if it might run twice.
+
+This is exactly what happened with
+`supabase/migrations/20260911000000_unified_identity_roles.sql` and
+`20260911000001_audit_log_and_staff.sql`: both were applied by hand via the
+Management API on 2026-09-10, then re-applied by `supabase db push` in CI
+after merge (run `34534917992`, confirmed via
+`gh run view 34534917992 --log | grep -iE 'push|applied|Applying|already'`)
+because the CLI's migration-history table had no record of the hand-apply.
+Both files are idempotent (`role_permissions` insert uses
+`ON CONFLICT (role, resource, action) DO NOTHING` against a `UNIQUE(role,
+resource, action)` constraint that has existed since
+`20251009060000_add_user_roles.sql`; the rest is
+`CREATE TABLE IF NOT EXISTS`/`ADD COLUMN IF NOT EXISTS`), so the re-run was
+a safe no-op -- **no duplicate `role_permissions` rows resulted, and no
+follow-up dedupe migration is needed.** If a future migration's INSERT
+lacks an `ON CONFLICT` clause backed by a real unique constraint, add both
+before merging, not after a duplicate shows up in production.
+
+## Never
+
+- **Never apply a migration by hand without also committing the file**
+  (see "Emergency hand-apply" above) -- this is the rule this whole
+  document exists to enforce.
+- **Never modify an already-merged migration file.** Write a new one.
+- **Never write a migration that isn't idempotent** (`CREATE ... IF NOT
+  EXISTS`, `DROP ... IF EXISTS`, `INSERT ... ON CONFLICT ... DO NOTHING`
+  backed by a real unique constraint) -- `supabase db push` may legitimately
+  re-run any file the remote's migration-history table doesn't recognize,
+  which is exactly what happens after every hand-apply.
+- **Never bypass the `validate` job's destructive-operation check** by
+  restructuring SQL specifically to dodge the grep pattern -- if a migration
+  genuinely needs `DROP SCHEMA public` or similar, that's a sign it needs
+  manual, reviewed, out-of-band execution, not a workflow change.

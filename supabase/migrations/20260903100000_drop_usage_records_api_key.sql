@@ -1,0 +1,25 @@
+-- Migration: drop the plaintext usage_records.api_key column
+-- Created: 2026-09-03 (staged) -- promoted to supabase/migrations/ 2026-09-11
+-- (gatewayz-backend Phase D, D3).
+--
+-- Was staged under supabase/staged-migrations/ (human-gated) until
+-- record_usage (src/db/users.py), changed in the same PR as
+-- 20260903100000_usage_records_hardening.sql to write api_key_id/
+-- api_key_last4 instead of the plaintext key, had soaked in production --
+-- see docs/security/DATA_ACCESS.md and supabase/staged-migrations/README.md.
+--
+-- APPLIED BY HAND 2026-09-10 via the Supabase Management API (emergency
+-- hand-apply -- see docs/DATABASE_MIGRATIONS.md), then committed here so the
+-- CI-managed `supabase/migrations/` history matches what the database
+-- actually has. This is the exact SQL that was run, not the original staged
+-- draft: the draft's leading
+--   UPDATE public.usage_records SET api_key = NULL WHERE api_key IS NOT NULL;
+-- line is intentionally omitted here -- usage_records.api_key was defined
+-- NOT NULL in the base schema (20251009030427_remote_schema.sql) and no
+-- migration ever dropped that constraint, so that UPDATE would fail outright
+-- against a live row rather than backfill anything; it was never actually
+-- run. DROP COLUMN IF EXISTS makes the file idempotent and safe to apply
+-- more than once, matching every other migration `supabase db push` might
+-- legitimately re-run (see docs/DATABASE_MIGRATIONS.md).
+
+ALTER TABLE public.usage_records DROP COLUMN IF EXISTS api_key;
