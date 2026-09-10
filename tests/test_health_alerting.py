@@ -219,17 +219,20 @@ def test_format_metrics_html_empty(alerting_service):
 
 
 @pytest.mark.asyncio
-@patch("resend.Emails.send")
-async def test_send_email_alert(mock_send_email, alerting_service):
-    """Test sending email alert"""
-    mock_send_email.return_value = None  # Resend returns None on success
+async def test_send_email_alert(alerting_service):
+    """Test sending email alert -- goes through the shared email service
+    (src/services/email.py) rather than a direct Resend SDK call."""
+    from src.services.email import EmailResult
 
-    # Patch Config where it's imported from
-    with patch("src.config.Config") as mock_config:
+    with (
+        patch("src.config.Config") as mock_config,
+        patch(
+            "src.services.email.send_email",
+            return_value=EmailResult(sent=True, id="email_1"),
+        ) as mock_send_email,
+    ):
         # Set attributes that getattr will access
         mock_config.ADMIN_EMAIL = "admin@example.com"
-        mock_config.RESEND_API_KEY = "re_test_key"
-        mock_config.FROM_EMAIL = "noreply@test.com"
         mock_config.SUPPORT_EMAIL = None
 
         alerting_service.enabled_channels = [AlertChannel.EMAIL]
@@ -243,8 +246,37 @@ async def test_send_email_alert(mock_send_email, alerting_service):
         )
 
         await alerting_service._send_email_alert(alert)
-        # Verify email was sent
+        # Verify email was sent to the configured admin address
         assert mock_send_email.called
+        assert mock_send_email.call_args.args[0] == "admin@example.com"
+
+
+@pytest.mark.asyncio
+async def test_send_email_alert_failure_is_logged_not_raised(alerting_service):
+    """A failed send (e.g. suspended Resend key) must not raise -- the
+    caller only sees a warning log, per _send_email_alert's own try/except."""
+    from src.services.email import EmailResult
+
+    with (
+        patch("src.config.Config") as mock_config,
+        patch(
+            "src.services.email.send_email",
+            return_value=EmailResult(sent=False, error="suspended_or_invalid_key"),
+        ),
+    ):
+        mock_config.ADMIN_EMAIL = "admin@example.com"
+        mock_config.SUPPORT_EMAIL = None
+
+        alert = Alert(
+            alert_type=AlertType.PROVIDER_DOWN,
+            severity=AlertSeverity.CRITICAL,
+            title="Provider Down",
+            message="OpenAI provider is offline",
+            provider="openai",
+        )
+
+        # Must not raise.
+        await alerting_service._send_email_alert(alert)
 
 
 @pytest.mark.asyncio
