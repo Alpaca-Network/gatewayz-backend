@@ -97,6 +97,28 @@ wei-scale totals for staking/earnings. It does NOT expose any user's
 anything from `users`/`payments`/`chat_completion_requests` — the response
 is aggregate counts plus provider (not end-user) identifying fields only.
 
+## Admin unified status endpoint
+
+`GET /admin/status` (`src/routes/admin_status.py`, same
+`Depends(require_admin_or_env_key)` as `GET /admin/wayz/status`)
+generalizes the WAYZ ops page into jobs + external integration health +
+secret presence. It reads no table this document doesn't already cover —
+`wayz` reuses `admin_wayz.py`'s own block builders (`src/db/*`, same
+`service_role` client), and `integrations` (`src/services/integrations_health.py`)
+performs its own external health checks (Resend, the Fuji RPC, a
+`select id limit 1` against `users`, Redis `PING`) rather than reading a
+table directly.
+
+What it exposes to admins only: the **presence** of a fixed allow-list of
+secret env var names (`ADMIN_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+`RESEND_API_KEY`, `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`,
+`WAYZ_FAUCET_MINTER_PRIVATE_KEY`, `WAYZ_REWARDS_POOL_PRIVATE_KEY`,
+`STRIPE_SECRET_KEY`, `SENTRY_DSN`) as `{present: bool, source: "env"}`,
+plus the health status of each external integration. It never returns a
+secret's value, length, or hash, and never exposes anything from
+`users`/`payments`/`chat_completion_requests`. `tests/routes/test_admin_status.py`
+asserts no configured secret's value appears anywhere in the response body.
+
 ## `gpu_providers.approved_by` is NULL for ADMIN_API_KEY-authenticated approvals
 
 `POST /gpu/admin/providers/{id}/approve|suspend` accept
