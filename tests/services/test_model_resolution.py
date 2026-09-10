@@ -170,3 +170,53 @@ class TestUndatedSnapshotAlias:
         r = resolve_catalog_model_id("anthropic/claude-sonnet-4-5")
         assert r.canonical_id == "anthropic/claude-sonnet-4-5"
         assert r.matched_by == "exact"
+
+
+class TestUndatedAliasWhenTheIndexIsOnlyTheAliasTable:
+    """Production reality, measured 2026-09-10 (#2298).
+
+    `/health/model-resolution` showed every fully-qualified catalog id
+    reporting `unresolved` while every bare form reported `alias`: the index
+    built from `get_cached_unique_models()` holds none of the prefixed ids
+    that GET /v1/models advertises, so the curated `model_aliases` table is
+    what actually maps names onto models.
+
+    An undated scan over the exact-id set alone therefore scans an empty
+    universe and finds nothing — which is exactly what shipped in #2297 and
+    #2300 and why neither fixed anything in production while both passed
+    against a stubbed catalog. These stub the catalog the way production
+    really behaves.
+    """
+
+    ALIASES = {
+        "claude-sonnet-4-5-20250929": "anthropic/claude-sonnet-4-5-20250929",
+        "claude-sonnet-4-6": "anthropic/claude-sonnet-4-6",
+    }
+
+    @pytest.fixture(autouse=True)
+    def _alias_only_catalog(self, monkeypatch):
+        # The catalog index is non-empty but carries unrelated ids -- the
+        # served Anthropic models are reachable only through aliases.
+        monkeypatch.setattr(
+            model_resolution, "_load_catalog_ids", lambda: ["deepinfra/some-other-model"]
+        )
+        monkeypatch.setattr(model_resolution, "_load_alias_map", lambda: dict(self.ALIASES))
+        model_resolution.invalidate_resolution_index()
+        yield
+        model_resolution.invalidate_resolution_index()
+
+    def test_undated_alias_resolves_through_the_alias_targets(self):
+        r = resolve_catalog_model_id("claude-sonnet-4-5")
+        assert r.canonical_id == "anthropic/claude-sonnet-4-5-20250929"
+        assert r.matched_by == "undated"
+
+    def test_qualified_undated_alias_resolves_too(self):
+        r = resolve_catalog_model_id("anthropic/claude-sonnet-4-5")
+        assert r.canonical_id == "anthropic/claude-sonnet-4-5-20250929"
+
+    def test_a_curated_alias_still_wins_before_the_undated_scan(self):
+        r = resolve_catalog_model_id("claude-sonnet-4-6")
+        assert r.matched_by == "alias"
+
+    def test_an_unknown_model_is_still_unresolved(self):
+        assert resolve_catalog_model_id("claude-sonnet-9-9").canonical_id is None
