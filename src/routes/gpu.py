@@ -18,9 +18,10 @@ import secrets
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
+from src.db.audit import record_audit
 from src.db.gpu import (
     create_node,
     create_provider,
@@ -531,7 +532,9 @@ async def node_heartbeat(
 
 @router.post("/admin/providers/{provider_id}/approve", tags=["gpu"])
 async def admin_approve_provider(
-    provider_id: int, admin_user: dict[str, Any] = Depends(require_admin_or_env_key)
+    provider_id: int,
+    request: Request,
+    admin_user: dict[str, Any] = Depends(require_admin_or_env_key),
 ) -> dict[str, Any]:
     admin_id = admin_user.get("id")
     if admin_id is None:
@@ -545,18 +548,34 @@ async def admin_approve_provider(
     updated = set_provider_status(provider_id, "approved", approved_by=admin_id)
     if updated is None:
         raise HTTPException(status_code=404, detail="provider_not_found")
+    record_audit(
+        admin_user,
+        action="gpu.provider_approved",
+        target_type="gpu_provider",
+        target_id=provider_id,
+        request=request,
+    )
     return {"success": True, "data": _provider_view(updated)}
 
 
 @router.post("/admin/providers/{provider_id}/suspend", tags=["gpu"])
 async def admin_suspend_provider(
-    provider_id: int, admin_user: dict[str, Any] = Depends(require_admin_or_env_key)
+    provider_id: int,
+    request: Request,
+    admin_user: dict[str, Any] = Depends(require_admin_or_env_key),
 ) -> dict[str, Any]:
     if admin_user.get("id") is None:
         logger.info("gpu provider %s suspended via ADMIN_API_KEY (no user id)", provider_id)
     updated = set_provider_status(provider_id, "suspended")
     if updated is None:
         raise HTTPException(status_code=404, detail="provider_not_found")
+    record_audit(
+        admin_user,
+        action="gpu.provider_suspended",
+        target_type="gpu_provider",
+        target_id=provider_id,
+        request=request,
+    )
     return {"success": True, "data": _provider_view(updated)}
 
 
