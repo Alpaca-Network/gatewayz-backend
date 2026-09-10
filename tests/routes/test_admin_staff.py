@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -13,28 +14,57 @@ SUPERADMIN = {"id": 1, "email": "root@example.com", "role": "superadmin"}
 ADMIN = {"id": 2, "email": "admin@example.com", "role": "admin"}
 
 
-def _override_superadmin(user=None):
-    app.dependency_overrides[require_superadmin] = lambda: user or SUPERADMIN
+@pytest.fixture(autouse=True)
+def _isolate_dependency_overrides():
+    """Snapshot and restore the FULL app.dependency_overrides dict around
+    every test in this module. Popping only the keys this file touches is
+    not enough under xdist: another module's test (e.g. one that sets an
+    override at import time and never restores it) can be interleaved with
+    these, and restoring the exact prior dict -- whatever it was -- is what
+    actually makes this file's tests independent of run order."""
+    saved = dict(app.dependency_overrides)
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(saved)
 
 
-def _override_admin(user=None):
-    app.dependency_overrides[require_admin] = lambda: user or ADMIN
+@pytest.fixture
+def superadmin_override():
+    """Override require_superadmin for one test. Returns a setter so a test
+    can supply a different actor dict."""
+
+    def _set(user=None):
+        app.dependency_overrides[require_superadmin] = lambda: user or SUPERADMIN
+
+    _set()
+    return _set
 
 
-def _override_current_user(user):
-    app.dependency_overrides[get_current_user] = lambda: user
+@pytest.fixture
+def admin_override():
+    """Override require_admin for one test. Returns a setter so a test can
+    supply a different actor dict."""
+
+    def _set(user=None):
+        app.dependency_overrides[require_admin] = lambda: user or ADMIN
+
+    _set()
+    return _set
 
 
-def _clear_overrides():
-    app.dependency_overrides.pop(require_superadmin, None)
-    app.dependency_overrides.pop(require_admin, None)
-    app.dependency_overrides.pop(get_current_user, None)
+@pytest.fixture
+def current_user_override():
+    """Override get_current_user for one test. Returns a setter -- no
+    default actor, since the caller's identity is what each accept-invite
+    test is specifically about."""
+
+    def _set(user):
+        app.dependency_overrides[get_current_user] = lambda: user
+
+    return _set
 
 
 class TestAuth:
-    def teardown_method(self, _method):
-        _clear_overrides()
-
     def test_get_staff_requires_admin(self):
         response = client.get("/admin/staff")
         assert response.status_code in (401, 403)
@@ -49,13 +79,7 @@ class TestAuth:
 
 
 class TestGetStaff:
-    def setup_method(self, _method):
-        _override_admin()
-
-    def teardown_method(self, _method):
-        _clear_overrides()
-
-    def test_returns_staff_list(self):
+    def test_returns_staff_list(self, admin_override):
         rows = [{"id": 1, "email": "a@x.com", "role": "superadmin"}]
         with patch("src.routes.admin_staff.list_staff", return_value=rows):
             response = client.get("/admin/staff")
@@ -66,13 +90,7 @@ class TestGetStaff:
 
 
 class TestInviteStaff:
-    def setup_method(self, _method):
-        _override_superadmin()
-
-    def teardown_method(self, _method):
-        _clear_overrides()
-
-    def test_existing_user_gets_role_set_directly(self):
+    def test_existing_user_gets_role_set_directly(self, superadmin_override):
         existing = {"id": 9, "email": "existing@x.com", "role": "user"}
         updated = {"id": 9, "email": "existing@x.com", "role": "admin"}
         with (
@@ -90,7 +108,9 @@ class TestInviteStaff:
         mock_set_role.assert_called_once()
         mock_audit.assert_called_once()
 
-    def test_new_email_creates_invite_and_returns_link_when_email_not_sent(self):
+    def test_new_email_creates_invite_and_returns_link_when_email_not_sent(
+        self, superadmin_override
+    ):
         invite_row = {
             "id": "uuid-1",
             "email": "new@x.com",
@@ -116,11 +136,11 @@ class TestInviteStaff:
         assert "invite_link" in body["data"]
         assert "raw-token-value" in body["data"]["invite_link"]
 
-    def test_invalid_role_rejected(self):
+    def test_invalid_role_rejected(self, superadmin_override):
         response = client.post("/admin/staff/invite", json={"email": "a@x.com", "role": "user"})
         assert response.status_code == 422
 
-    def test_invalid_email_rejected(self):
+    def test_invalid_email_rejected(self, superadmin_override):
         response = client.post(
             "/admin/staff/invite", json={"email": "not-an-email", "role": "admin"}
         )
@@ -128,23 +148,17 @@ class TestInviteStaff:
 
 
 class TestUpdateStaffRole:
-    def setup_method(self, _method):
-        _override_superadmin()
-
-    def teardown_method(self, _method):
-        _clear_overrides()
-
-    def test_cannot_change_own_role(self):
+    def test_cannot_change_own_role(self, superadmin_override):
         response = client.patch(f"/admin/staff/{SUPERADMIN['id']}", json={"role": "admin"})
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "cannot_change_own_role"
 
-    def test_404_when_target_missing(self):
+    def test_404_when_target_missing(self, superadmin_override):
         with patch("src.routes.admin_staff.get_user_by_id", return_value=None):
             response = client.patch("/admin/staff/999", json={"role": "admin"})
         assert response.status_code == 404
 
-    def test_cannot_demote_last_superadmin(self):
+    def test_cannot_demote_last_superadmin(self, superadmin_override):
         target = {"id": 5, "role": "superadmin"}
         with (
             patch("src.routes.admin_staff.get_user_by_id", return_value=target),
@@ -154,7 +168,7 @@ class TestUpdateStaffRole:
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "last_superadmin"
 
-    def test_successful_role_change(self):
+    def test_successful_role_change(self, superadmin_override):
         target = {"id": 5, "role": "admin"}
         updated = {"id": 5, "role": "superadmin"}
         with (
@@ -169,18 +183,12 @@ class TestUpdateStaffRole:
 
 
 class TestRemoveStaff:
-    def setup_method(self, _method):
-        _override_superadmin()
-
-    def teardown_method(self, _method):
-        _clear_overrides()
-
-    def test_cannot_remove_self(self):
+    def test_cannot_remove_self(self, superadmin_override):
         response = client.delete(f"/admin/staff/{SUPERADMIN['id']}")
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "cannot_change_own_role"
 
-    def test_cannot_remove_last_superadmin(self):
+    def test_cannot_remove_last_superadmin(self, superadmin_override):
         target = {"id": 5, "role": "superadmin"}
         with (
             patch("src.routes.admin_staff.get_user_by_id", return_value=target),
@@ -189,7 +197,7 @@ class TestRemoveStaff:
             response = client.delete("/admin/staff/5")
         assert response.status_code == 409
 
-    def test_removes_staff_sets_role_user(self):
+    def test_removes_staff_sets_role_user(self, superadmin_override):
         target = {"id": 5, "role": "admin"}
         updated = {"id": 5, "role": "user"}
         with (
@@ -203,18 +211,12 @@ class TestRemoveStaff:
 
 
 class TestRevokeStaffKeys:
-    def setup_method(self, _method):
-        _override_superadmin()
-
-    def teardown_method(self, _method):
-        _clear_overrides()
-
-    def test_404_when_target_missing(self):
+    def test_404_when_target_missing(self, superadmin_override):
         with patch("src.routes.admin_staff.get_user_by_id", return_value=None):
             response = client.post("/admin/staff/999/revoke-keys")
         assert response.status_code == 404
 
-    def test_revokes_keys(self):
+    def test_revokes_keys(self, superadmin_override):
         target = {"id": 5, "role": "admin"}
         with (
             patch("src.routes.admin_staff.get_user_by_id", return_value=target),
@@ -228,17 +230,14 @@ class TestRevokeStaffKeys:
 
 
 class TestAcceptInvite:
-    def teardown_method(self, _method):
-        _clear_overrides()
-
     def test_requires_authentication(self):
         response = client.post("/auth/accept-invite", json={"token": "abc"})
         assert response.status_code in (401, 403, 404)
 
-    def test_success(self):
+    def test_success(self, current_user_override):
         user = {"id": 5, "email": "a@x.com"}
         updated = {"id": 5, "role": "admin"}
-        _override_current_user(user)
+        current_user_override(user)
         with (
             patch("src.routes.admin_staff.accept_invite", return_value=updated) as mock_accept,
             patch("src.routes.admin_staff.record_audit"),
@@ -248,9 +247,9 @@ class TestAcceptInvite:
         assert response.json()["data"]["user"] == updated
         mock_accept.assert_called_once_with("raw-token", 5, "a@x.com")
 
-    def test_invalid_token_returns_422(self):
+    def test_invalid_token_returns_422(self, current_user_override):
         user = {"id": 5, "email": "a@x.com"}
-        _override_current_user(user)
+        current_user_override(user)
         with patch("src.routes.admin_staff.accept_invite", return_value=None):
             response = client.post("/auth/accept-invite", json={"token": "bad-token"})
         assert response.status_code == 422
