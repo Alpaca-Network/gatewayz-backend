@@ -116,16 +116,34 @@ def invalidate_resolution_index() -> None:
         _aliases = None
 
 
-def _undated_snapshots(low: str, exact: set[str]) -> tuple[str, ...]:
-    """Catalog ids that `low` denotes as an undated vendor alias.
+def _known_canonical_ids(exact: set[str], aliases: dict[str, str]) -> set[str]:
+    """Every canonical id this process can actually reach.
 
-    Derived from the exact-id set on each call rather than kept as a parallel
-    index. The catalog is a few dozen ids, so the scan is free, and a derived
-    answer cannot drift out of step with the set it is derived from — which a
-    second index built in the same loop demonstrably can.
+    The exact-id set alone is NOT that. Measured in production 2026-09-10 via
+    /health/model-resolution: `anthropic/claude-sonnet-4-6`,
+    `openai/gpt-4o-mini` and `anthropic/claude-haiku-4-5-20251001` all report
+    `unresolved`, while every bare form reports `alias`. The catalog index
+    built from `get_cached_unique_models()` contains none of the prefixed ids
+    that GET /v1/models advertises, so in practice the curated `model_aliases`
+    table is what maps bare names onto real models.
+
+    Its VALUES are therefore canonical ids the gateway serves, and any scan
+    over "the ids we know" has to include them or it scans the wrong universe.
+    (That the two disagree at all is a separate defect — see #2304.)
+    """
+    return exact | {str(v).lower() for v in aliases.values() if v}
+
+
+def _undated_snapshots(low: str, known: set[str]) -> tuple[str, ...]:
+    """Ids in `known` that `low` denotes as an undated vendor alias.
+
+    Derived on each call rather than kept as a parallel index. The catalog is
+    a few dozen ids, so the scan is free, and a derived answer cannot drift
+    out of step with the set it is derived from — which a second index built
+    in the same loop demonstrably can.
     """
     out = []
-    for mid in exact:
+    for mid in known:
         m = _DATE_SUFFIX.match(mid)
         if not m:
             continue
@@ -172,7 +190,7 @@ def resolve_catalog_model_id(model_id: str) -> ModelResolution:
     # curated alias and a unique suffix all win first. Still fails closed:
     # two snapshots is a refusal, because picking "the newest" would move a
     # caller between models on a catalog sync without them asking.
-    dated = _undated_snapshots(low, exact)
+    dated = _undated_snapshots(low, _known_canonical_ids(exact, aliases))
     if len(dated) == 1:
         logger.info("[MODEL_RESOLVE] '%s' -> '%s' (undated alias)", raw, dated[0])
         return _finish(dated[0], "undated")
