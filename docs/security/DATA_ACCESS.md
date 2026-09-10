@@ -110,15 +110,28 @@ performs its own external health checks (Resend, the Fuji RPC, a
 `select id limit 1` against `users`, Redis `PING`) rather than reading a
 table directly.
 
-What it exposes to admins only: the **presence** of a fixed allow-list of
-secret env var names (`ADMIN_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
-`RESEND_API_KEY`, `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`,
-`WAYZ_FAUCET_MINTER_PRIVATE_KEY`, `WAYZ_REWARDS_POOL_PRIVATE_KEY`,
-`STRIPE_SECRET_KEY`, `SENTRY_DSN`) as `{present: bool, source: "env"}`,
-plus the health status of each external integration. It never returns a
-secret's value, length, or hash, and never exposes anything from
-`users`/`payments`/`chat_completion_requests`. `tests/routes/test_admin_status.py`
-asserts no configured secret's value appears anywhere in the response body.
+What it exposes to admins only: the **presence and rotation age** of a fixed
+allow-list of secret env var names (`ADMIN_API_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_KEY`, `RESEND_API_KEY`,
+`PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`, `WAYZ_FAUCET_MINTER_PRIVATE_KEY`,
+`WAYZ_REWARDS_POOL_PRIVATE_KEY`, `STRIPE_SECRET_KEY`, `SENTRY_DSN`,
+`GATEWAYZ_AUTH_BRIDGE_SECRET`, `UPSTREAM_PSEUDONYM_SECRET` --
+`src/services/secrets_registry.py::SECRET_NAMES`) as
+`{present, source: "env", first_seen_at, age_days, rotate_due,
+fingerprint_known}`, plus the health status of each external integration.
+`first_seen_at`/`age_days`/`rotate_due` come from a one-way sha256
+fingerprint of the value (`secrets_registry.fingerprint`, salted by
+`SECRET_FP_SALT`, truncated to 12 hex chars) recorded at startup
+(`record_secret_fingerprints()`) purely to detect when a value changes --
+the fingerprint itself is never returned by this endpoint or logged, only
+used internally to compare "did this rotate". `rotate_due` fires once
+`age_days >= SECRET_ROTATION_DAYS` (env, default 90). It never returns a
+secret's value, length, hash, or fingerprint, and never exposes anything
+from `users`/`payments`/`chat_completion_requests`.
+`tests/routes/test_admin_status.py` asserts no configured secret's value
+*or its fingerprint* appears anywhere in the response body;
+`tests/services/test_secrets_registry.py` covers the fingerprint/age logic
+itself.
 
 ## `gpu_providers.approved_by` is NULL for ADMIN_API_KEY-authenticated approvals
 
@@ -166,6 +179,7 @@ passing `require_admin` for up to the cache's 60s TTL.
   key directly (comment carried over from `20260527000001`) — if that
   changes, every table above needs a real per-row policy for the roles it
   actually uses, not just a revoke.
-- `usage_records.api_key` (plaintext) is NULL for all new rows as of this
-  migration but the column and historical values still exist until the
-  staged drop migration is run manually.
+- `usage_records.api_key` (plaintext) was dropped entirely by
+  `supabase/migrations/20260903100000_drop_usage_records_api_key.sql`
+  (applied by hand 2026-09-10, promoted from `staged-migrations/` to
+  `migrations/` in Phase D, D3 -- see `docs/DATABASE_MIGRATIONS.md`).

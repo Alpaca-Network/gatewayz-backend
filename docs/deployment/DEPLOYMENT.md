@@ -15,6 +15,11 @@ Before deploying, ensure you have:
 
 ### 1. Vercel Deployment
 
+> **Policy note (Phase D, D4):** Option A below (`vercel` CLI deploy) is
+> **not to be used against production** -- see `docs/DEPLOYMENT.md`
+> ("Vercel: Git-only"). Production deploys go through Option B (git push)
+> only; use `vercel redeploy <url>` to rebuild an existing deployment.
+
 #### Option A: Vercel CLI
 
 1. Install Vercel CLI:
