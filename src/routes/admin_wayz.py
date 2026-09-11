@@ -52,6 +52,8 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     "pricing_drift": Config.PRICING_DRIFT_INTERVAL_MINUTES,
     "gpu_liveness_sweep": Config.GPU_LIVENESS_SWEEP_INTERVAL_MINUTES,
     "gpu_rollup": 60,
+    # Staking rewards (gatewayz-backend staking rewards) -- once a day.
+    "staking_rewards": 1440,
 }
 
 # WAYZ token/staking contracts are deployed on Avalanche Fuji testnet.

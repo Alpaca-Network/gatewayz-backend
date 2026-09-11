@@ -555,6 +555,10 @@ def create_app() -> FastAPI:
             "WAYZ Staking",
         ),  # Public staking read API (supports gatewayz-backend#2246)
         (
+            "admin_staking",
+            "Admin Staking Rewards",
+        ),  # Reward-rate control + manual runs (gatewayz-backend staking rewards)
+        (
             "wallet_auth",
             "Wallet Auth",
         ),  # SIWE wallet sign-in/sign-up + linking (gatewayz-backend#2249-#2252)
