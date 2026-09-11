@@ -54,11 +54,47 @@ _aliases: dict[str, str] | None = None
 
 
 def _load_catalog_ids() -> list[str]:
-    """Every canonical id in the deduped catalog. [] when the cache is cold."""
-    from src.services.cache.model_catalog_cache import get_cached_unique_models
+    """Every model id this gateway can be asked for. [] when caches are cold.
 
-    rows = get_cached_unique_models() or []
-    return [str(r["id"]) for r in rows if isinstance(r, dict) and r.get("id")]
+    Two sources, and the first one is the point (#2304):
+
+    - ``get_cached_models("all")`` is the FLAT catalog — exactly what
+      ``GET /v1/models`` serves, i.e. what we advertise and what partners
+      build against. If we list a model, we have to accept its id; a catalog
+      that advertises what the resolver rejects is a broken promise.
+    - ``get_cached_unique_models()`` is the DEDUPED catalog, the only source
+      this index used until 2026-09-11. Measured in production that day, it
+      carried none of the ids ``/v1/models`` advertises: every fully-qualified
+      id resolved to nothing and all working bare-id resolution ran through
+      the curated ``model_aliases`` table. Kept in the union rather than
+      dropped, because nothing here should depend on the two agreeing — this
+      function's job is to be the superset.
+
+    Each source is guarded separately: one being cold or unavailable must
+    never take the other down with it.
+    """
+    ids: list[str] = []
+
+    def _collect(rows) -> None:
+        for r in rows or []:
+            if isinstance(r, dict) and r.get("id"):
+                ids.append(str(r["id"]))
+
+    try:
+        from src.services.models import get_cached_models
+
+        _collect(get_cached_models("all"))
+    except Exception as e:  # noqa: BLE001 - a cold flat catalog is not fatal
+        logger.warning("[MODEL_RESOLVE] flat catalog unavailable for index: %s", e)
+
+    try:
+        from src.services.cache.model_catalog_cache import get_cached_unique_models
+
+        _collect(get_cached_unique_models())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[MODEL_RESOLVE] unique catalog unavailable for index: %s", e)
+
+    return ids
 
 
 def _load_alias_map() -> dict[str, str]:
