@@ -162,6 +162,22 @@ async def _get_subscription_status_for_email(email: str) -> tuple[str, bool]:
         return "trial", False
 
 
+def _pay_pending_staking_rewards(address: str, user_id: int) -> None:
+    """A wallet just got linked -- pay any staking rewards that accrued
+    while it was unlinked (src/services/staking_rewards.py). Lazy import
+    (staking_rewards pulls in the credits/ledger stack this hot request
+    path doesn't otherwise need) and never raises: pay_pending_for_wallet
+    itself is written to never raise, but this call site treats a failure
+    to even import it the same way -- a signup/login must never fail
+    because of a staking-rewards side effect."""
+    try:
+        from src.services.staking_rewards import pay_pending_for_wallet
+
+        pay_pending_for_wallet(address, user_id)
+    except Exception as e:
+        logger.warning("staking_rewards.pay_pending_for_wallet failed for %s: %s", address, e)
+
+
 def _ingest_privy_wallets(user_id: int, linked_accounts: list, verified: bool) -> int:
     """Upsert verified Privy wallet linked-accounts into user_wallets
     (gatewayz-backend#2251).
@@ -220,6 +236,7 @@ def _ingest_privy_wallets(user_id: int, linked_accounts: list, verified: bool) -
             if linked is not None:
                 has_wallet = True
                 linked_count += 1
+                _pay_pending_staking_rewards(address, user_id)
     except Exception as e:
         logger.warning("privy_auth.wallet_ingest_failed user_id=%s: %s", user_id, e)
 
