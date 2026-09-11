@@ -31,20 +31,24 @@ from src.db.credit_transactions import TransactionType, get_transaction_by_reque
 from src.db.staking_rewards import (
     create_accrual,
     get_accrual,
+    get_accruals_for_user,
     get_active_rates,
+    get_all_accruals_since,
     list_pending_accruals,
     mark_accrual_paid,
     mark_accrual_pending_failed,
 )
-from src.db.user_wallets import get_wallet
+from src.db.user_wallets import get_wallet, get_wallets_for_user
 from src.db.users import add_credits_to_user
-from src.db.wallet_stakes import get_max_last_synced_at, list_wallets_with_stake
+from src.db.wallet_stakes import get_max_last_synced_at, get_wallet_stake, list_wallets_with_stake
 
 logger = logging.getLogger(__name__)
 
 _WEI_PER_WAYZ = Decimal(10) ** 18
 _CREDITS_DP = Decimal("0.000001")  # 6 dp, matches credits numeric(18,6)
 _PENDING_RETRY_WINDOW_DAYS = 30
+_TOTALS_WINDOW_DAYS = 30
+_HISTORY_LIMIT = 30
 
 
 class StakingRewardsStaleError(Exception):
@@ -300,6 +304,113 @@ def run_staking_rewards_once(reward_date: date | None = None) -> dict[str, Any]:
         "credits_paid": str(credits_paid),
         "capped": capped,
         "duration": duration_seconds,
+    }
+
+
+def rate_table_view(rates: list[dict[str, Any]] | None = None) -> list[dict[str, str]]:
+    """The active rate table as API-shaped {min_stake_wayz,
+    credits_per_1k_wayz_per_day} string pairs (numbers-as-strings, per API
+    convention). Fetches active rates itself when not given."""
+    rates = rates if rates is not None else get_active_rates()
+    return [
+        {
+            "min_stake_wayz": str(r["min_stake_wayz"]),
+            "credits_per_1k_wayz_per_day": str(r["credits_per_1k_wayz_per_day"]),
+        }
+        for r in rates
+    ]
+
+
+def estimate_rewards_for_stake(staked_amount_wei: str | int) -> dict[str, str]:
+    """{'estimated_credits_per_day', 'rate_credits_per_1k'} for a raw stake
+    amount -- no user/wallet-link data, so this is safe on a public route
+    (GET /staking/wallets/{address})."""
+    rates = get_active_rates()
+    staked_wayz = wei_to_wayz(staked_amount_wei)
+    rate = _select_rate(staked_wayz, rates)
+    if rate is None:
+        return {"estimated_credits_per_day": "0", "rate_credits_per_1k": "0"}
+    estimate = _compute_credits(staked_wayz, rate)
+    return {
+        "estimated_credits_per_day": str(estimate),
+        "rate_credits_per_1k": str(rate["credits_per_1k_wayz_per_day"]),
+    }
+
+
+def _totals_from_rows(rows: list[dict[str, Any]]) -> dict[str, str]:
+    cutoff = (datetime.now(UTC).date() - timedelta(days=_TOTALS_WINDOW_DAYS)).isoformat()
+    credits_paid_30d = Decimal(0)
+    credits_paid_all = Decimal(0)
+    pending_credits = Decimal(0)
+    for row in rows:
+        credits = Decimal(str(row["credits"]))
+        if row["status"] == "paid":
+            credits_paid_all += credits
+            if row["reward_date"] >= cutoff:
+                credits_paid_30d += credits
+        elif row["status"] == "pending":
+            pending_credits += credits
+    return {
+        "credits_paid_30d": str(credits_paid_30d),
+        "credits_paid_all": str(credits_paid_all),
+        "pending_credits": str(pending_credits),
+    }
+
+
+def _history_from_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`rows` is expected newest-reward_date-first already (both
+    get_accruals_for_user and get_all_accruals_since order that way)."""
+    return [
+        {
+            "reward_date": row["reward_date"],
+            "wallet_address": row["wallet_address"],
+            "staked_wayz": str(wei_to_wayz(row["staked_amount_wei"])),
+            "credits": str(row["credits"]),
+            "status": row["status"],
+        }
+        for row in rows[:_HISTORY_LIMIT]
+    ]
+
+
+def get_rewards_view_for_user(user_id: int) -> dict[str, Any]:
+    """Everything GET /staking/rewards needs for one logged-in user:
+    whether the feature is live, the current rate table, this user's
+    linked wallets with a live daily-credit estimate, running totals, and
+    recent history. Never raises -- every sub-fetch already safe-defaults
+    to empty on a DB error (src/db/staking_rewards.py's convention)."""
+    rates = get_active_rates()
+
+    wallets_out = []
+    for w in get_wallets_for_user(user_id):
+        address = w["wallet_address"]
+        stake_row = get_wallet_stake(address)
+        staked_amount_wei = stake_row["staked_amount"] if stake_row else "0"
+        estimate = estimate_rewards_for_stake(staked_amount_wei)
+        wallets_out.append(
+            {
+                "address": address,
+                "staked_wayz": str(wei_to_wayz(staked_amount_wei)),
+                "estimated_credits_per_day": estimate["estimated_credits_per_day"],
+            }
+        )
+
+    rows = get_accruals_for_user(user_id)
+
+    return {
+        "enabled": Config.STAKING_REWARDS_ENABLED,
+        "rate_table": rate_table_view(rates),
+        "wallets": wallets_out,
+        "totals": _totals_from_rows(rows),
+        "history": _history_from_rows(rows),
+    }
+
+
+def get_global_rewards_summary() -> dict[str, Any]:
+    """Global totals across every user/wallet -- backs
+    GET /admin/staking/rewards/summary."""
+    rows = get_all_accruals_since()
+    return {
+        "totals": _totals_from_rows(rows),
     }
 
 

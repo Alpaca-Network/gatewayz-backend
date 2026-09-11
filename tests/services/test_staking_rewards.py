@@ -37,6 +37,8 @@ class FakeStakingDB:
         self.all_credit_attempts: list[dict] = []  # every call, success or fail
         self.fail_next_credit_calls = 0
         self._txn_id_seq = 1000
+        self.wallets_for_user: dict[int, list[dict]] = {}
+        self.wallet_stakes: dict[str, dict] = {}
 
     # -- src.db.staking_rewards ------------------------------------------------
     def get_active_rates(self):
@@ -134,6 +136,23 @@ class FakeStakingDB:
                 return {"id": self._txn_id_seq}
         return None
 
+    # -- view-building helpers (GET /staking/rewards, admin summary) --------
+    def get_accruals_for_user(self, user_id):
+        rows = [row for row in self.accruals.values() if row.get("user_id") == user_id]
+        return sorted(rows, key=lambda r: r["reward_date"], reverse=True)
+
+    def get_all_accruals_since(self, min_reward_date=None):
+        rows = list(self.accruals.values())
+        if min_reward_date is not None:
+            rows = [r for r in rows if r["reward_date"] >= min_reward_date]
+        return sorted(rows, key=lambda r: r["reward_date"], reverse=True)
+
+    def get_wallets_for_user(self, user_id):
+        return list(self.wallets_for_user.get(user_id, []))
+
+    def get_wallet_stake(self, address):
+        return self.wallet_stakes.get(address.lower())
+
 
 @pytest.fixture
 def store(monkeypatch):
@@ -153,6 +172,10 @@ def store(monkeypatch):
     monkeypatch.setattr(
         staking_rewards, "get_transaction_by_request_id", fake.get_transaction_by_request_id
     )
+    monkeypatch.setattr(staking_rewards, "get_accruals_for_user", fake.get_accruals_for_user)
+    monkeypatch.setattr(staking_rewards, "get_all_accruals_since", fake.get_all_accruals_since)
+    monkeypatch.setattr(staking_rewards, "get_wallets_for_user", fake.get_wallets_for_user)
+    monkeypatch.setattr(staking_rewards, "get_wallet_stake", fake.get_wallet_stake)
     monkeypatch.setattr(staking_rewards.Config, "STAKING_REWARDS_ENABLED", True)
     monkeypatch.setattr(staking_rewards.Config, "STAKING_REWARDS_DAILY_CAP_CREDITS", 50.0)
     monkeypatch.setattr(staking_rewards.Config, "STAKING_REWARDS_MIN_CREDITS", 0.0001)
@@ -332,3 +355,102 @@ class TestRateTierSelection:
     def test_no_covering_tier_returns_none(self):
         rates = [{"id": 2, "min_stake_wayz": "10000", "credits_per_1k_wayz_per_day": "0.012"}]
         assert staking_rewards._select_rate(Decimal("1"), rates) is None
+
+
+class TestEstimateRewardsForStake:
+    def test_returns_estimate_and_rate(self, store):
+        result = staking_rewards.estimate_rewards_for_stake(str(5000 * 10**18))
+        assert result["estimated_credits_per_day"] == "0.050000"  # 5000/1000 * 0.01
+        assert result["rate_credits_per_1k"] == "0.010000"
+
+    def test_zero_stake_returns_zeros(self, store):
+        result = staking_rewards.estimate_rewards_for_stake("0")
+        assert result["estimated_credits_per_day"] == "0.000000"
+        assert result["rate_credits_per_1k"] == "0.010000"
+
+    def test_no_rates_configured_returns_zero_strings(self, store):
+        store.rates = []
+        result = staking_rewards.estimate_rewards_for_stake(str(5000 * 10**18))
+        assert result == {"estimated_credits_per_day": "0", "rate_credits_per_1k": "0"}
+
+
+class TestRewardsViewForUser:
+    def test_assembles_wallets_totals_and_history(self, store):
+        store.wallets_for_user[7] = [{"wallet_address": ADDRESS}]
+        store.wallet_stakes[ADDRESS] = {"staked_amount": str(5000 * 10**18)}
+        today = datetime.now(UTC).date().isoformat()
+        old = (datetime.now(UTC).date() - timedelta(days=60)).isoformat()
+        store.accruals[(ADDRESS, today)] = {
+            "id": 1,
+            "wallet_address": ADDRESS,
+            "user_id": 7,
+            "reward_date": today,
+            "staked_amount_wei": str(5000 * 10**18),
+            "rate_id": 1,
+            "credits": "50.000000",
+            "status": "paid",
+        }
+        store.accruals[(ADDRESS, old)] = {
+            "id": 2,
+            "wallet_address": ADDRESS,
+            "user_id": 7,
+            "reward_date": old,
+            "staked_amount_wei": str(5000 * 10**18),
+            "rate_id": 1,
+            "credits": "40.000000",
+            "status": "paid",
+        }
+
+        view = staking_rewards.get_rewards_view_for_user(7)
+
+        assert view["enabled"] is True
+        assert view["rate_table"][0] == {
+            "min_stake_wayz": "0",
+            "credits_per_1k_wayz_per_day": "0.010000",
+        }
+        assert view["wallets"] == [
+            {
+                "address": ADDRESS,
+                "staked_wayz": "5000",
+                "estimated_credits_per_day": "0.050000",
+            }
+        ]
+        assert view["totals"]["credits_paid_30d"] == "50.000000"
+        assert view["totals"]["credits_paid_all"] == "90.000000"
+        assert view["totals"]["pending_credits"] == "0"
+        assert len(view["history"]) == 2
+        assert view["history"][0]["reward_date"] == today  # newest first
+
+    def test_no_wallets_returns_empty_view(self, store):
+        view = staking_rewards.get_rewards_view_for_user(7)
+        assert view["wallets"] == []
+        assert view["history"] == []
+        assert view["totals"] == {
+            "credits_paid_30d": "0",
+            "credits_paid_all": "0",
+            "pending_credits": "0",
+        }
+
+
+class TestGlobalRewardsSummary:
+    def test_totals_across_all_users(self, store):
+        today = datetime.now(UTC).date().isoformat()
+        store.accruals[(ADDRESS, today)] = {
+            "wallet_address": ADDRESS,
+            "user_id": 7,
+            "reward_date": today,
+            "credits": "10.000000",
+            "status": "paid",
+        }
+        store.accruals[("0x" + "2" * 40, today)] = {
+            "wallet_address": "0x" + "2" * 40,
+            "user_id": None,
+            "reward_date": today,
+            "credits": "5.000000",
+            "status": "pending",
+        }
+
+        summary = staking_rewards.get_global_rewards_summary()
+
+        assert summary["totals"]["credits_paid_all"] == "10.000000"
+        assert summary["totals"]["pending_credits"] == "5.000000"
