@@ -1535,7 +1535,9 @@ def start_staking_rewards_scheduler():
             coalesce=True,
         )
         _staking_rewards_scheduler.start()
-        logger.info("✅ Staking rewards scheduler started (next run at %02d:%02d UTC)", hour, minute)
+        logger.info(
+            "✅ Staking rewards scheduler started (next run at %02d:%02d UTC)", hour, minute
+        )
     except Exception as e:
         logger.error("❌ Failed to start staking rewards scheduler: %s", e)
         logger.exception(e)
