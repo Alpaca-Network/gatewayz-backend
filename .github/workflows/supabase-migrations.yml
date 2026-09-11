@@ -175,7 +175,12 @@ jobs:
           # --include-all skips the interactive confirmation prompt in CI.
           # db push automatically skips already-applied migrations and only
           # applies new ones — all local files must be present for this to work.
+          set -o pipefail
           supabase db push --include-all --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-output.txt
+          if grep -qE "^ERROR:" migration-output.txt; then
+            echo "::error::supabase db push reported an error (see output above)"
+            exit 1
+          fi
           echo "Migrations applied successfully"
 
       - name: Verify migration status
