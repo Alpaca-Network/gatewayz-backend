@@ -86,6 +86,12 @@ TARGET_TABLES = frozenset(
         # on top of RLS), added in 20260911000001_audit_log_and_staff.sql.
         "audit_log",
         "admin_invites",
+        # Staking rewards (gatewayz-backend staking rewards, boss's rule:
+        # stakers paid in inference credits) -- same service-role-only,
+        # RLS-enabled-no-policy posture, added in
+        # 20260911120000_staking_rewards.sql.
+        "staking_reward_rates",
+        "staking_reward_accruals",
     }
 )
 
