@@ -97,6 +97,11 @@ class TestMetadataAllowList:
             "admin_user_id",
             "duration_minutes",
             "stripe_session_id",
+            "wallet",
+            "reward_date",
+            "staked_amount_wei",
+            "rate_id",
+            "capped",
         ],
     )
     def test_every_known_legitimate_key_survives(self, sb, key):

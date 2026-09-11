@@ -176,6 +176,25 @@ class Config:
     )
     # Placeholder; the real value is a product decision, not set here.
     WAYZ_DAILY_INFERENCE_CAPACITY = int(_get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0"))
+    # Staking rewards (gatewayz-backend staking rewards, boss's rule: WAYZ
+    # stakers are paid in inference credits; providers who offer inference
+    # are paid in WAYZ -- already built, M4 provider earnings/settlement).
+    # Off by default -- flips on in prod once the boss confirms the rate
+    # table (see supabase/migrations/20260911120000_staking_rewards.sql's
+    # tiny placeholder values) and docs/staking/REWARDS.md.
+    STAKING_REWARDS_ENABLED = _get_env_var("STAKING_REWARDS_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    STAKING_REWARDS_DAILY_CAP_CREDITS = float(
+        _get_env_var("STAKING_REWARDS_DAILY_CAP_CREDITS", "50.0")
+    )
+    STAKING_REWARDS_MIN_CREDITS = float(_get_env_var("STAKING_REWARDS_MIN_CREDITS", "0.0001"))
+    # Daily cron time (UTC) the job runs at -- see
+    # src/services/scheduled_sync.py::start_staking_rewards_scheduler.
+    STAKING_REWARDS_CRON_HOUR_UTC = int(_get_env_var("STAKING_REWARDS_CRON_HOUR_UTC", "0"))
+    STAKING_REWARDS_CRON_MINUTE_UTC = int(_get_env_var("STAKING_REWARDS_CRON_MINUTE_UTC", "20"))
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.
