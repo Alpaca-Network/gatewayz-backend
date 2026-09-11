@@ -1,3 +1,5 @@
+-- Renamed from 20260903100000_… on 2026-09-11: that version number collided with
+-- usage_records_hardening.sql and made `supabase db push` abort. Already applied to prod by hand on 2026-09-10; idempotent.
 -- Migration: drop the plaintext usage_records.api_key column
 -- Created: 2026-09-03 (staged) -- promoted to supabase/migrations/ 2026-09-11
 -- (gatewayz-backend Phase D, D3).
