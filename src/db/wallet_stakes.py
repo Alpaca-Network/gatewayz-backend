@@ -125,6 +125,56 @@ def get_stake_totals() -> tuple[str, int]:
         return "0", 0
 
 
+def list_wallets_with_stake() -> list[dict]:
+    """All wallet_stakes rows with a nonzero staked_amount -- the set the
+    daily staking-rewards job (src/services/staking_rewards.py) pays.
+    staked_amount can't go negative (only ever written from an on-chain
+    balance read), so != '0' is equivalent to > 0 here. Empty list on any
+    lookup error."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_WALLET_STAKES_TABLE)
+            .select("wallet_address, staked_amount, last_synced_at")
+            .neq("staked_amount", "0")
+            .limit(_STAKE_TOTALS_ROW_CAP)
+            .execute()
+        )
+        rows = result.data or []
+        if len(rows) >= _STAKE_TOTALS_ROW_CAP:
+            logger.warning(
+                f"list_wallets_with_stake hit the {_STAKE_TOTALS_ROW_CAP}-row cap; "
+                "some staked wallets may not be paid this run"
+            )
+        return rows
+    except Exception as e:
+        logger.warning(f"wallet_stakes list-with-stake lookup failed: {e}")
+        return []
+
+
+def get_max_last_synced_at() -> str | None:
+    """Most recent last_synced_at across every tracked wallet, or None if
+    wallet_stakes is empty (or on error). Backs the staking-rewards job's
+    stale-sync guard -- if the on-chain sync has fallen behind, the reward
+    computation for "today's" stake would be based on data too old to
+    trust, so the job must skip the whole run rather than pay wrong amounts."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_WALLET_STAKES_TABLE)
+            .select("last_synced_at")
+            .order("last_synced_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            return None
+        return result.data[0]["last_synced_at"]
+    except Exception as e:
+        logger.warning(f"wallet_stakes max last_synced_at lookup failed: {e}")
+        return None
+
+
 def get_sync_cursor(contract_address: str) -> int | None:
     """Last-synced block for this contract, or None if never synced (or on error)."""
     try:

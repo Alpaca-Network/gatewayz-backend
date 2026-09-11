@@ -95,6 +95,13 @@ _METADATA_ALLOWED_KEYS = frozenset(
         "amount_paid",
         "topup_fee_rate",
         "topup_fee",
+        # Staking rewards (src/services/staking_rewards.py) -- daily WAYZ
+        # staking payout metadata.
+        "wallet",
+        "reward_date",
+        "staked_amount_wei",
+        "rate_id",
+        "capped",
     }
 )
 
@@ -133,6 +140,7 @@ class TransactionType:
     SUBSCRIPTION_CANCELLATION = "subscription_cancellation"  # Allowance forfeited on cancel
     SUBSCRIPTION_UPGRADE = "subscription_upgrade"  # Allowance reset on tier upgrade
     SUBSCRIPTION_DOWNGRADE = "subscription_downgrade"  # Allowance reset on tier downgrade
+    STAKING_REWARD = "staking_reward"  # Daily WAYZ staking payout (inference credits)
 
 
 def get_transaction_by_request_id(request_id: str) -> dict[str, Any] | None:

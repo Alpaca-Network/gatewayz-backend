@@ -164,6 +164,7 @@ def test_nonce_rejects_malformed_address():
 # ---------------------------------------------------------------------------
 
 
+@patch("src.services.staking_rewards.pay_pending_for_wallet")
 @patch("src.routes.wallet_auth.link_wallet")
 @patch("src.routes.wallet_auth.create_api_key")
 @patch("src.routes.wallet_auth.resolve_key_environment")
@@ -181,6 +182,7 @@ def test_verify_new_wallet_signs_up_and_provisions_key(
     mock_resolve_env,
     mock_create_api_key,
     mock_link_wallet,
+    mock_pay_pending,
 ):
     mock_rl.return_value = _ALLOWED
     account = Account.create()
@@ -232,6 +234,8 @@ def test_verify_new_wallet_signs_up_and_provisions_key(
     assert args[1] == account.address.lower()
     assert kwargs["source"] == "siwe"
     assert kwargs["make_primary"] is True
+
+    mock_pay_pending.assert_called_once_with(account.address.lower(), 99)
 
 
 @patch("src.routes.wallet_auth._handle_existing_user")
@@ -553,6 +557,40 @@ def test_link_first_wallet_becomes_primary(
     assert response.json()["data"]["wallet"]["is_primary"] is True
     _, kwargs = mock_link_wallet.call_args
     assert kwargs["make_primary"] is True
+
+
+@patch("src.services.staking_rewards.pay_pending_for_wallet")
+@patch("src.routes.wallet_auth.link_wallet")
+@patch("src.routes.wallet_auth.count_wallets")
+@patch("src.routes.wallet_auth.get_wallet")
+@patch("src.routes.wallet_auth.get_redis_client")
+def test_link_pays_pending_staking_rewards_on_success(
+    mock_get_redis, mock_get_wallet, mock_count_wallets, mock_link_wallet, mock_pay_pending
+):
+    account = Account.create()
+    message = _link_message(account.address, user_id=_TEST_USER_ID)
+    mock_get_redis.return_value = _redis(getdel_return=message)
+    mock_get_wallet.return_value = None
+    mock_count_wallets.return_value = 0
+    mock_link_wallet.return_value = {
+        "wallet_address": account.address.lower(),
+        "source": "siwe",
+        "is_primary": True,
+        "wallet_client_type": None,
+        "verified_at": "2026-09-03T00:00:00Z",
+    }
+
+    response = client.post(
+        "/auth/wallet/link",
+        json={
+            "wallet_address": account.address,
+            "message": message,
+            "signature": _sign(account, message),
+        },
+    )
+
+    assert response.status_code == 200
+    mock_pay_pending.assert_called_once_with(account.address.lower(), _TEST_USER_ID)
 
 
 @patch("src.routes.wallet_auth.get_wallet")

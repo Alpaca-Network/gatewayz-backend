@@ -14,7 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.config.config import Config
 from src.db.wallet_stakes import get_stake_totals, get_sync_cursor_row, get_wallet_stake
+from src.security.deps import get_current_user
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
+from src.services.staking_rewards import estimate_rewards_for_stake, get_rewards_view_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +95,21 @@ async def get_wallet_staking(
             "daily_inference_capacity": str(Config.WAYZ_DAILY_INFERENCE_CAPACITY),
             "contracts": _contracts(),
             "configured": bool(Config.WAYZ_STAKING_CONTRACT_ADDRESS),
+            # Staking rewards (gatewayz-backend staking rewards) -- computed
+            # from the public rate table only, no user/wallet-link data.
+            "rewards": estimate_rewards_for_stake(staked_amount),
         },
     }
+
+
+@router.get("/staking/rewards", tags=["staking"])
+async def get_staking_rewards(
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """The logged-in user's staking-rewards view: whether the feature is
+    live, the current rate table, this user's linked wallets with a daily
+    estimate, running totals, and recent history."""
+    return {"success": True, "data": get_rewards_view_for_user(user["id"])}
 
 
 @router.get("/staking/summary", tags=["staking"])

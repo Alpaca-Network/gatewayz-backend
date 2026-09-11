@@ -6,10 +6,12 @@ import pytest
 
 from src.db.wallet_stakes import (
     get_all_wallet_addresses,
+    get_max_last_synced_at,
     get_stake_totals,
     get_sync_cursor,
     get_sync_cursor_row,
     get_wallet_stake,
+    list_wallets_with_stake,
     set_sync_cursor,
     upsert_wallet_stake,
 )
@@ -34,6 +36,8 @@ def _mock_table_client(table_data: dict):
             query = MagicMock()
             query.select.return_value = query
             query.eq.return_value = query
+            query.neq.return_value = query
+            query.order.return_value = query
             query.limit.return_value = query
             query.upsert.return_value = query
             query.execute.return_value = MagicMock(data=table_data.get(name, []))
@@ -188,3 +192,42 @@ def test_get_sync_cursor_row_returns_none_on_error(sb):
     client.table.side_effect = RuntimeError("boom")
     with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
         assert get_sync_cursor_row("0xcontract") is None
+
+
+def test_list_wallets_with_stake_filters_nonzero(sb):
+    rows = [{"wallet_address": "0xabc", "staked_amount": "500", "last_synced_at": "t"}]
+    client = _mock_table_client({"wallet_stakes": rows})
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        result = list_wallets_with_stake()
+    assert result == rows
+    table_query = client.table("wallet_stakes")
+    args, _ = table_query.neq.call_args
+    assert args == ("staked_amount", "0")
+
+
+def test_list_wallets_with_stake_returns_empty_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert list_wallets_with_stake() == []
+
+
+def test_get_max_last_synced_at_returns_none_when_empty(sb):
+    client = _mock_table_client({"wallet_stakes": []})
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert get_max_last_synced_at() is None
+
+
+def test_get_max_last_synced_at_returns_latest_value(sb):
+    client = _mock_table_client(
+        {"wallet_stakes": [{"last_synced_at": "2026-09-10T00:15:00+00:00"}]}
+    )
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert get_max_last_synced_at() == "2026-09-10T00:15:00+00:00"
+
+
+def test_get_max_last_synced_at_returns_none_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert get_max_last_synced_at() is None

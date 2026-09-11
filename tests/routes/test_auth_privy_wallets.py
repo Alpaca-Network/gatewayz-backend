@@ -142,6 +142,36 @@ class TestIngestPrivyWallets:
             42, WALLET_1.lower(), source="privy", wallet_client_type="privy", make_primary=True
         )
 
+    @patch("src.services.staking_rewards.pay_pending_for_wallet")
+    @patch("src.routes.auth.link_wallet")
+    @patch("src.routes.auth.get_wallet", return_value=None)
+    @patch("src.routes.auth.count_wallets", return_value=0)
+    def test_successful_link_pays_pending_staking_rewards(
+        self, mock_count, mock_get_wallet, mock_link, mock_pay
+    ):
+        mock_link.return_value = {"id": 1, "wallet_address": WALLET_1}
+
+        _ingest_privy_wallets(
+            42, [_wallet_account(WALLET_1, wallet_client_type="privy")], verified=True
+        )
+
+        mock_pay.assert_called_once_with(WALLET_1.lower(), 42)
+
+    @patch("src.services.staking_rewards.pay_pending_for_wallet", side_effect=RuntimeError("boom"))
+    @patch("src.routes.auth.link_wallet")
+    @patch("src.routes.auth.get_wallet", return_value=None)
+    @patch("src.routes.auth.count_wallets", return_value=0)
+    def test_pay_pending_staking_rewards_failure_never_propagates(
+        self, mock_count, mock_get_wallet, mock_link, mock_pay
+    ):
+        mock_link.return_value = {"id": 1, "wallet_address": WALLET_1}
+
+        count = _ingest_privy_wallets(
+            42, [_wallet_account(WALLET_1, wallet_client_type="privy")], verified=True
+        )  # must not raise
+
+        assert count == 1
+
     @patch("src.routes.auth.link_wallet")
     @patch("src.routes.auth.get_wallet", return_value=None)
     @patch("src.routes.auth.count_wallets", return_value=0)

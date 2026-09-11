@@ -744,6 +744,17 @@ async def lifespan(app):
         logger.warning(f"Failed to start WAYZ staking sync scheduler: {e}")
         # Don't fail startup if WAYZ staking sync fails to start
 
+    # Start daily staking rewards job (gatewayz-backend staking rewards --
+    # boss's rule: WAYZ stakers are paid in inference credits)
+    try:
+        from src.services.scheduled_sync import start_staking_rewards_scheduler
+
+        start_staking_rewards_scheduler()
+        logger.info("Staking rewards service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start staking rewards scheduler: {e}")
+        # Don't fail startup if staking rewards scheduler fails to start
+
     # Start GPU node liveness sweep (Milestone 4 W-A1, gatewayz-backend#2262)
     try:
         from src.services.scheduled_sync import start_gpu_liveness_scheduler
@@ -988,6 +999,15 @@ async def lifespan(app):
         logger.info("WAYZ staking sync service stopped")
     except Exception as e:
         logger.warning(f"WAYZ staking sync shutdown warning: {e}")
+
+    # Stop daily staking rewards job
+    try:
+        from src.services.scheduled_sync import stop_staking_rewards_scheduler
+
+        stop_staking_rewards_scheduler()
+        logger.info("Staking rewards service stopped")
+    except Exception as e:
+        logger.warning(f"Staking rewards shutdown warning: {e}")
 
     # Stop GPU node liveness sweep
     try:

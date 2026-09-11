@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.config.config import Config
@@ -1447,6 +1448,115 @@ def stop_gpu_liveness_scheduler():
         logger.error("❌ Error stopping GPU node liveness sweep scheduler: %s", e)
     finally:
         _gpu_liveness_scheduler = None
+
+
+# ============================================================================
+# Staking rewards (gatewayz-backend staking rewards, boss's rule: WAYZ
+# stakers are paid in inference credits) -- daily job that pays every
+# staked wallet's reward for "yesterday" (UTC). Runs once a day at
+# Config.STAKING_REWARDS_CRON_HOUR_UTC:STAKING_REWARDS_CRON_MINUTE_UTC
+# (default 00:20 UTC, after wayz_staking_sync has had time to run at least
+# once). Gated by Config.STAKING_REWARDS_ENABLED itself (off by default) --
+# unlike the on-chain sync jobs, this scheduler always starts so a job-run
+# record ("skipped: disabled") shows up on the ops page even while the
+# feature is off.
+# ============================================================================
+_staking_rewards_scheduler: AsyncIOScheduler | None = None
+
+
+async def run_scheduled_staking_rewards():
+    """Run one pass of the daily staking-rewards job
+    (src/services/staking_rewards.py::run_staking_rewards_once)."""
+    from src.services.staking_rewards import StakingRewardsStaleError, run_staking_rewards_once
+
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(run_staking_rewards_once)
+        duration_ms = int((datetime.now(UTC) - run_started_at).total_seconds() * 1000)
+
+        if result.get("skipped") == "disabled":
+            record_job_run(
+                "staking_rewards",
+                ok=True,
+                summary={"skipped": "disabled"},
+                duration_ms=duration_ms,
+            )
+            return
+
+        logger.info(
+            "✅ Staking rewards OK | reward_date=%s wallets=%s paid=%s pending=%s skipped=%s "
+            "credits_paid=%s capped=%s",
+            result.get("reward_date"),
+            result.get("wallets"),
+            result.get("paid"),
+            result.get("pending"),
+            result.get("skipped"),
+            result.get("credits_paid"),
+            result.get("capped"),
+        )
+        record_job_run("staking_rewards", ok=True, summary=result, duration_ms=duration_ms)
+    except StakingRewardsStaleError as e:
+        logger.warning("Staking rewards skipped: %s", e)
+        record_job_run(
+            "staking_rewards",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+    except Exception as e:
+        logger.warning("Staking rewards run failed (non-fatal): %s", e)
+        record_job_run(
+            "staking_rewards",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+def start_staking_rewards_scheduler():
+    """Start the APScheduler cron job for daily staking rewards (app
+    lifespan). Always starts, regardless of STAKING_REWARDS_ENABLED -- the
+    job itself no-ops (and records a 'skipped: disabled' job run) when the
+    feature flag is off."""
+    global _staking_rewards_scheduler
+
+    hour = Config.STAKING_REWARDS_CRON_HOUR_UTC
+    minute = Config.STAKING_REWARDS_CRON_MINUTE_UTC
+    logger.info("Starting staking rewards scheduler (daily at %02d:%02d UTC)", hour, minute)
+    try:
+        _staking_rewards_scheduler = AsyncIOScheduler()
+        _staking_rewards_scheduler.add_job(
+            run_scheduled_staking_rewards,
+            trigger=CronTrigger(hour=hour, minute=minute, timezone="UTC"),
+            id="staking_rewards",
+            name="Staking Rewards Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _staking_rewards_scheduler.start()
+        logger.info(
+            "✅ Staking rewards scheduler started (next run at %02d:%02d UTC)", hour, minute
+        )
+    except Exception as e:
+        logger.error("❌ Failed to start staking rewards scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_staking_rewards_scheduler():
+    """Stop the staking-rewards APScheduler gracefully (called during shutdown)."""
+    global _staking_rewards_scheduler
+
+    if _staking_rewards_scheduler is None:
+        return
+    logger.info("Stopping staking rewards scheduler...")
+    try:
+        _staking_rewards_scheduler.shutdown(wait=True)
+        logger.info("✅ Staking rewards scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping staking rewards scheduler: %s", e)
+    finally:
+        _staking_rewards_scheduler = None
 
 
 def get_pricing_drift_status() -> dict[str, Any]:

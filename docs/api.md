@@ -920,6 +920,62 @@ not `404` — simpler for the dashboard to render.
 }
 ```
 
+### Staking Rewards (WAYZ stakers paid in inference credits)
+
+Stakers are paid in inference credits (providers who offer inference are
+paid in WAYZ instead — a separate, already-shipped system). See
+`docs/staking/REWARDS.md` for the full design — how the daily job
+computes and pays rewards, idempotency, unlinked-wallet handling, and ops.
+
+`GET /staking/wallets/{wallet_address}` above also carries a `rewards`
+block computed from the rate table alone (no user/wallet-link data), so
+it's safe on that no-auth endpoint:
+
+```json
+"rewards": { "estimated_credits_per_day": "0.050000", "rate_credits_per_1k": "0.010000" }
+```
+
+```http
+GET /staking/rewards
+```
+
+Requires auth. The calling user's staking-rewards view: whether the
+feature is live, the current rate table, their linked wallets with a live
+daily-credit estimate, running totals, and recent history. All numbers are
+strings.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "enabled": false,
+    "rate_table": [
+      { "min_stake_wayz": "0", "credits_per_1k_wayz_per_day": "0.010000" },
+      { "min_stake_wayz": "10000", "credits_per_1k_wayz_per_day": "0.012000" },
+      { "min_stake_wayz": "100000", "credits_per_1k_wayz_per_day": "0.015000" }
+    ],
+    "wallets": [
+      { "address": "0x...", "staked_wayz": "5000", "estimated_credits_per_day": "0.050000" }
+    ],
+    "totals": {
+      "credits_paid_30d": "0",
+      "credits_paid_all": "0",
+      "pending_credits": "0"
+    },
+    "history": [
+      {
+        "reward_date": "2026-09-10",
+        "wallet_address": "0x...",
+        "staked_wayz": "5000",
+        "credits": "0.050000",
+        "status": "paid"
+      }
+    ]
+  }
+}
+```
+
 ### Get Staking Summary
 
 ```http
@@ -1304,6 +1360,77 @@ workstream) plus two dedicated docs. Starting points:
 - **Admin ops status** — "Admin — WAYZ Ops Status" below: `GET
   /admin/wayz/status`, admin-only, job health + config + counters +
   pending provider approvals in one call.
+
+## Admin — Staking Rewards
+
+Rate-table control and manual runs for the staking-rewards job. See
+`docs/staking/REWARDS.md` for the full design. Envelope is `{success,
+data}`; error reasons are `error.context.parameter_value`.
+
+```http
+GET /admin/staking/reward-rates
+```
+
+`Depends(require_admin_or_env_key)`. Returns every active rate row
+(`{id, min_stake_wayz, credits_per_1k_wayz_per_day, active, note}`).
+
+```http
+PUT /admin/staking/reward-rates
+```
+
+`Depends(require_superadmin)`. Body: `{"rates": [{"min_stake_wayz": 0,
+"credits_per_1k_wayz_per_day": 0.01, "note": "..."}]}` — `rates` must be
+non-empty. Deactivates the current active set and inserts the new one
+(existing rows referenced by a paid accrual are never mutated in place).
+Audited as `staking.rates.update`. Returns the newly-inserted rows.
+
+```http
+POST /admin/staking/rewards/run
+```
+
+`Depends(require_superadmin)`. Body: `{"reward_date": "2026-09-10"}`
+(optional — defaults to yesterday UTC). Runs the job immediately, with the
+same idempotency guarantees as the scheduled run — safe to call any number
+of times. Audited as `staking.rewards.run`. Returns the run summary:
+
+```json
+{
+  "success": true,
+  "data": {
+    "reward_date": "2026-09-10",
+    "wallets": 3,
+    "paid": 2,
+    "pending": 1,
+    "skipped": 0,
+    "credits_paid": "0.150000",
+    "capped": 0,
+    "duration": 0.42
+  }
+}
+```
+
+A stale on-chain sync returns `409`:
+```json
+{ "error": { "code": "stake_sync_stale", "context": { "parameter_value": "stake_sync_stale" } } }
+```
+
+```http
+GET /admin/staking/rewards/summary
+```
+
+`Depends(require_admin_or_env_key)`. The last job run (from the ops job
+registry, same shape as one entry of `GET /admin/wayz/status`'s `jobs`
+block) plus global totals across every user:
+
+```json
+{
+  "success": true,
+  "data": {
+    "last_run": { "name": "staking_rewards", "ok": true, "ran_at": "...", "summary": { "...": "..." } },
+    "totals": { "credits_paid_30d": "0", "credits_paid_all": "0", "pending_credits": "0" }
+  }
+}
+```
 
 ## Admin — WAYZ Ops Status
 
