@@ -12,6 +12,10 @@ import pytest
 from src.services import model_resolution
 from src.services.model_resolution import resolve_catalog_model_id
 
+# Captured at import, before the autouse fixture below replaces the attribute.
+# Tests that need the REAL loader (to exercise its catalog sources) restore it.
+_REAL_LOAD_CATALOG_IDS = model_resolution._load_catalog_ids
+
 CATALOG = [
     {"id": "anthropic/claude-sonnet-4-6"},
     {"id": "anthropic/claude-sonnet-5"},
@@ -220,3 +224,71 @@ class TestUndatedAliasWhenTheIndexIsOnlyTheAliasTable:
 
     def test_an_unknown_model_is_still_unresolved(self):
         assert resolve_catalog_model_id("claude-sonnet-9-9").canonical_id is None
+
+
+class TestEveryAdvertisedModelResolves:
+    """#2304: if GET /v1/models lists it, the resolver has to accept it.
+
+    A catalog that advertises ids the gateway then rejects is a broken promise
+    to anyone building from it — which is exactly what Flashy would have hit.
+    Until 2026-09-11 the index came only from the DEDUPED catalog while
+    /v1/models serves the FLAT one, and in production the two shared no ids at
+    all.
+
+    These fixtures deliberately make the two sources DISAGREE, which is what
+    production actually looked like. The pre-existing fixtures used one
+    realistic source and agreed with themselves, which is why two rounds of
+    fixes passed CI while changing nothing live.
+    """
+
+    FLAT = [
+        {"id": "anthropic/claude-sonnet-4-6"},
+        {"id": "anthropic/claude-sonnet-4-5-20250929"},
+        {"id": "openai/gpt-4o-mini"},
+    ]
+    UNIQUE = [{"id": "deepinfra/unrelated-model"}]
+
+    @pytest.fixture(autouse=True)
+    def _two_disagreeing_sources(self, monkeypatch):
+        # The module-level autouse fixture stubs _load_catalog_ids wholesale;
+        # this class is testing that function itself, so put the real one back
+        # and stub the sources it reads instead.
+        monkeypatch.setattr(model_resolution, "_load_catalog_ids", _REAL_LOAD_CATALOG_IDS)
+        monkeypatch.setattr(
+            "src.services.models.get_cached_models", lambda _g: list(self.FLAT), raising=False
+        )
+        monkeypatch.setattr(
+            "src.services.cache.model_catalog_cache.get_cached_unique_models",
+            lambda: list(self.UNIQUE),
+            raising=False,
+        )
+        monkeypatch.setattr(model_resolution, "_load_alias_map", dict)
+        model_resolution.invalidate_resolution_index()
+        yield
+        model_resolution.invalidate_resolution_index()
+
+    @pytest.mark.parametrize("row", FLAT)
+    def test_every_advertised_id_resolves_to_itself(self, row):
+        r = resolve_catalog_model_id(row["id"])
+        assert r.canonical_id == row["id"], f"{row['id']} is advertised but does not resolve"
+
+    def test_the_deduped_source_is_still_indexed(self):
+        # Kept in the union rather than replaced: nothing should depend on the
+        # two sources agreeing.
+        assert resolve_catalog_model_id("deepinfra/unrelated-model").canonical_id is not None
+
+    def test_a_bare_advertised_name_resolves(self):
+        assert resolve_catalog_model_id("gpt-4o-mini").canonical_id == "openai/gpt-4o-mini"
+
+    def test_an_undated_advertised_alias_resolves(self):
+        r = resolve_catalog_model_id("claude-sonnet-4-5")
+        assert r.canonical_id == "anthropic/claude-sonnet-4-5-20250929"
+
+    def test_one_dead_source_does_not_take_down_the_other(self, monkeypatch):
+        def _boom(*a, **k):
+            raise RuntimeError("cache down")
+
+        monkeypatch.setattr("src.services.models.get_cached_models", _boom, raising=False)
+        model_resolution.invalidate_resolution_index()
+        # The deduped source alone must still produce a usable index.
+        assert resolve_catalog_model_id("deepinfra/unrelated-model").canonical_id is not None
