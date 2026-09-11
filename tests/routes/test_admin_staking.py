@@ -120,6 +120,57 @@ class TestUpdateRewardRates:
         response = client.put("/admin/staking/reward-rates", json={"rates": []})
         assert response.status_code == 422
 
+    def test_rejects_rate_set_missing_a_zero_floor_tier(self, superadmin_override):
+        with patch("src.routes.admin_staking.replace_active_rates") as mock_replace:
+            response = client.put(
+                "/admin/staking/reward-rates",
+                json={
+                    "rates": [
+                        {"min_stake_wayz": 10000, "credits_per_1k_wayz_per_day": 0.01},
+                        {"min_stake_wayz": 100000, "credits_per_1k_wayz_per_day": 0.02},
+                    ]
+                },
+            )
+
+        assert response.status_code == 422
+        body = response.json()
+        assert body["error"]["code"] == "missing_zero_floor_tier"
+        assert body["error"]["context"]["parameter_value"] is None
+        mock_replace.assert_not_called()
+
+    def test_rejects_duplicate_rate_floors(self, superadmin_override):
+        with patch("src.routes.admin_staking.replace_active_rates") as mock_replace:
+            response = client.put(
+                "/admin/staking/reward-rates",
+                json={
+                    "rates": [
+                        {"min_stake_wayz": 0, "credits_per_1k_wayz_per_day": 0.01},
+                        {"min_stake_wayz": 10000, "credits_per_1k_wayz_per_day": 0.012},
+                        {"min_stake_wayz": 10000, "credits_per_1k_wayz_per_day": 0.013},
+                    ]
+                },
+            )
+
+        assert response.status_code == 422
+        body = response.json()
+        assert body["error"]["code"] == "duplicate_rate_floor"
+        assert body["error"]["context"]["parameter_value"] == [10000]
+        mock_replace.assert_not_called()
+
+    def test_rejects_negative_min_stake_wayz(self, superadmin_override):
+        response = client.put(
+            "/admin/staking/reward-rates",
+            json={"rates": [{"min_stake_wayz": -1, "credits_per_1k_wayz_per_day": 0.01}]},
+        )
+        assert response.status_code == 422
+
+    def test_rejects_negative_credits_per_1k(self, superadmin_override):
+        response = client.put(
+            "/admin/staking/reward-rates",
+            json={"rates": [{"min_stake_wayz": 0, "credits_per_1k_wayz_per_day": -0.01}]},
+        )
+        assert response.status_code == 422
+
     def test_db_failure_returns_500(self, superadmin_override):
         with patch("src.routes.admin_staking.replace_active_rates", return_value=None):
             response = client.put(

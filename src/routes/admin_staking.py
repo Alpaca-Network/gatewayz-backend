@@ -46,6 +46,53 @@ def _conflict(message: str, code: str, parameter_value: Any = None) -> HTTPExcep
     )
 
 
+def _invalid_request(message: str, code: str, parameter_value: Any = None) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={
+            "error": {
+                "message": message,
+                "type": "invalid_request_error",
+                "code": code,
+                "context": {"parameter_value": parameter_value},
+            }
+        },
+    )
+
+
+def _validate_rate_set(rates: list[Any]) -> None:
+    """Reject a rate set that can't safely stand alone as the active table:
+
+    - no tier floored at 0 -- a stake below every other tier's floor would
+      have no matching rate at all (_select_rate returns None), silently
+      skipping the wallet instead of paying it at the base rate.
+    - duplicate floors -- ambiguous which rate applies (Field(ge=0) on
+      RewardRateInput already rejects negative min_stake_wayz/credits, via
+      FastAPI's own 422 request-validation path).
+    """
+    floors = [r.min_stake_wayz for r in rates]
+
+    if 0 not in floors:
+        raise _invalid_request(
+            "Rate set must include a tier with min_stake_wayz == 0.",
+            "missing_zero_floor_tier",
+            None,
+        )
+
+    seen: set[int] = set()
+    duplicates: set[int] = set()
+    for floor in floors:
+        if floor in seen:
+            duplicates.add(floor)
+        seen.add(floor)
+    if duplicates:
+        raise _invalid_request(
+            "Rate set has duplicate min_stake_wayz floors.",
+            "duplicate_rate_floor",
+            sorted(duplicates),
+        )
+
+
 @router.get("/admin/staking/reward-rates", tags=["admin", "staking"])
 async def get_reward_rates(
     _admin_user: dict[str, Any] = Depends(require_admin_or_env_key),
@@ -62,6 +109,8 @@ async def update_reward_rates(
     """Replace the active rate set. Existing rate rows are never mutated in
     place (a rate already referenced by a paid accrual must not change out
     from under it) -- this deactivates the old set and inserts a new one."""
+    _validate_rate_set(body.rates)
+
     new_rates = replace_active_rates([r.model_dump() for r in body.rates])
     if new_rates is None:
         raise HTTPException(status_code=500, detail="Failed to update reward rates")
