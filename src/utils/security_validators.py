@@ -880,3 +880,22 @@ def sanitize_for_logging(value: str) -> str:
         value = str(value)
     # Replace newlines and carriage returns with spaces to prevent log injection
     return value.replace("\n", " ").replace("\r", " ").replace("\x00", "")
+
+
+def escape_ilike_pattern(value: str) -> str:
+    """Escape Postgres LIKE/ILIKE wildcards in a value meant for an EXACT
+    (case-insensitive) match via `.ilike()`.
+
+    postgrest-py's `.ilike(column, value)` sends `value` straight through to
+    Postgres's ILIKE operator with no escaping of its own -- `%` and `_` are
+    wildcards there, so an unescaped user-supplied value used for an
+    "exact" lookup (e.g. an email) can match rows it has no business
+    matching: `first_last@x.com` (the `_` is a single-char wildcard) would
+    also match `firstXlast@x.com`. Escaping `\\`, `%`, and `_` here makes
+    `.ilike()` behave like a case-insensitive `=`. Callers doing a
+    security-sensitive exact-match lookup should ALSO post-filter results
+    in Python (`row["email"].lower() == value.lower()`) as a second,
+    independent guard -- see src/db/users.py::get_user_by_email_ci and
+    src/services/privy_migration.py::_find_legacy_candidates.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

@@ -62,6 +62,32 @@ class TestExtractVerifiedEmail:
     def test_malformed_linked_accounts_is_safe(self):
         assert pm._extract_verified_email({"linked_accounts": "not-a-list"}) is None
 
+    def test_explicit_verified_false_is_rejected(self):
+        """Defense in depth (PR #2316 review, fix round 1): if a linked
+        account ever does carry an explicit unverified marker, honor it even
+        though `email`/`google_oauth`/`apple_oauth` are trusted by type."""
+        user = {
+            "linked_accounts": [{"type": "email", "address": "user@example.com", "verified": False}]
+        }
+        assert pm._extract_verified_email(user) is None
+
+    def test_explicit_verified_at_null_is_rejected(self):
+        user = {
+            "linked_accounts": [
+                {"type": "google_oauth", "email": "user@example.com", "verified_at": None}
+            ]
+        }
+        assert pm._extract_verified_email(user) is None
+
+    def test_falls_through_to_next_account_when_one_is_unverified(self):
+        user = {
+            "linked_accounts": [
+                {"type": "email", "address": "unverified@example.com", "verified": False},
+                {"type": "google_oauth", "email": "verified@example.com"},
+            ]
+        }
+        assert pm._extract_verified_email(user) == "verified@example.com"
+
 
 class TestAttemptAdoptionGating:
     """Preconditions that must block adoption before any network/DB call."""
@@ -102,7 +128,8 @@ class TestAttemptAdoptionHappyPath:
         mock_supabase.table.return_value.select.return_value.ilike.return_value.in_.return_value.execute.return_value.data = [
             legacy_user
         ]
-        mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [
+        # .update(...).eq("id", ...).eq("privy_user_id", old_did).execute()
+        mock_supabase.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = [
             updated_row
         ]
 
@@ -152,8 +179,8 @@ class TestAttemptAdoptionHappyPath:
         mock_response = _mock_httpx_response(_privy_user())
         mock_supabase = MagicMock()
         mock_supabase.table.return_value.select.return_value.ilike.return_value.in_.return_value.execute.return_value.data = [
-            {"id": 1, "privy_app_id": OLD_APP_ID, "is_active": True},
-            {"id": 2, "privy_app_id": OLD_APP_ID, "is_active": True},
+            {"id": 1, "email": "user@example.com", "privy_app_id": OLD_APP_ID, "is_active": True},
+            {"id": 2, "email": "user@example.com", "privy_app_id": OLD_APP_ID, "is_active": True},
         ]
 
         with (
@@ -221,6 +248,113 @@ class TestAttemptAdoptionHappyPath:
             result = await pm.attempt_adoption(new_did=NEW_DID, token_verified=True)
         assert result is None
         mock_client.assert_not_called()
+
+
+class TestFindLegacyCandidatesWildcardSafety:
+    """Fix round 1 on PR #2316: `.ilike()` is a Postgres pattern match, not
+    an exact match -- `%`/`_` in the looked-up email must not act as
+    wildcards, or a legacy row with an unrelated but pattern-compatible
+    email could be adopted into."""
+
+    def test_underscore_is_escaped_before_reaching_ilike(self, monkeypatch):
+        _configure(monkeypatch)
+        mock_supabase = MagicMock()
+        mock_supabase.table.return_value.select.return_value.ilike.return_value.in_.return_value.execute.return_value.data = (
+            []
+        )
+
+        with patch.object(pm.supabase_config, "get_supabase_client", return_value=mock_supabase):
+            pm._find_legacy_candidates("first_last@x.com")
+
+        mock_supabase.table.return_value.select.return_value.ilike.assert_called_once_with(
+            "email", "first\\_last@x.com"
+        )
+
+    def test_wildcard_near_miss_row_is_rejected_by_python_post_filter(self, monkeypatch):
+        """Belt and braces: even if the DB layer somehow returned a
+        pattern-matched near-miss (e.g. escaping regressed), the exact
+        (case-insensitive) equality check in _find_legacy_candidates must
+        still reject it -- it must never be handed to adopt_legacy_account."""
+        _configure(monkeypatch)
+        mock_supabase = MagicMock()
+        near_miss = {
+            "id": 1,
+            "email": "firstXlast@x.com",
+            "privy_app_id": OLD_APP_ID,
+            "is_active": True,
+        }
+        mock_supabase.table.return_value.select.return_value.ilike.return_value.in_.return_value.execute.return_value.data = [
+            near_miss
+        ]
+
+        with patch.object(pm.supabase_config, "get_supabase_client", return_value=mock_supabase):
+            candidates = pm._find_legacy_candidates("first_last@x.com")
+
+        assert candidates == []
+
+
+class TestAdoptLegacyAccountRaceCondition:
+    """Fix round 1 on PR #2316: the adoption UPDATE is conditioned on
+    privy_user_id still matching what was read -- a lost race must never
+    return the stale pre-read `user` dict."""
+
+    def test_lost_race_returns_the_concurrent_winners_row(self, monkeypatch):
+        _configure(monkeypatch)
+        legacy_user = {
+            "id": 42,
+            "email": "user@example.com",
+            "privy_user_id": "did:privy:oldappuser",
+            "privy_app_id": OLD_APP_ID,
+            "is_active": True,
+        }
+        concurrent_winner_row = {
+            "id": 42,
+            "privy_user_id": NEW_DID,
+            "privy_app_id": NEW_APP_ID,
+        }
+
+        mock_supabase = MagicMock()
+        mock_supabase.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+            []
+        )
+
+        with (
+            patch.object(pm.supabase_config, "get_supabase_client", return_value=mock_supabase),
+            patch.object(
+                pm.users_module, "get_user_by_privy_id", return_value=concurrent_winner_row
+            ) as mock_get_by_did,
+            patch.object(pm, "record_audit") as mock_audit,
+        ):
+            result = pm.adopt_legacy_account(user=legacy_user, new_did=NEW_DID)
+
+        assert result == concurrent_winner_row
+        mock_get_by_did.assert_called_once_with(NEW_DID)
+        mock_audit.assert_not_called()  # this request did not perform the adoption
+
+    def test_lost_race_with_no_concurrent_winner_returns_none(self, monkeypatch):
+        _configure(monkeypatch)
+        legacy_user = {
+            "id": 42,
+            "email": "user@example.com",
+            "privy_user_id": "did:privy:oldappuser",
+            "privy_app_id": OLD_APP_ID,
+            "is_active": True,
+        }
+
+        mock_supabase = MagicMock()
+        mock_supabase.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+            []
+        )
+
+        with (
+            patch.object(pm.supabase_config, "get_supabase_client", return_value=mock_supabase),
+            patch.object(pm.users_module, "get_user_by_privy_id", return_value=None),
+            patch.object(pm, "record_audit") as mock_audit,
+        ):
+            result = pm.adopt_legacy_account(user=legacy_user, new_did=NEW_DID)
+
+        assert result is None
+        mock_audit.assert_not_called()
 
 
 class TestMigrationCounts:

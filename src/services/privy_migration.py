@@ -31,8 +31,10 @@ from typing import Any
 import httpx
 
 import src.config.supabase_config as supabase_config
+import src.db.users as users_module
 from src.config import Config
 from src.db.audit import record_audit
+from src.utils.security_validators import escape_ilike_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -58,16 +60,45 @@ def _email_hash(email: str) -> str:
     return hashlib.sha256(email.strip().lower().encode()).hexdigest()[:12]
 
 
+def _is_explicitly_unverified(account: dict[str, Any]) -> bool:
+    """True only when the account payload itself carries an explicit
+    unverified marker (`verified: false` or `verified_at: null` present as a
+    key). Privy's public API docs don't document either field on `email`/
+    `google_oauth`/`apple_oauth` accounts today (see `_extract_verified_email`
+    docstring for why those types are trustworthy by construction), but this
+    is a defense-in-depth check in case a future API response ever adds one:
+    if the field is present and says "not verified", believe it -- don't
+    rely solely on account type. Absence of the field is not a signal either
+    way (most accounts here won't carry it at all)."""
+    if "verified" in account and account.get("verified") is False:
+        return True
+    return "verified_at" in account and account.get("verified_at") is None
+
+
 def _extract_verified_email(privy_user: dict[str, Any]) -> str | None:
     """
     Pull a trustworthy email out of a Privy `/users/{did}` response.
 
-    Only two account types can vouch for an email here: a verified `email`
-    linked account, or a `google_oauth`/`apple_oauth` account (Privy only
-    creates those after the provider's own email verification -- there is no
-    unverified variant). Anything else (wallet-only, phone, unlinked) yields
-    no adoptable email, which is an expected outcome (see spec §"Risks":
-    wallet-only logins cannot be adopted), not an error.
+    Only two account types can vouch for an email here:
+    - `email` -- Privy only creates this linked-account entry after the
+      user completes OTP (or magic-link) verification for that address;
+      there is no "pending"/unverified `email` account type in Privy's
+      model, so its mere presence in `linked_accounts` already means it was
+      verified by the time it landed there.
+    - `google_oauth` / `apple_oauth` -- Privy only creates these after the
+      identity provider's own sign-in flow, which itself only hands back an
+      email Google/Apple have already verified account-side. Privy does
+      not re-expose a separate verification flag for these because the
+      provider is the source of truth.
+
+    Anything else (wallet-only, phone, unlinked) yields no adoptable email,
+    which is an expected outcome (see docs/PRIVY_MIGRATION.md's Risks
+    section: wallet-only logins cannot be adopted), not an error.
+
+    Defense in depth: if a linked account of either trusted type ever DOES
+    carry an explicit unverified marker (`verified: false` or
+    `verified_at: null`), it's skipped anyway -- see
+    `_is_explicitly_unverified`.
     """
     linked_accounts = privy_user.get("linked_accounts")
     if not isinstance(linked_accounts, list):
@@ -76,12 +107,11 @@ def _extract_verified_email(privy_user: dict[str, Any]) -> str | None:
     for account in linked_accounts:
         if not isinstance(account, dict):
             continue
+        if _is_explicitly_unverified(account):
+            continue
         account_type = account.get("type")
         if account_type == "email":
             address = account.get("address") or account.get("email")
-            # Privy's own /users API does not surface a separate
-            # "verified" flag for the primary email account -- an email
-            # account only exists once its OTP/link has been verified.
             if address:
                 return str(address).strip()
         elif account_type in ("google_oauth", "apple_oauth"):
@@ -131,14 +161,23 @@ async def _fetch_privy_user(did: str) -> dict[str, Any] | None:
 
 
 def _find_legacy_candidates(email: str) -> list[dict[str, Any]]:
-    """ALL legacy (pre-migration) rows whose email matches, case-insensitively.
+    """ALL legacy (pre-migration) rows whose email matches, EXACTLY
+    (case-insensitively) -- same semantics as `lower(email) = lower(E)`.
 
     Deliberately does NOT use `db.users.get_user_by_email[_ci]` -- those
     return only the first match, which would silently hide the "more than
     one row shares this email" case this function exists to detect (the
-    spec's "ambiguous -> do NOT adopt" rule). `.ilike()` with no wildcards is
-    an exact, case-insensitive match, same semantics as `lower(email) =
-    lower(E)`.
+    spec's "ambiguous -> do NOT adopt" rule).
+
+    SECURITY (PR #2316 review, fix round 1): `.ilike()` sends its pattern
+    straight to Postgres's ILIKE operator, where `%`/`_` are wildcards -- an
+    unescaped `email` here is a pattern search, not an exact match:
+    "first_last@x.com" (`_` = "any one char") would also match
+    "firstXlast@x.com", a DIFFERENT account, and that account would then be
+    silently adopted into. `escape_ilike_pattern` neutralizes the wildcards,
+    and the exact-match filter below is a second, independent guard on the
+    returned rows -- belt and braces, same pattern as
+    `db.users.get_user_by_email_ci`.
     """
     legacy_app_ids = Config.PRIVY_LEGACY_APP_IDS
     if not legacy_app_ids:
@@ -149,7 +188,7 @@ def _find_legacy_candidates(email: str) -> list[dict[str, Any]]:
         result = (
             client.table("users")
             .select("*")
-            .ilike("email", email)
+            .ilike("email", escape_ilike_pattern(email))
             .in_("privy_app_id", list(legacy_app_ids))
             .execute()
         )
@@ -158,7 +197,12 @@ def _find_legacy_candidates(email: str) -> list[dict[str, Any]]:
         logger.warning("privy_migration_lookup_failed reason=db_error(%s)", type(e).__name__)
         return []
 
-    return [row for row in rows if row.get("is_active") is not False]
+    target = email.strip().lower()
+    return [
+        row
+        for row in rows
+        if row.get("is_active") is not False and (row.get("email") or "").strip().lower() == target
+    ]
 
 
 def adopt_legacy_account(
@@ -166,12 +210,26 @@ def adopt_legacy_account(
     user: dict[str, Any],
     new_did: str,
     request: Any = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Re-link `user`'s row to `new_did` under the current Privy app.
 
     Everything else on the row (credits, keys, history) is left untouched --
     only the two Privy identity columns change. Writes an audit_log row
     (never raises on audit failure -- see record_audit's own contract).
+
+    SECURITY/CORRECTNESS (PR #2316 review, fix round 1): the UPDATE is
+    conditioned on `privy_user_id` still equaling the DID this row had when
+    `_find_legacy_candidates` read it (`.eq("privy_user_id", old_did)`), not
+    just `id` -- otherwise two concurrent logins racing to adopt the same
+    legacy row (or a row that changed underneath us for any other reason
+    between the read and this write) could both "succeed" against a stale
+    read, corrupting which DID owns the account. If zero rows match (we lost
+    the race), this returns whatever `get_user_by_privy_id(new_did)` finds
+    now: another request may have already completed this exact adoption
+    (return that row, no error), or nothing has (return None so the caller
+    falls through to ordinary new-account creation) -- either way, this
+    never blindly returns the stale, no-longer-true `user` dict it was
+    called with.
     """
     old_did = user.get("privy_user_id")
     old_app_id = user.get("privy_app_id")
@@ -179,8 +237,22 @@ def adopt_legacy_account(
 
     client = supabase_config.get_supabase_client()
     update_fields = {"privy_user_id": new_did, "privy_app_id": current_app_id}
-    result = client.table("users").update(update_fields).eq("id", user["id"]).execute()
-    updated_user = result.data[0] if result.data else {**user, **update_fields}
+    query = client.table("users").update(update_fields).eq("id", user["id"])
+    query = (
+        query.is_("privy_user_id", "null")
+        if old_did is None
+        else query.eq("privy_user_id", old_did)
+    )
+    result = query.execute()
+
+    if not result.data:
+        logger.warning(
+            "privy_migration_adopt_race_lost user_id=%s",
+            user.get("id"),
+        )
+        return users_module.get_user_by_privy_id(new_did)
+
+    updated_user = result.data[0]
 
     record_audit(
         actor=None,  # system-initiated, not an admin action

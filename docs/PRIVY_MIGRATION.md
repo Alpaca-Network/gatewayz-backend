@@ -57,9 +57,26 @@ one login at a time, entirely server-side:
    `GET https://auth.privy.io/api/v1/users/{did}` with
    `Authorization: Basic base64(app_id:app_secret)` and header
    `privy-app-id: <app_id>`, 5s timeout. If that returns a user whose linked
-   accounts include a verified `email` account or a `google_oauth`/
-   `apple_oauth` account (both are only created after the provider's own
-   email verification), that email `E` is the candidate.
+   accounts include an `email` account or a `google_oauth`/`apple_oauth`
+   account, that account's email `E` is the candidate — both are trusted by
+   construction, not by an inspected flag:
+   - **`email`** — Privy only creates this linked-account entry after the
+     user completes OTP (or magic-link) verification for that address.
+     There is no "pending"/unverified `email` account type in Privy's data
+     model, so the entry existing in `linked_accounts` at all already means
+     it was verified.
+   - **`google_oauth` / `apple_oauth`** — Privy only creates these after
+     the identity provider's own sign-in flow, which itself only returns an
+     email Google/Apple have already verified on their end. Privy doesn't
+     re-expose a separate verification flag for these because the provider
+     is the source of truth.
+
+   As defense in depth, `src/services/privy_migration.py::_extract_verified_email`
+   still rejects a linked account of either type if its payload happens to
+   carry an explicit unverified marker (`verified: false` or `verified_at:
+   null`) — neither field is documented on these account types today, but
+   if a future Privy API response ever adds one, it wins over the
+   type-based trust above.
 
    The backend then looks for `users` rows with `lower(email) =
    lower(E)` **and** `privy_app_id IN PRIVY_LEGACY_APP_IDS` **and**
