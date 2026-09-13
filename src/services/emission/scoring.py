@@ -150,7 +150,7 @@ def score_providers(
     providers_wei: int,
     weights_bps: dict[str, int],
     exponent_above_median: str | float | Decimal,
-    tier_multiplier_bps_for: "callable[[int, list], int]",
+    tier_multiplier_bps_for: callable[[int, list], int],
     tiers: list[dict],
 ) -> tuple[list[ProviderScoreResult], int]:
     """Score every provider in `metrics` and allocate providers_wei across

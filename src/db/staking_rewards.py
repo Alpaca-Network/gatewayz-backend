@@ -109,36 +109,45 @@ def create_accrual(
     wallet_address: str,
     reward_date: str,
     staked_amount_wei: str,
-    rate_id: int,
+    rate_id: int | None,
     credits: str,
     status: str,
     user_id: int | None = None,
     skip_reason: str | None = None,
+    source: str = "rate_table",
+    wayz_amount_wei: str | None = None,
 ) -> dict[str, Any] | None:
     """Insert one new accrual row. Returns the created row, or None on any
     failure -- including the (wallet_address, reward_date) UNIQUE conflict.
     Callers (the staking-rewards job) call get_accrual() first and only
     reach this when no row exists yet, so a conflict here means a
     concurrent run raced it; the caller re-reads via get_accrual() rather
-    than treating None as a hard failure."""
+    than treating None as a hard failure.
+
+    source/wayz_amount_wei/a nullable rate_id (Chutes-style WAYZ emission
+    rewards, gatewayz-backend tokenomics) back the emission-mode staker
+    path (src/services/emission/epoch.py) -- an emission accrual isn't
+    priced off staking_reward_rates at all, so it has no rate_id, and
+    wayz_amount_wei records the WAYZ amount its credits were converted
+    from. 'rate_table' callers (this module's own job) are unaffected --
+    source defaults to 'rate_table' and wayz_amount_wei to None, exactly
+    the previous insert payload."""
+    payload: dict[str, Any] = {
+        "wallet_address": wallet_address.lower(),
+        "user_id": user_id,
+        "reward_date": reward_date,
+        "staked_amount_wei": staked_amount_wei,
+        "rate_id": rate_id,
+        "credits": credits,
+        "status": status,
+        "skip_reason": skip_reason,
+        "source": source,
+    }
+    if wayz_amount_wei is not None:
+        payload["wayz_amount_wei"] = wayz_amount_wei
     try:
         client = get_supabase_client()
-        result = (
-            client.table(_ACCRUALS_TABLE)
-            .insert(
-                {
-                    "wallet_address": wallet_address.lower(),
-                    "user_id": user_id,
-                    "reward_date": reward_date,
-                    "staked_amount_wei": staked_amount_wei,
-                    "rate_id": rate_id,
-                    "credits": credits,
-                    "status": status,
-                    "skip_reason": skip_reason,
-                }
-            )
-            .execute()
-        )
+        result = client.table(_ACCRUALS_TABLE).insert(payload).execute()
         if not result.data:
             return None
         return result.data[0]

@@ -86,8 +86,24 @@ create unique index if not exists idx_provider_earnings_emission on public.provi
 -- staking_reward_accruals: source + the WAYZ amount an emission-mode
 -- accrual was converted from (STAKER_REWARD_ASSET=credits path -- see
 -- docs/tokenomics/EMISSION.md). rate_table rows leave both untouched.
+-- rate_id becomes nullable: an emission-mode accrual isn't priced off
+-- staking_reward_rates at all (it's a pro-rata share of the day's
+-- stakers_wei), so it has no rate row to reference. A CHECK constraint
+-- keeps the invariant for 'rate_table' rows (today's per_unit-analogous
+-- path): those must still carry a rate_id.
 alter table public.staking_reward_accruals add column if not exists source text not null default 'rate_table' check (source in ('rate_table', 'emission'));
 alter table public.staking_reward_accruals add column if not exists wayz_amount_wei numeric(78,0) null;
+alter table public.staking_reward_accruals alter column rate_id drop not null;
+do $$
+begin
+    if not exists (
+        select 1 from pg_constraint where conname = 'staking_reward_accruals_rate_id_required_for_rate_table'
+    ) then
+        alter table public.staking_reward_accruals
+            add constraint staking_reward_accruals_rate_id_required_for_rate_table
+            check (source <> 'rate_table' or rate_id is not null);
+    end if;
+end $$;
 
 alter table public.emission_epochs enable row level security;
 alter table public.provider_scores enable row level security;
