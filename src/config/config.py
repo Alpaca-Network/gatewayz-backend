@@ -269,6 +269,30 @@ class Config:
     # Optional override of the JWKS URL (default: https://auth.privy.io/api/v1/apps/<app_id>/jwks.json)
     PRIVY_JWKS_URL = _get_env_var("PRIVY_JWKS_URL")
     PRIVY_TOKEN_VERIFICATION = _get_env_var("PRIVY_TOKEN_VERIFICATION")
+
+    # Privy app migration (docs/PRIVY_MIGRATION.md, 2026-09-13): lazily
+    # re-links a login under PRIVY_APP_ID's new DID to the same Gatewayz
+    # account it had under a prior Privy app, once Privy's own server API
+    # confirms (via a verified email) it's the same person -- never from
+    # client-supplied request data. See src/services/privy_migration.py.
+    #
+    # The Privy app id(s) accounts may have been migrated FROM, comma
+    # separated. A row is eligible for adoption only when its
+    # users.privy_app_id is in this set.
+    PRIVY_LEGACY_APP_IDS: frozenset[str] = frozenset(
+        s.strip() for s in (_get_env_var("PRIVY_LEGACY_APP_IDS") or "").split(",") if s.strip()
+    )
+    # Server credential (Basic auth) for PRIVY_APP_ID, used only for the
+    # POST-time GET https://auth.privy.io/api/v1/users/{did} lookup -- never
+    # sent to, or accepted from, the client. Distinct from
+    # PRIVY_VERIFICATION_KEY (the public JWKS verification key).
+    PRIVY_APP_SECRET = _get_env_var("PRIVY_APP_SECRET")
+    # "off" (default): adoption is fully disabled, /auth behaves exactly as
+    # before this feature. "adopt": the adoption path runs. There is no
+    # partial/dry-run mode -- the Privy lookup and email match are exact-once
+    # checks with no ambiguity to "shadow" (see privy_migration.py's
+    # "exactly one match" rule).
+    PRIVY_MIGRATION_MODE = (_get_env_var("PRIVY_MIGRATION_MODE", "off") or "off").strip().lower()
     # SIWE wallet sign-in/link (gatewayz-backend#2249/#2250/#2251/#2252).
     # domain/uri are fixed and server-authored -- part of what makes the
     # signed message resistant to cross-dapp replay (design spec section 7).

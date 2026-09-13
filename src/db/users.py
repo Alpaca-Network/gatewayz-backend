@@ -9,7 +9,7 @@ from src.db.api_keys import create_api_key, get_api_key_by_key
 from src.utils.crypto import last4
 from src.utils.db_instrumentation import track_database_query
 from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
-from src.utils.security_validators import sanitize_for_logging
+from src.utils.security_validators import escape_ilike_pattern, sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
@@ -652,22 +652,34 @@ def get_user_by_email(email: str) -> dict[str, Any] | None:
 
 
 def get_user_by_email_ci(email: str) -> dict[str, Any] | None:
-    """Get user by email, case-insensitively.
+    """Get user by email, case-insensitively -- an EXACT match, not a
+    substring/pattern search.
 
-    get_user_by_email does an exact match, which misses a stored email that
-    differs only in case from the one a caller normalizes to lowercase
-    (e.g. a user who signed up as "Admin@Example.com" being looked up as
-    "admin@example.com" -- src/routes/admin_staff.py's invite flow, which
-    must find an existing account regardless of how its email was cased at
-    signup rather than silently creating a duplicate invite).
+    get_user_by_email does an exact (case-sensitive) match, which misses a
+    stored email that differs only in case from the one a caller normalizes
+    to lowercase (e.g. a user who signed up as "Admin@Example.com" being
+    looked up as "admin@example.com" -- src/routes/admin_staff.py's invite
+    flow, which must find an existing account regardless of how its email
+    was cased at signup rather than silently creating a duplicate invite).
+
+    SECURITY: `.ilike()` sends its pattern straight to Postgres's ILIKE
+    operator, where `%`/`_` are wildcards -- an unescaped `email` here would
+    let `first_last@x.com` match `firstXlast@x.com` (`_` = "any one char"),
+    returning (and letting a caller act on) a different person's account.
+    `escape_ilike_pattern` neutralizes those, and the loop below is a second,
+    independent exact-match check on the returned rows -- belt and braces.
     """
     try:
         client = get_supabase_client()
 
-        result = client.table("users").select("*").ilike("email", email).execute()
+        result = (
+            client.table("users").select("*").ilike("email", escape_ilike_pattern(email)).execute()
+        )
 
-        if result.data:
-            return result.data[0]
+        target = email.strip().lower()
+        for row in result.data or []:
+            if (row.get("email") or "").strip().lower() == target:
+                return row
 
         return None
 

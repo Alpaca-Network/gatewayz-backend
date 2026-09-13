@@ -38,6 +38,7 @@ from src.services.auth_cache import (
 from src.services.auth_rate_limiting import AuthRateLimitType, check_auth_rate_limit, get_client_ip
 from src.services.email_verification import EmailVerificationResult
 from src.services.email_verification import verify_email as emailable_verify_email
+from src.services.privy_migration import attempt_adoption, migration_mode_is_adopt
 from src.services.query_timeout import (
     AUTH_QUERY_TIMEOUT,
     USER_LOOKUP_TIMEOUT,
@@ -915,11 +916,29 @@ async def privy_auth(
 
         # Fallback: check by username if privy_user_id lookup failed
         if not existing_user and token_verified:
-            logger.debug(
-                "Privy ID lookup failed for verified token sub=%s; skipping the "
-                "username fallback and treating this as a new account",
-                request.user.id,
-            )
+            # Privy app migration (docs/PRIVY_MIGRATION.md): a verified token
+            # for a DID we've never seen is exactly the shape of a returning
+            # user who last logged in under the old Privy app. Try a
+            # server-verified adoption of that legacy account before falling
+            # through to new-account creation. This never uses request.email
+            # or any other client-supplied field -- only Privy's own
+            # server-side response to a lookup keyed by the verified DID.
+            if migration_mode_is_adopt():
+                adopted_user = await attempt_adoption(
+                    new_did=request.user.id,
+                    token_verified=token_verified,
+                    request=raw_request,
+                )
+                if adopted_user:
+                    existing_user = adopted_user
+                    cache_user_by_privy_id(request.user.id, existing_user)
+
+            if not existing_user:
+                logger.debug(
+                    "Privy ID lookup failed for verified token sub=%s; skipping the "
+                    "username fallback and treating this as a new account",
+                    request.user.id,
+                )
         elif not existing_user:
             logger.debug(f"Privy ID lookup failed, trying username: {username}")
 

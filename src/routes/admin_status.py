@@ -21,6 +21,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
+from src.config import Config
 from src.routes.admin_wayz import (
     _build_config_block,
     _build_faucet_block,
@@ -33,6 +34,7 @@ from src.routes.admin_wayz import (
 )
 from src.security.deps import require_admin_or_env_key
 from src.services.integrations_health import check_all
+from src.services.privy_migration import migration_counts
 from src.services.secrets_registry import SECRET_NAMES, secret_ages
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,18 @@ def _build_secrets_block() -> dict[str, Any]:
     """
     ages = secret_ages()
     return {name: {"source": "env", **ages[name]} for name in SECRET_NAMES}
+
+
+def _build_migration_block() -> dict[str, Any]:
+    """Privy app-migration progress (docs/PRIVY_MIGRATION.md): how many
+    accounts still carry a legacy Privy app id vs. how many have been
+    adopted onto the current one, plus whether adoption is currently on."""
+    counts = migration_counts()
+    return {
+        "legacy_users": counts["legacy_users"],
+        "migrated_users": counts["migrated_users"],
+        "adopt_mode": Config.PRIVY_MIGRATION_MODE == "adopt",
+    }
 
 
 def _build_wayz_block(jobs_block: dict[str, Any]) -> dict[str, Any]:
@@ -81,6 +95,7 @@ async def get_admin_status(
         "integrations": _safe_block(check_all, "integrations"),
         "secrets": _safe_block(_build_secrets_block, "secrets"),
         "wayz": _safe_block(lambda: _build_wayz_block(jobs_block), "wayz"),
+        "migration": _safe_block(_build_migration_block, "migration"),
     }
 
     return {"success": True, "data": data}

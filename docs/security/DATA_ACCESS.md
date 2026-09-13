@@ -173,6 +173,20 @@ Both paths invalidate the in-memory user cache
 without that, a just-demoted admin's stale cached user object would keep
 passing `require_admin` for up to the cache's 60s TTL.
 
+## Privy app migration: `users.privy_app_id` and Privy server-API calls
+
+`docs/PRIVY_MIGRATION.md` (2026-09-13) adds `users.privy_app_id` (which
+Privy app a row's `privy_user_id` was issued under) and a new outbound
+call: `src/services/privy_migration.py` asks Privy's own
+`GET /api/v1/users/{did}` server API which verified email a login's DID
+belongs to, using `PRIVY_APP_SECRET` (Basic auth) -- a server credential,
+never sent to or accepted from the client. The response's email is used
+only to look up a legacy account, never logged or stored in the clear:
+`record_audit`'s `auth.privy_migrated` metadata carries a 12-char sha256
+prefix of both the old and new DID, never the DID or the email itself. Same
+service-role-only posture as every other column on `users` -- no new table,
+no new grant.
+
 ## What's still open
 
 - Frontend code has never been observed talking to PostgREST with the anon
