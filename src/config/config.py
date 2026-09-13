@@ -266,6 +266,8 @@ class Config:
     # environments without the key don't 401 every login.
     PRIVY_APP_ID = _get_env_var("PRIVY_APP_ID")
     PRIVY_VERIFICATION_KEY = _get_env_var("PRIVY_VERIFICATION_KEY")
+    # Optional override of the JWKS URL (default: https://auth.privy.io/api/v1/apps/<app_id>/jwks.json)
+    PRIVY_JWKS_URL = _get_env_var("PRIVY_JWKS_URL")
     PRIVY_TOKEN_VERIFICATION = _get_env_var("PRIVY_TOKEN_VERIFICATION")
     # SIWE wallet sign-in/link (gatewayz-backend#2249/#2250/#2251/#2252).
     # domain/uri are fixed and server-authored -- part of what makes the

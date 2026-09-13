@@ -93,7 +93,29 @@ class TestPrivyCheck:
         ):
             result = integrations_health._check_privy()
         assert result["status"] == "ok"
-        assert result["detail"] in {"enforce", "log", "off"}
+        assert result["detail"].split(" ")[0] in {"enforce", "log", "off"}
+        assert "(pem)" in result["detail"]
+
+    def test_ok_via_jwks_when_no_pem(self):
+        with (
+            patch.object(integrations_health.Config, "PRIVY_APP_ID", "app_123"),
+            patch.object(integrations_health.Config, "PRIVY_VERIFICATION_KEY", None),
+            patch(
+                "src.security.privy_token._get_jwks", return_value={"a": object(), "b": object()}
+            ),
+        ):
+            result = integrations_health._check_privy()
+        assert result["status"] == "ok"
+        assert "jwks: 2 keys" in result["detail"]
+
+    def test_down_when_jwks_unreachable(self):
+        with (
+            patch.object(integrations_health.Config, "PRIVY_APP_ID", "app_123"),
+            patch.object(integrations_health.Config, "PRIVY_VERIFICATION_KEY", None),
+            patch("src.security.privy_token._get_jwks", side_effect=RuntimeError("net")),
+        ):
+            result = integrations_health._check_privy()
+        assert result["status"] == "down"
 
     def test_down_when_key_malformed(self):
         with (

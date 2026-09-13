@@ -13,9 +13,12 @@ public key from the Privy dashboard (PEM, `-----BEGIN PUBLIC KEY-----`).
 """
 
 import logging
+import threading
+import time
 from dataclasses import dataclass
 from typing import Literal
 
+import httpx
 import jwt
 
 from src.config import Config
@@ -64,6 +67,97 @@ def _normalize_pem(key: str) -> str:
     return key.replace("\\n", "\n").strip()
 
 
+# ---------------------------------------------------------------------------
+# JWKS (the dashboard no longer shows a PEM "verification key"; Privy serves
+# the app's ES256 public keys at a public JWKS URL, and rotates them — so a
+# single PEM would reject tokens signed by the other kid). We fetch the JWKS
+# for PRIVY_APP_ID, cache it in-process, and pick the key by the token's
+# ``kid``. PRIVY_VERIFICATION_KEY (PEM) remains a manual override/fallback.
+# ---------------------------------------------------------------------------
+
+_JWKS_URL_TEMPLATE = "https://auth.privy.io/api/v1/apps/{app_id}/jwks.json"
+_JWKS_TTL_SECONDS = 6 * 60 * 60
+_JWKS_FETCH_TIMEOUT = 5.0
+_jwks_cache: dict[str, tuple[float, dict[str, jwt.PyJWK]]] = {}
+_jwks_lock = threading.Lock()
+
+
+def _jwks_url(app_id: str) -> str:
+    return (Config.PRIVY_JWKS_URL or "").strip() or _JWKS_URL_TEMPLATE.format(app_id=app_id)
+
+
+def _fetch_jwks(app_id: str) -> dict[str, jwt.PyJWK]:
+    resp = httpx.get(_jwks_url(app_id), timeout=_JWKS_FETCH_TIMEOUT)
+    resp.raise_for_status()
+    keys: dict[str, jwt.PyJWK] = {}
+    for entry in resp.json().get("keys", []):
+        kid = entry.get("kid")
+        if not kid:
+            continue
+        try:
+            keys[kid] = jwt.PyJWK.from_dict(entry)
+        except Exception as e:  # pragma: no cover - defensive; malformed key entries
+            logger.warning("Skipping unparseable Privy JWK %s: %s", kid, type(e).__name__)
+    if not keys:
+        raise PrivyTokenError("not_configured", "Privy JWKS returned no usable keys")
+    return keys
+
+
+def _get_jwks(app_id: str, *, force_refresh: bool = False) -> dict[str, jwt.PyJWK]:
+    now = time.monotonic()
+    with _jwks_lock:
+        cached = _jwks_cache.get(app_id)
+        if cached and not force_refresh and now - cached[0] < _JWKS_TTL_SECONDS:
+            return cached[1]
+    try:
+        keys = _fetch_jwks(app_id)
+    except PrivyTokenError:
+        raise
+    except Exception as e:
+        # Network/HTTP failure: serve a stale cache if we have one, else fail closed.
+        with _jwks_lock:
+            cached = _jwks_cache.get(app_id)
+        if cached:
+            logger.warning("Privy JWKS refresh failed (%s); using cached keys", type(e).__name__)
+            return cached[1]
+        raise PrivyTokenError("jwks_unavailable", "Could not fetch Privy JWKS") from e
+    with _jwks_lock:
+        _jwks_cache[app_id] = (now, keys)
+    return keys
+
+
+def _resolve_signing_key(token: str, app_id: str):
+    """Return the key object to verify ``token`` with, from PEM env or JWKS."""
+    if Config.PRIVY_VERIFICATION_KEY:
+        return _normalize_pem(Config.PRIVY_VERIFICATION_KEY)
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.DecodeError as e:
+        raise PrivyTokenError("malformed", "Privy access token is malformed") from e
+    kid = header.get("kid")
+    if not kid:
+        raise PrivyTokenError("bad_signature", "Privy access token has no kid header")
+    keys = _get_jwks(app_id)
+    if kid not in keys:
+        # Unknown kid: Privy may have rotated since we cached — refresh once.
+        keys = _get_jwks(app_id, force_refresh=True)
+    key = keys.get(kid)
+    if key is None:
+        raise PrivyTokenError("bad_signature", "Privy access token signed by an unknown key")
+    return key.key
+
+
+def clear_jwks_cache() -> None:
+    """Test/ops helper."""
+    with _jwks_lock:
+        _jwks_cache.clear()
+
+
+def privy_verification_configured() -> bool:
+    """True when tokens can be verified: PEM key set, or an app id (JWKS)."""
+    return bool(Config.PRIVY_VERIFICATION_KEY) or bool(Config.PRIVY_APP_ID)
+
+
 def privy_verification_mode() -> Literal["enforce", "log", "off"]:
     """
     Resolve the effective Privy token verification mode.
@@ -77,6 +171,8 @@ def privy_verification_mode() -> Literal["enforce", "log", "off"]:
     if configured in {"enforce", "log", "off"}:
         return configured  # type: ignore[return-value]
 
+    # JWKS-only setups start in "log" and are promoted to "enforce" explicitly
+    # via PRIVY_TOKEN_VERIFICATION once the logs show zero verification failures.
     return "enforce" if Config.PRIVY_VERIFICATION_KEY else "log"
 
 
@@ -99,17 +195,18 @@ def verify_privy_access_token(token: str | None, expected_sub: str) -> PrivyToke
     if not token:
         raise PrivyTokenError("missing", "Privy access token was not provided")
 
-    verification_key = Config.PRIVY_VERIFICATION_KEY
-    if not verification_key:
-        raise PrivyTokenError("not_configured", "PRIVY_VERIFICATION_KEY is not configured")
-
     if not Config.PRIVY_APP_ID:
         raise PrivyTokenError("not_configured", "PRIVY_APP_ID is not configured")
+
+    if not privy_verification_configured():
+        raise PrivyTokenError("not_configured", "PRIVY_VERIFICATION_KEY is not configured")
+
+    signing_key = _resolve_signing_key(token, Config.PRIVY_APP_ID)
 
     try:
         payload = jwt.decode(
             token,
-            key=_normalize_pem(verification_key),
+            key=signing_key,
             algorithms=["ES256"],
             audience=Config.PRIVY_APP_ID,
             issuer="privy.io",

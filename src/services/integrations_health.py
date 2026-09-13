@@ -68,22 +68,33 @@ def _check_resend(timeout_s: float) -> dict[str, Any]:
 
 
 def _check_privy() -> dict[str, Any]:
-    if not Config.PRIVY_APP_ID or not Config.PRIVY_VERIFICATION_KEY:
+    if not Config.PRIVY_APP_ID:
         return _result("not_configured")
 
-    from src.security.privy_token import _normalize_pem, privy_verification_mode
+    from src.security.privy_token import (
+        _get_jwks,
+        _normalize_pem,
+        privy_verification_mode,
+    )
 
     start = time.monotonic()
     try:
-        from cryptography.hazmat.primitives import serialization
+        if Config.PRIVY_VERIFICATION_KEY:
+            from cryptography.hazmat.primitives import serialization
 
-        serialization.load_pem_public_key(_normalize_pem(Config.PRIVY_VERIFICATION_KEY).encode())
+            serialization.load_pem_public_key(
+                _normalize_pem(Config.PRIVY_VERIFICATION_KEY).encode()
+            )
+            detail = f"{privy_verification_mode()} (pem)"
+        else:
+            keys = _get_jwks(Config.PRIVY_APP_ID)
+            detail = f"{privy_verification_mode()} (jwks: {len(keys)} keys)"
     except Exception as e:
-        logger.info(f"integrations_health: privy key parse failed: {e}")
+        logger.info(f"integrations_health: privy check failed: {type(e).__name__}")
         return _result("down", int((time.monotonic() - start) * 1000), type(e).__name__)
 
     latency_ms = int((time.monotonic() - start) * 1000)
-    return _result("ok", latency_ms, privy_verification_mode())
+    return _result("ok", latency_ms, detail)
 
 
 def _check_fuji_rpc(timeout_s: float) -> dict[str, Any]:
