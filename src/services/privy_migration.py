@@ -30,8 +30,8 @@ from typing import Any
 
 import httpx
 
+import src.config.supabase_config as supabase_config
 from src.config import Config
-from src.config.supabase_config import get_supabase_client
 from src.db.audit import record_audit
 
 logger = logging.getLogger(__name__)
@@ -145,7 +145,7 @@ def _find_legacy_candidates(email: str) -> list[dict[str, Any]]:
         return []
 
     try:
-        client = get_supabase_client()
+        client = supabase_config.get_supabase_client()
         result = (
             client.table("users")
             .select("*")
@@ -177,7 +177,7 @@ def adopt_legacy_account(
     old_app_id = user.get("privy_app_id")
     current_app_id = Config.PRIVY_APP_ID
 
-    client = get_supabase_client()
+    client = supabase_config.get_supabase_client()
     update_fields = {"privy_user_id": new_did, "privy_app_id": current_app_id}
     result = client.table("users").update(update_fields).eq("id", user["id"]).execute()
     updated_user = result.data[0] if result.data else {**user, **update_fields}
@@ -266,3 +266,36 @@ async def attempt_adoption(
         return None
 
     return adopt_legacy_account(user=candidates[0], new_did=new_did, request=request)
+
+
+def migration_counts() -> dict[str, int]:
+    """{'legacy_users': n, 'migrated_users': n} -- counts of `users` rows by
+    `privy_app_id`, for `GET /admin/status`'s `migration` block (see
+    src/routes/admin_status.py). 0 for either count on any lookup error --
+    never raises, matching every other admin/status block builder.
+    """
+    counts = {"legacy_users": 0, "migrated_users": 0}
+    legacy_app_ids = list(Config.PRIVY_LEGACY_APP_IDS)
+
+    try:
+        client = supabase_config.get_supabase_client()
+        if legacy_app_ids:
+            legacy_result = (
+                client.table("users")
+                .select("id", count="exact")
+                .in_("privy_app_id", legacy_app_ids)
+                .execute()
+            )
+            counts["legacy_users"] = legacy_result.count or 0
+        if Config.PRIVY_APP_ID:
+            migrated_result = (
+                client.table("users")
+                .select("id", count="exact")
+                .eq("privy_app_id", Config.PRIVY_APP_ID)
+                .execute()
+            )
+            counts["migrated_users"] = migrated_result.count or 0
+    except Exception as e:
+        logger.warning("privy_migration_counts_failed: %s", type(e).__name__)
+
+    return counts
