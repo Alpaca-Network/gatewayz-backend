@@ -193,6 +193,16 @@ immediately whether the signed-in account is staff, without a second
 lookup. Populated for both new and existing accounts; `GET /user/profile`
 returns the same two fields for the same reason.
 
+**Privy app migration:** when a login presents a verified access token for a
+Privy DID this backend has never seen, and `PRIVY_MIGRATION_MODE=adopt` is
+on, the backend asks Privy's own server API for that DID's verified email
+and — if it matches exactly one pre-migration account — transparently
+re-links that account instead of creating a new one. The response looks
+identical to any other existing-user login (same credits, keys, history);
+there is no client-visible difference and no client-supplied field
+participates in the match. See `docs/PRIVY_MIGRATION.md` for the full
+design and rollout runbook.
+
 ### Get User Balance
 
 ```http
