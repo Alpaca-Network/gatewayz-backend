@@ -581,6 +581,54 @@ def create_earning(
         return None, "db_error"
 
 
+def create_emission_earning(
+    provider_id: int, epoch_date: str, amount_wei: int
+) -> tuple[dict | None, str]:
+    """Insert an 'accrued' provider_earnings row for a daily WAYZ emission
+    allocation (Chutes-style emission rewards, gatewayz-backend
+    tokenomics) -- source='emission', work_id=NULL, epoch_date set.
+
+    Same (row_or_None, outcome) contract as create_earning():
+
+    'created'   -- inserted successfully.
+    'duplicate' -- idx_provider_earnings_emission's UNIQUE(provider_id,
+                   epoch_date) WHERE source='emission' rejected a re-run
+                   of the same epoch for this provider -- a genuine no-op.
+    'db_error'  -- any other insert failure; logged at WARNING. Callers
+                   (src/services/emission/epoch.py) surface this in the
+                   epoch summary rather than silently dropping the
+                   allocation.
+
+    Settlement pays this row identically to a per_unit earning --
+    src/services/gpu/settlement.py's read/write paths (list_accrued_earnings,
+    mark_earnings_settling/settled/accrued) never select or filter on
+    work_id, so a NULL work_id here needs no settlement changes."""
+    payload: dict[str, object] = {
+        "provider_id": provider_id,
+        "work_id": None,
+        "amount_wei": str(amount_wei),
+        "status": "accrued",
+        "source": "emission",
+        "epoch_date": epoch_date,
+    }
+    try:
+        client = get_supabase_client()
+        result = client.table(_EARNINGS_TABLE).insert(payload).execute()
+        return (result.data[0] if result.data else None), "created"
+    except Exception as e:
+        if _is_duplicate_error(e):
+            logger.info(
+                f"provider_earnings emission insert skipped for provider {provider_id}/"
+                f"{epoch_date} (duplicate): {e}"
+            )
+            return None, "duplicate"
+        logger.warning(
+            f"provider_earnings emission insert FAILED for provider {provider_id}/"
+            f"{epoch_date} (not a duplicate): {e}"
+        )
+        return None, "db_error"
+
+
 def void_earning_for_work(work_id: int) -> bool:
     """Flip an earning to 'void' (spot-check failure after it had already
     accrued). Only ever touches an 'accrued' row -- a 'settled' earning is

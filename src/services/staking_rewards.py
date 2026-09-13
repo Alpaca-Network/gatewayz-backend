@@ -101,6 +101,15 @@ def _is_sync_stale() -> bool:
     return age_minutes > max_age_minutes
 
 
+def is_stake_sync_stale() -> bool:
+    """Public wrapper over _is_sync_stale() -- the same staleness check
+    reused by the emission_epoch job (src/services/emission/epoch.py)'s
+    staker-payout path, which reads wallet_stakes exactly like this
+    module's own daily run and must not trust it any more than this job
+    does."""
+    return _is_sync_stale()
+
+
 def _find_ledger_id(wallet_address: str, reward_date_str: str) -> int | None:
     row = get_transaction_by_request_id(f"staking_reward:{wallet_address}:{reward_date_str}")
     return row.get("id") if row else None
