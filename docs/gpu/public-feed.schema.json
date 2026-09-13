@@ -108,6 +108,54 @@
           "title": "GpuModelCount",
           "type": "object"
         },
+        "GpuPublicEmission": {
+          "description": "Aggregate-only WAYZ emission info (Chutes-style WAYZ emission\nrewards, gatewayz-backend tokenomics) -- config + the most recent\nepoch_date, nothing per-provider or per-user. See\ndocs/tokenomics/EMISSION.md.",
+          "properties": {
+            "daily_emission_wayz": {
+              "title": "Daily Emission Wayz",
+              "type": "string"
+            },
+            "last_epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO-8601 date of the most recent emission_epochs row, or null if none has run yet",
+              "title": "Last Epoch"
+            },
+            "mode": {
+              "description": "'per_unit' or 'emission' -- Config.REWARDS_MODE",
+              "title": "Mode",
+              "type": "string"
+            },
+            "providers_bps": {
+              "title": "Providers Bps",
+              "type": "integer"
+            },
+            "stakers_bps": {
+              "title": "Stakers Bps",
+              "type": "integer"
+            },
+            "treasury_bps": {
+              "title": "Treasury Bps",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "mode",
+            "daily_emission_wayz",
+            "providers_bps",
+            "stakers_bps",
+            "treasury_bps",
+            "last_epoch"
+          ],
+          "title": "GpuPublicEmission",
+          "type": "object"
+        },
         "GpuRegionCount": {
           "properties": {
             "nodes": {
@@ -138,6 +186,9 @@
           "title": "Approved Providers",
           "type": "integer"
         },
+        "emission": {
+          "$ref": "#/$defs/GpuPublicEmission"
+        },
         "last_hour": {
           "$ref": "#/$defs/GpuLastHourStats"
         },
@@ -167,7 +218,8 @@
         "regions",
         "models",
         "last_hour",
-        "updated_at"
+        "updated_at",
+        "emission"
       ],
       "title": "GpuPublicSummary",
       "type": "object"

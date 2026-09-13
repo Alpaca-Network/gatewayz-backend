@@ -574,6 +574,10 @@ def create_app() -> FastAPI:
             "gpu_earnings",
             "GPU Earnings",
         ),  # Community GPU provider earnings/settlements (gatewayz-backend#2265-#2266)
+        (
+            "admin_emission",
+            "Admin Emission Rewards",
+        ),  # Chutes-style WAYZ emission rewards admin API (gatewayz-backend tokenomics)
     ]
 
     loaded_count = 0

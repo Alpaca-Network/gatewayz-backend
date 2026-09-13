@@ -196,13 +196,46 @@ class TestGetStakingRewards:
 
     def test_returns_view_for_current_user(self):
         app.dependency_overrides[get_current_user] = lambda: {"id": 7, "email": "a@x.com"}
+        # dict(...) -- the route mutates the dict get_rewards_view_for_user
+        # returns (adding `mode`/`emission`), so the mock must return a
+        # fresh copy each call rather than the shared module-level fixture.
         with patch(
-            "src.routes.staking.get_rewards_view_for_user", return_value=_REWARDS_VIEW
+            "src.routes.staking.get_rewards_view_for_user",
+            return_value=dict(_REWARDS_VIEW),
         ) as mock_view:
             response = client.get("/staking/rewards")
 
         assert response.status_code == 200
         body = response.json()
         assert body["success"] is True
-        assert body["data"] == _REWARDS_VIEW
+        # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics):
+        # `mode` is always present; `emission` is absent under the default
+        # REWARDS_MODE='per_unit'.
+        assert body["data"] == {**_REWARDS_VIEW, "mode": "per_unit"}
         mock_view.assert_called_once_with(7)
+
+    def test_includes_emission_block_in_emission_mode(self):
+        """Chutes-style WAYZ emission rewards (gatewayz-backend
+        tokenomics): once REWARDS_MODE=='emission', the response gains
+        `emission`, derived from this user's wallets' staked_wayz."""
+        app.dependency_overrides[get_current_user] = lambda: {"id": 7, "email": "a@x.com"}
+        with (
+            patch("src.routes.staking.get_rewards_view_for_user", return_value=dict(_REWARDS_VIEW)),
+            patch("src.routes.staking.Config") as mock_config,
+            patch("src.routes.staking.get_staker_emission_view") as mock_emission,
+        ):
+            mock_config.REWARDS_MODE = "emission"
+            mock_emission.return_value = {
+                "daily_emission_wayz": "100000",
+                "stakers_share_bps": 4100,
+                "your_share": "0.1",
+                "estimated_credits_per_day": "4.1",
+            }
+            response = client.get("/staking/rewards")
+
+        assert response.status_code == 200
+        body = response.json()["data"]
+        assert body["mode"] == "emission"
+        assert body["emission"]["your_share"] == "0.1"
+        # 5000 WAYZ (the sole wallet in _REWARDS_VIEW) as wei.
+        mock_emission.assert_called_once_with(5000 * 10**18)
