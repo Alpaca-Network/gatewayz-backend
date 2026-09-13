@@ -5,6 +5,35 @@ earnings/settlement). See `m4/spec.md` §5 for the binding design; this
 document is the operator/provider-facing reference plus the decisions made
 where the spec was silent.
 
+## Two payout modes: `per_unit` (this doc) vs `emission`
+
+Everything below describes `Config.REWARDS_MODE`'s default, `per_unit`:
+a provider is accrued a `provider_earnings` row **per verified work item**
+(this doc's payout-rate table below). The alternative,
+**`emission`** (Chutes-style WAYZ emission rewards,
+`docs/tokenomics/EMISSION.md`), pays providers a **daily share of a fixed
+WAYZ emission pool** by 7-day rolling score instead -- verification
+itself (sampling, replay, the aging path, `provider_work.verification`)
+is completely unchanged either way; only what happens to a `'verified'`
+row differs:
+
+- `per_unit`: `record_earning_for_verified_work` accrues a
+  `provider_earnings(source='per_unit', work_id=<row>)` earning, per the
+  rate table below.
+- `emission`: `record_earning_for_verified_work` returns immediately
+  (`outcome='skipped_emission_mode'`) without creating a per-unit earning
+  -- the row still gets marked `'verified'` (verification bookkeeping is
+  unaffected), it just isn't paid per-item. Instead, the daily
+  `emission_epoch` job aggregates the trailing 7 days of `'verified'` work
+  per provider into a score and creates ONE
+  `provider_earnings(source='emission', work_id=NULL, epoch_date=<date>)`
+  allocation per provider per day. Settlement (below) pays either kind of
+  earning identically -- its queries never select or filter on `work_id`.
+
+The two modes are mutually exclusive by construction: the emission job
+only runs once `REWARDS_MODE=='emission'`, and `record_earning_for_verified_work`
+checks that same flag before ever touching the per-unit rate table.
+
 ## Why replay instead of trusting the report
 
 A community GPU node is an untrusted party by design (M4's trust-boundary
@@ -230,6 +259,15 @@ every single job cycle rather than needing to track which specific rows
 failed.
 
 ## Settlement (daily, `COMMUNITY_SETTLEMENT_INTERVAL_HOURS`, default 24)
+
+Pays `'accrued'` earnings regardless of `source` -- an `emission`-mode
+allocation (`work_id IS NULL`) is summed, claimed, and transferred exactly
+like a `per_unit` one, because every query in `src/services/gpu/settlement.py`
+(`list_accrued_earnings`, `mark_earnings_settling`/`settled`/`accrued`)
+filters on `provider_id`/`status`/`settlement_id` only -- none of them
+ever select or filter on `work_id`. No settlement code changed to support
+emission mode; see `tests/services/gpu/test_settlement.py`'s null-`work_id`
+coverage.
 
 Per **approved** provider: preview `'accrued'` earnings; pay out iff the
 preview sum is `>= COMMUNITY_MIN_PAYOUT_WAYZ` (default 10 WAYZ), the
