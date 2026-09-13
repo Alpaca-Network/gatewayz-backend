@@ -92,6 +92,11 @@ TARGET_TABLES = frozenset(
         # 20260911120000_staking_rewards.sql.
         "staking_reward_rates",
         "staking_reward_accruals",
+        # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics)
+        # -- same service-role-only, RLS-enabled-with-explicit-REVOKE
+        # posture, added in 20260913120000_emission_rewards.sql.
+        "emission_epochs",
+        "provider_scores",
     }
 )
 
