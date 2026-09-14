@@ -13,6 +13,7 @@ from src.db.api_keys import (
     update_api_key,
     validate_api_key_permissions,
 )
+from src.db.chat_completion_requests import get_usage_by_tag
 from src.schemas import (
     ApiKeyResponse,
     CreateApiKeyRequest,
@@ -490,3 +491,58 @@ async def get_user_api_key_usage(
     except Exception as e:
         logger.error("Error getting API key usage: %s", sanitize_for_logging(str(e)))
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/v1/usage", tags=["authentication"])
+async def get_usage_by_tag_endpoint(
+    api_key: str = Depends(get_api_key),
+    tag: str | None = None,
+    since: str | None = None,
+):
+    """Usage rolled up by attribution tag.
+
+    The read half of request-tag passthrough. Without it the tag is write-only:
+    a caller can set `x-gatewayz-tag` and has no way to confirm the gateway
+    recorded it, which makes the feature unfalsifiable from outside.
+
+    Optional `tag` narrows to one; optional `since` (ISO-8601, epoch seconds or
+    epoch ms) bounds the window. Untagged traffic is not reported here -- this
+    endpoint answers "what did this tag spend", and folding untagged calls into
+    a bucket would invent an attribution nobody asserted.
+
+    Failures are reported SEPARATELY from calls. A failed call cost real compute
+    and averaging it into the totals flatters the initiative that spent it.
+    """
+    user = get_user(api_key)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    since_iso = None
+    if since is not None:
+        try:
+            since_iso = _parse_since(since)
+        except (ValueError, OverflowError, OSError):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Invalid `since` value — use ISO-8601 "
+                    "(e.g. 2026-08-27T00:00:00Z), epoch seconds, or epoch ms"
+                ),
+            )
+
+    rows = get_usage_by_tag(user["id"], tag=tag, since_iso=since_iso)
+    if rows is None:
+        # Not an empty list: "the rollup did not run" and "this tag spent
+        # nothing" are different answers, and a dashboard must not render them
+        # the same way.
+        raise HTTPException(status_code=503, detail="Usage rollup unavailable")
+
+    return {
+        "object": "list",
+        "tag": tag,
+        "since": since_iso,
+        "data": rows,
+        # Said out loud so a reader never mistakes an empty list for a measured
+        # zero -- the same three-state discipline the partner plan asks for.
+        "measured": bool(rows),
+    }
