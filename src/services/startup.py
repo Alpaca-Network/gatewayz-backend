@@ -868,9 +868,11 @@ async def lifespan(app):
         from src.config import Config as _Config4
         from src.security.privy_token import privy_verification_mode
 
-        if _Config4.IS_PRODUCTION and privy_verification_mode() == "off":
+        _privy_mode = privy_verification_mode()
+        if _Config4.IS_PRODUCTION and _privy_mode in {"off", "log"}:
+            # "log" is just as open as "off": failures are recorded, then let through.
             logger.warning(
-                "  [WARN] PRIVY_TOKEN_VERIFICATION=off in production. "
+                f"  [WARN] PRIVY_TOKEN_VERIFICATION={_privy_mode} in production. "
                 "POST /auth will trust the client-supplied Privy user id "
                 "with no server-side proof — this is a known account-takeover "
                 "vector (gatewayz-backend#2248)."

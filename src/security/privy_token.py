@@ -163,17 +163,19 @@ def privy_verification_mode() -> Literal["enforce", "log", "off"]:
     Resolve the effective Privy token verification mode.
 
     ``Config.PRIVY_TOKEN_VERIFICATION`` wins when set. Otherwise default to
-    "enforce" when a verification key is configured (the key being present
-    is the signal that the rollout is ready to enforce), else "log" so
-    environments without the key don't 401 every login.
+    "enforce" whenever tokens CAN be verified -- a PEM key or a PRIVY_APP_ID
+    (JWKS) -- else "log" so environments with neither don't 401 every login.
+
+    JWKS-only setups used to default to "log". The Privy dashboard no longer
+    exposes a PEM, so production silently fell back to "log" and POST /auth
+    accepted forged tokens: a known DID was enough to get that account's API
+    key. "log" is a rollout aid you opt into, never a default.
     """
     configured = (Config.PRIVY_TOKEN_VERIFICATION or "").strip().lower()
     if configured in {"enforce", "log", "off"}:
         return configured  # type: ignore[return-value]
 
-    # JWKS-only setups start in "log" and are promoted to "enforce" explicitly
-    # via PRIVY_TOKEN_VERIFICATION once the logs show zero verification failures.
-    return "enforce" if Config.PRIVY_VERIFICATION_KEY else "log"
+    return "enforce" if privy_verification_configured() else "log"
 
 
 def verify_privy_access_token(token: str | None, expected_sub: str) -> PrivyTokenClaims:
