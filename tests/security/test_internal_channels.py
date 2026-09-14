@@ -21,7 +21,7 @@ from src.db.users import deduct_credits
 from src.handlers.error_persistence import format_error_for_persistence
 from src.middleware.auto_sentry_middleware import AutoSentryMiddleware
 from src.middleware.request_id_middleware import RequestIDMiddleware
-from src.routes.chat import _resolve_billing_ref
+from src.services.billing.billing_ref import resolve_billing_ref as _resolve_billing_ref
 from src.utils.sentry_scrub import strip_sensitive_event
 
 # Sentinel values from the threat model's canary vocabulary.

@@ -2,7 +2,6 @@ import asyncio
 import importlib
 import logging
 import time
-import uuid
 from contextvars import ContextVar
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -47,19 +46,10 @@ from src.handlers.error_persistence import format_error_for_persistence, save_fa
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
 
-def _resolve_billing_ref(request: Request | None) -> str:
-    """Resolve the server-minted billing correlation ref for this request.
-
-    Reads request.state.billing_ref, set by RequestIDMiddleware independently of
-    any client-supplied header (threat model L7/G4: the client-settable
-    X-Request-ID must never be the join key between billing rows and a
-    request). Falls back to a fresh UUID only when no request/middleware state
-    is available (e.g. a handler invoked outside the normal middleware stack in
-    a test), so billing never silently lacks an idempotency key.
-    """
-    state = getattr(request, "state", None) if request is not None else None
-    billing_ref = getattr(state, "billing_ref", None) if state is not None else None
-    return billing_ref or str(uuid.uuid4())
+# Server-minted billing correlation ref (threat model L7/G4). Shared with every
+# other billable route (audio, ...) via src.services.billing.billing_ref; kept
+# under its historical private name here for existing call sites.
+from src.services.billing.billing_ref import resolve_billing_ref as _resolve_billing_ref
 
 
 # Braintrust removed for cost reduction (see docs/superpowers/specs/2026-05-25-cost-reduction-design.md)

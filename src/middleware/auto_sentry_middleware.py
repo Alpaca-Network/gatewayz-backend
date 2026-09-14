@@ -283,7 +283,10 @@ class AutoSentryMiddleware:
         """
         Sanitize headers to remove sensitive information.
 
-        Removes: Authorization, API keys, cookies, etc.
+        Removes: Authorization, API keys, cookies, and every header that
+        carries the client's network address (threat model G5/L5: the real
+        client IP must not reach Sentry by any path — this context is set
+        directly on the scope, so the SDK's own header filter never sees it).
         """
         sensitive_headers = [
             b"authorization",
@@ -293,6 +296,13 @@ class AutoSentryMiddleware:
             b"apikey",
             b"token",
             b"x-auth-token",
+            # Client-IP-bearing headers (proxies / CDNs)
+            b"x-forwarded-for",
+            b"x-real-ip",
+            b"x-client-ip",
+            b"cf-connecting-ip",
+            b"true-client-ip",
+            b"forwarded",
         ]
 
         sanitized = {}

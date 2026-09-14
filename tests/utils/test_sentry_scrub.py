@@ -75,3 +75,62 @@ def test_never_raises_on_malformed_event_and_drops_it():
     event = ExplodingEvent(request={"data": "x"})
     result = strip_sensitive_event(event, {})
     assert result is None
+
+
+def test_strips_stack_frame_locals_from_exceptions_and_threads():
+    """Frame locals in a route handler are the request itself (auth header,
+    client IP, parsed body). They must never survive before_send even if
+    include_local_variables were ever re-enabled."""
+    event = {
+        "exception": {
+            "values": [
+                {
+                    "type": "RuntimeError",
+                    "value": "boom",
+                    "stacktrace": {
+                        "frames": [
+                            {"function": "handler", "vars": {"api_key": "gw_live_secret"}},
+                            {"function": "inner", "vars": {"body": {"prompt": "secret"}}},
+                            {"function": "no_vars"},
+                        ]
+                    },
+                }
+            ]
+        },
+        "threads": {
+            "values": [
+                {"stacktrace": {"frames": [{"function": "t", "vars": {"ip": "203.0.113.77"}}]}}
+            ]
+        },
+    }
+    result = strip_sensitive_event(event, {})
+    frames = result["exception"]["values"][0]["stacktrace"]["frames"]
+    assert all("vars" not in frame for frame in frames)
+    assert [frame["function"] for frame in frames] == ["handler", "inner", "no_vars"]
+    thread_frames = result["threads"]["values"][0]["stacktrace"]["frames"]
+    assert all("vars" not in frame for frame in thread_frames)
+
+
+def test_strips_client_ip_headers_from_request_and_middleware_context():
+    """IP-bearing proxy headers are identity (threat model L5). They must be
+    dropped from the SDK's request section AND from the "request" context
+    AutoSentryMiddleware sets on the scope (which lands under contexts)."""
+    event = {
+        "request": {"headers": {"X-Forwarded-For": "203.0.113.77", "Host": "api"}},
+        "contexts": {
+            "request": {
+                "path": "/v1/chat/completions",
+                "headers": {
+                    "x-forwarded-for": "203.0.113.77",
+                    "X-Real-IP": "203.0.113.77",
+                    "cf-connecting-ip": "203.0.113.77",
+                    "Authorization": "Bearer gw_live_secret",
+                    "content-type": "application/json",
+                },
+            }
+        },
+    }
+    result = strip_sensitive_event(event, {})
+    assert result["request"]["headers"] == {"Host": "api"}
+    assert result["contexts"]["request"]["headers"] == {"content-type": "application/json"}
+    assert result["contexts"]["request"]["path"] == "/v1/chat/completions"

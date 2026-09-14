@@ -47,7 +47,7 @@ N7. **A community compute operator sees full prompt and response content, by con
 | L2 | Client `metadata`/`extra_body`/`extra_headers` passthrough | dropped on `/v1/messages`; `extra_body` not modelled | **Deny-list at one boundary** (W-B) |
 | L3 | Client IP / User-Agent / `X-Forwarded-For` to providers | not forwarded | Assert with canary test (W-B) |
 | L4 | Egress IP | fixed Railway egress | Document (this doc) |
-| L5 | Sentry user context: `user_id`, `email`, `api_key_id`, `client_host` (real IP) | attached to every request scope | **Drop email + IP; keep hashed key + request ref; `before_send` strips bodies** (W-C) |
+| L5 | Sentry user context: `user_id`, `email`, `api_key_id`, `client_host` (real IP) | attached to every request scope | **Drop email + IP; keep hashed key + request ref; `before_send` strips bodies** (W-C). M3 follow-up: the SDK's default `include_local_variables=True` shipped every route-handler local (Authorization header, client IP, parsed body) inside stack frames, and the middleware's own request context copied `X-Forwarded-For`/`X-Real-IP` verbatim — both closed (`include_local_variables=False`, IP-bearing headers redacted in the middleware and in `before_send`, frame `vars` dropped in `before_send`). |
 | L6 | `chat_completion_requests.error_message = str(e)[:500]` | may echo input | **Type + sanitized message only** (W-C) |
 | L7 | Client-settable `X-Request-ID` used as billing idempotency key and Sentry tag | yes | **Server-minted billing ref**; client id only echoed back (W-C) |
 | L8 | OTLP/Arize/Loki config vars | dead code, but a stray `OTEL_EXPORTER_OTLP_ENDPOINT` would silently export spans carrying `user_id` | **Remove dead config; startup guard** (W-C) |
@@ -62,6 +62,8 @@ N7. **A community compute operator sees full prompt and response content, by con
 
 - `tests/security/test_upstream_identity_firewall.py`: for every provider client, drive a request carrying sentinel identity values through the real handler with the HTTP layer intercepted; assert no sentinel appears in any outbound header or body byte. This test is the executable form of G1 and must stay green — **must include `community` in its provider list** (W-A2), asserting the same sentinels never leak *except* `billing_ref`, which the same test should assert IS present on the community path (the scoped, deliberate carve-out in G1/N7) but nowhere else.
 - `tests/security/test_internal_channels.py`: Sentry scope has no `email`/`client_host`/bodies; `error_message` never contains a sentinel prompt; billing ref ≠ client `X-Request-ID`.
+- `tests/security/test_sentry_scrub_roundtrip.py`: the executable form of G5. Initialises the real `sentry_sdk` with the production options (`build_sentry_init_kwargs`) and a capturing transport, drives a sentinel-carrying request (bearer key, `X-Forwarded-For`, JSON body with email + prompt, identity on `request.state`) through `RequestIDMiddleware` + `AutoSentryMiddleware` to a raising route, and asserts on the serialized event the transport receives: no key (full or prefix), no IP, no email, no body/prompt, no frame locals; the `billing_ref` tag and the error type/message survive.
+- `tests/routes/test_audio_billing_ref.py`: both audio transcription endpoints hand `request.state.billing_ref` to `deduct_credits` as the idempotency key (L7/G4 for audio; chat is covered by `tests/routes/test_chat_billing_ref_resolution.py`).
 - Migration tests / `pg_policies` assertions for L9/L10.
 
 ## 7. Changing this document

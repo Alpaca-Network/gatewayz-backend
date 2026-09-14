@@ -85,3 +85,26 @@ def test_api_key_hash_extracted_independent_of_user_object():
     assert "api_key_hash" not in user_context
     assert "email" not in user_context
     assert user_context == {"id": 1}
+
+
+def test_request_context_redacts_client_ip_bearing_headers():
+    """The middleware's own request context is set straight on the Sentry
+    scope and never passes through the SDK's header filter — so it must
+    redact proxy/CDN client-IP headers itself (threat model G5/L5)."""
+    middleware = _middleware()
+    headers = [
+        (b"x-forwarded-for", b"203.0.113.77, 10.0.0.1"),
+        (b"x-real-ip", b"203.0.113.77"),
+        (b"cf-connecting-ip", b"203.0.113.77"),
+        (b"true-client-ip", b"203.0.113.77"),
+        (b"forwarded", b"for=203.0.113.77"),
+        (b"authorization", b"Bearer gw_live_secret"),
+        (b"content-type", b"application/json"),
+    ]
+    context = middleware._extract_request_context(_scope(headers=headers))
+
+    assert "203.0.113.77" not in str(context)
+    assert "gw_live_secret" not in str(context)
+    for name in ("x-forwarded-for", "x-real-ip", "cf-connecting-ip", "true-client-ip", "forwarded"):
+        assert context["headers"][name] == "[REDACTED]"
+    assert context["headers"]["content-type"] == "application/json"

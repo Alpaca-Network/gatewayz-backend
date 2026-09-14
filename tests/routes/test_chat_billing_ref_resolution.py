@@ -5,7 +5,13 @@ anything client-controlled — threat model L7/G4."""
 import uuid
 from types import SimpleNamespace
 
-from src.routes.chat import _resolve_billing_ref
+from src.routes.chat import _resolve_billing_ref  # re-exported from billing_ref
+from src.services.billing.billing_ref import resolve_billing_ref
+
+
+def test_chat_uses_the_shared_billing_ref_helper():
+    """chat.py must not carry its own copy — audio and chat share one helper."""
+    assert _resolve_billing_ref is resolve_billing_ref
 
 
 def test_uses_billing_ref_from_request_state():
