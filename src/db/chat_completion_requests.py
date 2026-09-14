@@ -1701,3 +1701,33 @@ def get_requests_with_cost(
             "offset": offset,
             "error": str(e),
         }
+
+
+def get_usage_by_tag(
+    user_id: int,
+    tag: str | None = None,
+    since_iso: str | None = None,
+) -> list[dict[str, Any]] | None:
+    """Usage rolled up by the caller's attribution tag, newest activity first.
+
+    Aggregated in SQL (`gatewayz_usage_by_tag`) rather than by fetching rows and
+    summing here. A PostgREST fetch with a row cap plus a client-side sum is the
+    shape that silently undercounted high-volume providers in #2295 -- a capped
+    sum is not a smaller answer, it is a wrong one.
+
+    Returns None on failure rather than [] so the caller can tell "no tagged
+    usage" from "the rollup did not run". Those are different answers and a
+    dashboard must not render them the same way.
+    """
+    try:
+        client = get_supabase_client()
+        params: dict[str, Any] = {"p_user_id": user_id}
+        if tag:
+            params["p_tag"] = tag
+        if since_iso:
+            params["p_since"] = since_iso
+        result = client.rpc("gatewayz_usage_by_tag", params).execute()
+        return list(result.data or [])
+    except Exception as e:
+        logger.error("usage-by-tag rollup failed for user %s: %s", user_id, e)
+        return None
