@@ -36,6 +36,7 @@ from src.services.providers.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
 )
+from src.services.request_tag import extract_request_tag
 from src.services.upstream.anonymize import scrub_upstream_kwargs
 
 logger = logging.getLogger(__name__)
@@ -922,6 +923,14 @@ class ChatInferenceHandler:
             "api_key_id": self.user.get("key_id") if self.user else None,
             "is_anonymous": self.is_anonymous,
         }
+
+        # Caller-supplied attribution, recorded at the call rather than
+        # reconstructed afterwards. Only set when a tag was actually sent, so
+        # an untagged call's row is byte-identical to what it was before --
+        # attribution is opt-in and must never change an existing caller.
+        tag = extract_request_tag(self.request)
+        if tag:
+            save_kwargs["metadata"] = {"tag": tag}
 
         if self.background_tasks:
             self.background_tasks.add_task(save_chat_completion_request_with_cost, **save_kwargs)
