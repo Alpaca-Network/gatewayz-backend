@@ -393,7 +393,17 @@ def _process_emission_wallet(
 def _pay_stakers(epoch_date_str: str, stakers_wei: int) -> dict[str, Any]:
     """Pay stakers_wei out pro-rata to each wallet's share of total staked
     WAYZ. Unlinked wallets fall to 'pending' exactly like the per_unit
-    rate-table job -- see docs/staking/REWARDS.md."""
+    rate-table job -- see docs/staking/REWARDS.md.
+
+    Returns a `dust_wei` field alongside the usual counts: the wei left
+    over after every wallet's floor(stakers_wei * share) allocation --
+    same floor-division dust concept as `score_providers()`'s return value
+    -- so the caller can fold it into `treasury_wei` and keep the
+    (providers + stakers + treasury == emission_wei) invariant exact. When
+    there's no stake to pay against at all (no wallets, or stakers_wei
+    itself is 0), the ENTIRE stakers_wei is unallocated dust -- mirrors
+    `_score_and_persist_providers`' "no eligible providers -> the whole
+    pool is dust" handling."""
     wallets = list_wallets_with_stake()
     total_staked_wei = sum(int(w["staked_amount"]) for w in wallets)
 
@@ -409,9 +419,11 @@ def _pay_stakers(epoch_date_str: str, stakers_wei: int) -> dict[str, Any]:
             "credits_paid": "0",
             "capped": 0,
             "asset": Config.STAKER_REWARD_ASSET,
+            "dust_wei": stakers_wei,
         }
 
     credit_rate = Decimal(str(Config.WAYZ_CREDIT_RATE))
+    allocated_wei = 0
 
     for wallet in wallets:
         address = wallet["wallet_address"]
@@ -420,6 +432,7 @@ def _pay_stakers(epoch_date_str: str, stakers_wei: int) -> dict[str, Any]:
             continue
         share = Decimal(staked_wei) / Decimal(total_staked_wei)
         wayz_amount_wei = int((Decimal(stakers_wei) * share).to_integral_value(rounding=ROUND_DOWN))
+        allocated_wei += wayz_amount_wei
 
         try:
             outcome, was_capped, paid_credits = _process_emission_wallet(
@@ -442,6 +455,7 @@ def _pay_stakers(epoch_date_str: str, stakers_wei: int) -> dict[str, Any]:
         "credits_paid": str(credits_paid),
         "capped": capped,
         "asset": Config.STAKER_REWARD_ASSET,
+        "dust_wei": stakers_wei - allocated_wei,
     }
 
 
@@ -489,8 +503,17 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
         epoch_date_str, window_start.isoformat(), window_end.isoformat(), split.providers_wei
     )
     staker_summary = _pay_stakers(epoch_date_str, split.stakers_wei)
+    staker_dust_wei = staker_summary["dust_wei"]
 
-    treasury_wei = split.treasury_wei + provider_dust_wei
+    # Persist the ACTUAL allocated amounts, not the nominal pre-dust split
+    # -- every floor-division remainder (providers' per-provider shares,
+    # stakers' per-wallet shares) is dust that lands in treasury instead,
+    # so providers_wei + stakers_wei + treasury_wei always sums to exactly
+    # emission_wei, never emission_wei + dust.
+    providers_wei = split.providers_wei - provider_dust_wei
+    stakers_wei = split.stakers_wei - staker_dust_wei
+    treasury_wei = split.treasury_wei + provider_dust_wei + staker_dust_wei
+    total_dust_wei = provider_dust_wei + staker_dust_wei
     top_share = max((r.share for r in provider_results), default=Decimal(0))
 
     summary = {
@@ -498,8 +521,8 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
         "emission_wayz": str(Config.WAYZ_DAILY_EMISSION),
         "emission_wei": str(split.emission_wei),
         "split": {
-            "providers_wei": str(split.providers_wei),
-            "stakers_wei": str(split.stakers_wei),
+            "providers_wei": str(providers_wei),
+            "stakers_wei": str(stakers_wei),
             "treasury_wei": str(treasury_wei),
         },
         "providers_scored": len(provider_results),
@@ -509,14 +532,16 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
         "stakers_skipped": staker_summary["skipped"],
         "credits_paid": staker_summary["credits_paid"],
         "staker_asset": staker_summary["asset"],
-        "dust_wei": str(provider_dust_wei),
+        "dust_wei": str(total_dust_wei),
+        "provider_dust_wei": str(provider_dust_wei),
+        "staker_dust_wei": str(staker_dust_wei),
     }
 
     epoch_row = create_epoch(
         epoch_date_str,
         split.emission_wei,
-        split.providers_wei,
-        split.stakers_wei,
+        providers_wei,
+        stakers_wei,
         treasury_wei,
         len(provider_results),
         staker_summary["paid"],

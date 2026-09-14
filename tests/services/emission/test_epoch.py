@@ -181,20 +181,138 @@ def test_run_emission_epoch_happy_path(
     assert result["providers_scored"] == 1
     assert result["stakers_paid"] == 1
     assert result["credits_paid"] == "1.000000"
-    assert Decimal(result["split"]["providers_wei"]) == Decimal(100000 * 10**18 * 4100 // 10000)
 
-    # The sole eligible provider with all the activity gets the entire
-    # providers_wei pool (minus at most a tiny floor-dust remainder).
+    # The sole eligible provider (share=1.0) and sole staker (100% of
+    # stake) each get their full pool exactly -- zero dust either side in
+    # this scenario. HIGH fix-round-1: the persisted/reported split must
+    # be the ACTUAL allocated amounts (post-dust), summing to exactly
+    # emission_wei -- never emission_wei + dust. See the two dedicated
+    # dust tests below for the nonzero-dust and zero-eligible cases.
+    emission_wei = Decimal(result["emission_wei"])
+    providers_wei = Decimal(result["split"]["providers_wei"])
+    stakers_wei = Decimal(result["split"]["stakers_wei"])
+    treasury_wei = Decimal(result["split"]["treasury_wei"])
+    assert providers_wei + stakers_wei + treasury_wei == emission_wei
+    assert stakers_wei == Decimal(100000 * 10**18 * 4100 // 10000)
+    assert providers_wei == Decimal(100000 * 10**18 * 4100 // 10000)
+    assert result["provider_dust_wei"] == "0"
+    assert result["staker_dust_wei"] == "0"
+
     mock_create_earning.assert_called_once()
     called_provider_id, called_epoch_date, called_amount = mock_create_earning.call_args[0]
     assert called_provider_id == 1
     assert called_epoch_date == "2026-09-12"
-    assert called_amount > 0
+    assert called_amount == providers_wei
 
     mock_create_epoch.assert_called_once()
     args, kwargs = mock_create_epoch.call_args
     assert args[0] == "2026-09-12"
+    # create_epoch(epoch_date, emission_wei, providers_wei, stakers_wei, treasury_wei, ...)
+    assert args[2] == int(providers_wei)
+    assert args[3] == int(stakers_wei)
+    assert args[4] == int(treasury_wei)
     assert kwargs["status"] == "allocated"
+
+
+@patch("src.services.emission.epoch.create_epoch")
+@patch("src.services.emission.epoch.pay_pending_accrual")
+@patch("src.services.emission.epoch.create_accrual")
+@patch("src.services.emission.epoch.get_wallet")
+@patch("src.services.emission.epoch.get_accrual")
+@patch("src.services.emission.epoch.list_wallets_with_stake")
+@patch("src.services.emission.epoch.create_emission_earning")
+@patch("src.services.emission.epoch.create_provider_scores")
+@patch("src.services.emission.epoch.get_payout_tiers")
+@patch("src.services.emission.epoch.list_active_nodes")
+@patch("src.services.emission.epoch.list_approved_providers")
+@patch("src.services.emission.epoch.list_verified_work_window")
+@patch("src.services.emission.epoch.is_stake_sync_stale")
+@patch("src.services.emission.epoch.get_epoch")
+def test_run_emission_epoch_3way_sum_is_exact_with_nonzero_provider_and_staker_dust(
+    mock_get_epoch,
+    mock_stale,
+    mock_work_window,
+    mock_approved_providers,
+    mock_active_nodes,
+    mock_tiers,
+    mock_create_scores,
+    mock_create_earning,
+    mock_list_wallets,
+    mock_get_accrual,
+    mock_get_wallet,
+    mock_create_accrual,
+    mock_pay_pending,
+    mock_create_epoch,
+    emission_mode,
+):
+    """HIGH fix-round-1 regression: with THREE eligible providers splitting
+    unevenly (guaranteed floor-division remainder) and THREE stakers
+    splitting unevenly (same), both provider_dust_wei and staker_dust_wei
+    must be > 0 AND fully absorbed into treasury_wei -- providers_wei +
+    stakers_wei + treasury_wei must still equal emission_wei exactly."""
+    mock_get_epoch.return_value = None
+    mock_stale.return_value = False
+    # Three providers, unevenly-weighted activity -> unequal shares ->
+    # floor(providers_wei * share) for each leaves a nonzero remainder.
+    mock_work_window.return_value = [
+        {
+            "provider_id": pid,
+            "node_id": pid,
+            "model": "llama-3.1-8b-instruct",
+            "prompt_tokens": tokens,
+            "completion_tokens": 0,
+            "latency_ms": 200,
+            "attested": False,
+            "created_at": "2026-09-12T10:00:00+00:00",
+        }
+        for pid, tokens in [(1, 1000), (2, 333), (3, 111)]
+    ]
+    mock_approved_providers.return_value = [{"id": 1}, {"id": 2}, {"id": 3}]
+    mock_active_nodes.return_value = []
+    mock_tiers.return_value = []
+    mock_create_scores.return_value = True
+    mock_create_earning.return_value = ({"id": 99}, "created")
+
+    # Three stakers, unevenly-weighted stake -> same floor-division dust
+    # on the staker leg.
+    mock_list_wallets.return_value = [
+        {"wallet_address": "0xa", "staked_amount": str(1000 * 10**18)},
+        {"wallet_address": "0xb", "staked_amount": str(333 * 10**18)},
+        {"wallet_address": "0xc", "staked_amount": str(111 * 10**18)},
+    ]
+    mock_get_accrual.return_value = None
+    mock_get_wallet.return_value = {"user_id": 7, "is_active": True}
+    mock_create_accrual.side_effect = lambda *args, **kwargs: {
+        "id": 5,
+        "wallet_address": args[0],
+        "reward_date": args[1],
+        "user_id": 7,
+        "staked_amount_wei": args[2],
+        "credits": kwargs.get("credits", "0"),
+        "rate_id": None,
+    }
+    mock_pay_pending.return_value = ("paid", Decimal("1.000000"))
+    mock_create_epoch.return_value = {"epoch_date": "2026-09-12"}
+
+    result = epoch.run_emission_epoch(date(2026, 9, 12))
+
+    emission_wei = Decimal(result["emission_wei"])
+    providers_wei = Decimal(result["split"]["providers_wei"])
+    stakers_wei = Decimal(result["split"]["stakers_wei"])
+    treasury_wei = Decimal(result["split"]["treasury_wei"])
+
+    assert providers_wei + stakers_wei + treasury_wei == emission_wei
+    assert int(result["provider_dust_wei"]) > 0
+    assert int(result["staker_dust_wei"]) > 0
+    assert Decimal(result["dust_wei"]) == Decimal(result["provider_dust_wei"]) + Decimal(
+        result["staker_dust_wei"]
+    )
+
+    args, _kwargs = mock_create_epoch.call_args
+    assert args[2] == int(providers_wei)
+    assert args[3] == int(stakers_wei)
+    assert args[4] == int(treasury_wei)
+    assert args[2] + args[3] + args[4] == int(emission_wei)
 
 
 @patch("src.services.emission.epoch.create_epoch")
@@ -230,13 +348,24 @@ def test_run_emission_epoch_no_eligible_providers_dusts_treasury(
     result = epoch.run_emission_epoch(date(2026, 9, 12))
 
     assert result["providers_scored"] == 0
-    treasury_wei = Decimal(result["split"]["treasury_wei"])
     emission_wei = Decimal(result["emission_wei"])
-    stakers_wei = emission_wei * 4100 // 10000
-    # The whole providers_wei leg becomes dust with zero eligible
-    # providers, landing entirely in treasury alongside the usual 18% cut.
-    expected_treasury = emission_wei - stakers_wei
-    assert treasury_wei == expected_treasury
+    providers_wei = Decimal(result["split"]["providers_wei"])
+    stakers_wei = Decimal(result["split"]["stakers_wei"])
+    treasury_wei = Decimal(result["split"]["treasury_wei"])
+
+    # Zero eligible providers AND zero staked wallets -- BOTH the
+    # providers_wei and stakers_wei legs are entirely dust, so the whole
+    # emission_wei lands in treasury and the persisted providers_wei/
+    # stakers_wei are 0, not their nominal pre-dust amounts (HIGH
+    # fix-round-1: previously this row would have reported providers_wei
+    # still at its full 41% while ALSO folding that same amount into
+    # treasury, double-counting it).
+    assert providers_wei == 0
+    assert stakers_wei == 0
+    assert treasury_wei == emission_wei
+    assert providers_wei + stakers_wei + treasury_wei == emission_wei
+    assert Decimal(result["provider_dust_wei"]) == emission_wei * 4100 // 10000
+    assert Decimal(result["staker_dust_wei"]) == emission_wei * 4100 // 10000
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +388,7 @@ def test_pay_stakers_wayz_mode_records_pending_not_implemented(
     assert summary["paid"] == 0
     assert summary["pending"] == 1
     assert summary["asset"] == "wayz"
+    assert summary["dust_wei"] == 0  # sole wallet -> 100% share, no floor remainder
     mock_create_accrual.assert_called_once()
     _args, kwargs = mock_create_accrual.call_args
     assert kwargs["skip_reason"] == "wayz_payout_not_implemented"
@@ -267,6 +397,10 @@ def test_pay_stakers_wayz_mode_records_pending_not_implemented(
 
 
 def test_pay_stakers_no_stake_returns_all_zero(emission_mode):
+    """HIGH fix-round-1: with no staked wallets at all, the ENTIRE
+    stakers_wei pool is unallocated dust for the caller to fold into
+    treasury -- mirrors _score_and_persist_providers' "no eligible
+    providers" handling."""
     with patch("src.services.emission.epoch.list_wallets_with_stake", return_value=[]):
         summary = epoch._pay_stakers("2026-09-12", 1_000_000)
     assert summary == {
@@ -276,6 +410,7 @@ def test_pay_stakers_no_stake_returns_all_zero(emission_mode):
         "credits_paid": "0",
         "capped": 0,
         "asset": "credits",
+        "dust_wei": 1_000_000,
     }
 
 

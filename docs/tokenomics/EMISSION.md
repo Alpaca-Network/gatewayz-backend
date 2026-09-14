@@ -124,7 +124,10 @@ one-off node, exactly like today.
 
 Every provider's `allocation_wei` floors, so `Σ(allocation_wei) <=
 providers_wei`; the remainder ("dust") is folded into `treasury_wei` for
-that epoch, never lost and never given to any one provider arbitrarily.
+that epoch, never lost and never given to any one provider arbitrarily. The
+persisted `emission_epochs.providers_wei` / `stakers_wei` are the amounts
+**actually allocated** (nominal split minus dust), so the three columns always
+sum to exactly `emission_wei`.
 
 **Persistence:** one `provider_scores` row per (epoch_date, provider_id)
 (all four raw metrics, `raw_score`, `adjusted_score`, `share`,
