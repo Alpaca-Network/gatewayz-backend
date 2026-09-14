@@ -4,6 +4,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from src.config.config import Config
 from src.config.supabase_config import get_supabase_client
 from src.db.api_keys import create_api_key, get_api_key_by_key
 from src.utils.crypto import last4
@@ -216,9 +217,15 @@ def create_enhanced_user(
             "tier": "basic",
         }
 
-        # Add privy_user_id if provided
+        # Add privy_user_id if provided, and stamp the Privy app that issued
+        # it (docs/PRIVY_MIGRATION.md): lazy adoption and /admin/status's
+        # migration counters key on privy_app_id, so a NULL here would make
+        # every post-cutover account indistinguishable from a pre-Privy row
+        # at the next app migration.
         if privy_user_id:
             user_data["privy_user_id"] = privy_user_id
+            if Config.PRIVY_APP_ID:
+                user_data["privy_app_id"] = Config.PRIVY_APP_ID
 
         # Create user account with a temporary API key (will be replaced)
         user_data["api_key"] = f"gw_live_{secrets.token_urlsafe(16)}"
