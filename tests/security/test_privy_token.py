@@ -175,9 +175,15 @@ class TestPrivyVerificationMode:
         monkeypatch.setattr("src.security.privy_token.Config.PRIVY_VERIFICATION_KEY", "some-key")
         assert privy_verification_mode() == "enforce"
 
-    def test_defaults_to_log_when_key_absent(self, monkeypatch):
+    def test_defaults_to_log_when_nothing_can_verify(self, monkeypatch):
         monkeypatch.setattr("src.security.privy_token.Config.PRIVY_TOKEN_VERIFICATION", "")
         monkeypatch.setattr("src.security.privy_token.Config.PRIVY_VERIFICATION_KEY", None)
+        monkeypatch.setattr("src.security.privy_token.Config.PRIVY_APP_ID", None)
+        assert privy_verification_mode() == "log"
+
+    def test_explicit_log_still_honoured(self, monkeypatch):
+        monkeypatch.setattr("src.security.privy_token.Config.PRIVY_TOKEN_VERIFICATION", "log")
+        monkeypatch.setattr("src.security.privy_token.Config.PRIVY_APP_ID", "app-id")
         assert privy_verification_mode() == "log"
 
 
@@ -311,6 +317,7 @@ def test_pem_env_overrides_jwks(monkeypatch, jwks_mode, key_pair):
     assert jwks_mode["calls"]["n"] == 0
 
 
-def test_jwks_mode_defaults_to_log(monkeypatch, jwks_mode):
+def test_jwks_mode_defaults_to_enforce(monkeypatch, jwks_mode):
+    # Regression: JWKS-only prod defaulted to "log" and accepted forged tokens.
     monkeypatch.setattr("src.security.privy_token.Config.PRIVY_TOKEN_VERIFICATION", None)
-    assert privy_verification_mode() == "log"
+    assert privy_verification_mode() == "enforce"
