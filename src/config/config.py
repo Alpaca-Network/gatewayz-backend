@@ -257,6 +257,73 @@ class Config:
     COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS = int(
         _get_env_var("COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS", "48")
     )
+
+    # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics --
+    # boss asks: split WAYZ rewards between stakers and GPU providers the
+    # way Chutes/Bittensor does). See docs/tokenomics/EMISSION.md.
+    #
+    # REWARDS_MODE gates two mutually-exclusive payout paths:
+    #   'per_unit' (default) -- today's behaviour: providers earn per
+    #     verified work item (src/services/gpu/earnings.py), stakers earn
+    #     off the tiered rate table (src/services/staking_rewards.py).
+    #     Ships dark; nothing below takes effect until this flips.
+    #   'emission' -- providers earn a daily share of WAYZ_DAILY_EMISSION
+    #     by 7-day rolling score (src/services/emission/), stakers earn
+    #     pro-rata to stake off the SAME emission pool instead of the rate
+    #     table. record_earning_for_verified_work() checks this flag and
+    #     stops creating per_unit earnings once it's 'emission' -- the two
+    #     paths are never both live for the same day.
+    REWARDS_MODE = _get_env_var("REWARDS_MODE", "per_unit")
+    # Decimal WAYZ/day the emission_epoch job splits 41/41/18. Deliberately
+    # NOT wei-scaled here -- src/services/emission/scoring.py converts to
+    # wei once, at the top of the split, so every downstream number is an
+    # integer.
+    WAYZ_DAILY_EMISSION = _get_env_var("WAYZ_DAILY_EMISSION", "100000")
+    EMISSION_SPLIT_PROVIDERS_BPS = int(_get_env_var("EMISSION_SPLIT_PROVIDERS_BPS", "4100"))
+    EMISSION_SPLIT_STAKERS_BPS = int(_get_env_var("EMISSION_SPLIT_STAKERS_BPS", "4100"))
+    EMISSION_SPLIT_TREASURY_BPS = int(_get_env_var("EMISSION_SPLIT_TREASURY_BPS", "1800"))
+    # 'credits' (default, boss's standing rule for stakers) pays the staker
+    # share through the same staking_reward_accruals + add_credits_to_user
+    # path as the per_unit rate table, converted at WAYZ_CREDIT_RATE.
+    # 'wayz' has no payout rail yet (see src/services/emission/epoch.py's
+    # _pay_stakers_wayz docstring) -- accruals are recorded 'pending' with
+    # skip_reason='wayz_payout_not_implemented' until one exists.
+    STAKER_REWARD_ASSET = _get_env_var("STAKER_REWARD_ASSET", "credits")
+    WAYZ_CREDIT_RATE = _get_env_var("WAYZ_CREDIT_RATE", "0.001")
+    # Provider 7-day rolling score weights (must sum to 10000 -- validated
+    # at startup by check_emission_config, which never raises: a bad sum
+    # is logged and the job is marked disabled rather than crashing boot).
+    PROVIDER_SCORE_WEIGHT_COMPUTE_BPS = int(
+        _get_env_var("PROVIDER_SCORE_WEIGHT_COMPUTE_BPS", "5500")
+    )
+    PROVIDER_SCORE_WEIGHT_SPEED_BPS = int(_get_env_var("PROVIDER_SCORE_WEIGHT_SPEED_BPS", "2000"))
+    PROVIDER_SCORE_WEIGHT_AVAILABILITY_BPS = int(
+        _get_env_var("PROVIDER_SCORE_WEIGHT_AVAILABILITY_BPS", "2000")
+    )
+    PROVIDER_SCORE_WEIGHT_UNIQUE_MODELS_BPS = int(
+        _get_env_var("PROVIDER_SCORE_WEIGHT_UNIQUE_MODELS_BPS", "500")
+    )
+    # Chutes' rule: a provider at/above the median raw score gets raised to
+    # this power (>1 rewards being above-median more than proportionally);
+    # below-median scores are left alone.
+    PROVIDER_SCORE_EXPONENT_ABOVE_MEDIAN = _get_env_var(
+        "PROVIDER_SCORE_EXPONENT_ABOVE_MEDIAN", "1.3"
+    )
+    # Daily cron time (UTC) the emission_epoch job runs at -- after
+    # staking_rewards (00:20) and gpu_spot_check, per
+    # src/services/scheduled_sync.py::start_emission_epoch_scheduler.
+    EMISSION_EPOCH_CRON_HOUR_UTC = int(_get_env_var("EMISSION_EPOCH_CRON_HOUR_UTC", "0"))
+    EMISSION_EPOCH_CRON_MINUTE_UTC = int(_get_env_var("EMISSION_EPOCH_CRON_MINUTE_UTC", "40"))
+
+    @classmethod
+    def emission_score_weights_bps(cls) -> dict[str, int]:
+        return {
+            "compute": cls.PROVIDER_SCORE_WEIGHT_COMPUTE_BPS,
+            "speed": cls.PROVIDER_SCORE_WEIGHT_SPEED_BPS,
+            "availability": cls.PROVIDER_SCORE_WEIGHT_AVAILABILITY_BPS,
+            "unique_models": cls.PROVIDER_SCORE_WEIGHT_UNIQUE_MODELS_BPS,
+        }
+
     # Server-side Privy access-token verification (gatewayz-backend#2248).
     # `POST /auth` used to trust the client-supplied Privy user id outright;
     # this closes that hole. PRIVY_VERIFICATION_KEY is the app's ES256 public

@@ -152,6 +152,16 @@ class EarningResult:
                         NOT leave provider_work.verification='verified'
                         for this row (see src/services/gpu/spot_check.py).
     'rate_unseeded'  -- the resolved class has no seeded provider_payout_rates row.
+    'skipped_emission_mode' -- Config.REWARDS_MODE == 'emission': per-unit
+                        earnings are not created while the daily emission
+                        job (src/services/emission/) owns provider payouts
+                        instead. The caller's verification bookkeeping is
+                        UNCHANGED by this -- callers that check only for
+                        'not_payable' to decide 'skipped' vs 'verified'
+                        (src/services/gpu/spot_check.py) correctly fall
+                        through to 'verified' here, since the work item
+                        itself is still legitimate; it simply isn't paid
+                        per-unit. See docs/tokenomics/EMISSION.md.
     'db_error'       -- the insert failed for a reason OTHER than a
                         duplicate (network blip, RLS, malformed payload...);
                         logged at WARNING (not INFO like 'duplicate') so
@@ -168,7 +178,17 @@ class EarningResult:
 
 def record_earning_for_verified_work(work: dict) -> EarningResult:
     """Accrue a provider_earnings row for a provider_work row that just
-    passed verification, applying the C1 allow-list + testnet safety cap."""
+    passed verification, applying the C1 allow-list + testnet safety cap.
+
+    Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics): when
+    Config.REWARDS_MODE == 'emission', provider payouts are made once a
+    day by the emission_epoch job instead of per verified work item -- see
+    'skipped_emission_mode' in EarningResult's docstring. This check runs
+    BEFORE the allow-list/rate lookups below so a mode flip never depends
+    on those tables being in any particular state."""
+    if Config.REWARDS_MODE == "emission":
+        return EarningResult(earning=None, outcome="skipped_emission_mode")
+
     reference_provider_configured = bool(Config.COMMUNITY_SPOTCHECK_REFERENCE_PROVIDER)
     attested = bool(work.get("attested"))
     effective_class = effective_model_class(

@@ -40,6 +40,7 @@ from src.schemas.gpu_public import (
     GpuPublicUtilizationResponse,
 )
 from src.services.auth_rate_limiting import get_client_ip
+from src.services.emission.epoch import get_public_emission_summary
 from src.services.rate_limiting import sliding_window_check
 
 logger = logging.getLogger(__name__)
@@ -114,11 +115,15 @@ def _set_cache_headers(response: Response) -> None:
 @router.get("/summary", response_model=GpuPublicSummary, dependencies=[Depends(_rate_limit)])
 async def public_summary(response: Response) -> dict:
     """Protocol-wide public summary: node/provider counts, region and model
-    breakdown, and last-hour aggregate utilization."""
+    breakdown, last-hour aggregate utilization, and (Chutes-style WAYZ
+    emission rewards, gatewayz-backend tokenomics) aggregate-only emission
+    config + the most recent epoch_date. No envelope -- see the module
+    docstring and tests/security/test_gpu_public_aggregate_only.py."""
     cache_key = "gpu_public:summary"
     data = _cache_get(cache_key)
     if data is None:
         data = get_summary()
+        data["emission"] = get_public_emission_summary()
         _cache_set(cache_key, data)
     _set_cache_headers(response)
     return data

@@ -24,6 +24,7 @@ from src.db.gpu_payouts import (
     list_settlements_for_provider,
 )
 from src.security.deps import get_user_id
+from src.services.emission.epoch import get_provider_emission_view
 from src.services.gpu.earnings import next_tier_min_tokens_7d, tier_multiplier_bps
 
 logger = logging.getLogger(__name__)
@@ -87,20 +88,27 @@ async def get_my_earnings(user_id: int = Depends(get_user_id)) -> dict[str, Any]
     multiplier_bps = tier_multiplier_bps(volume_7d, tiers)
     next_min = next_tier_min_tokens_7d(volume_7d, tiers)
 
-    return {
-        "success": True,
-        "data": {
-            "totals": {
-                "accrued_wei": str(totals["accrued"]),
-                "settled_wei": str(totals["settled"]),
-                "void_wei": str(totals["void"]),
-            },
-            "work": [_work_view(row) for row in work],
-            "settlements": [_settlement_view(row) for row in settlements],
-            "tier": {
-                "current_volume_7d": volume_7d,
-                "multiplier_bps": multiplier_bps,
-                "next_tier_min_tokens_7d": next_min,
-            },
+    data: dict[str, Any] = {
+        "totals": {
+            "accrued_wei": str(totals["accrued"]),
+            "settled_wei": str(totals["settled"]),
+            "void_wei": str(totals["void"]),
+        },
+        "work": [_work_view(row) for row in work],
+        "settlements": [_settlement_view(row) for row in settlements],
+        "tier": {
+            "current_volume_7d": volume_7d,
+            "multiplier_bps": multiplier_bps,
+            "next_tier_min_tokens_7d": next_min,
         },
     }
+
+    # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics) --
+    # present only once this provider has been scored at least once
+    # (None while the feature is off, or before the provider's first
+    # qualifying epoch).
+    emission = get_provider_emission_view(provider_id)
+    if emission is not None:
+        data["emission"] = emission
+
+    return {"success": True, "data": data}

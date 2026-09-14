@@ -960,6 +960,7 @@ strings.
   "success": true,
   "data": {
     "enabled": false,
+    "mode": "per_unit",
     "rate_table": [
       { "min_stake_wayz": "0", "credits_per_1k_wayz_per_day": "0.010000" },
       { "min_stake_wayz": "10000", "credits_per_1k_wayz_per_day": "0.012000" },
@@ -983,6 +984,20 @@ strings.
       }
     ]
   }
+}
+```
+
+`mode` is `Config.REWARDS_MODE` (`per_unit` or `emission`). Once
+`emission` mode has run at least one epoch, the response also gains
+(Chutes-style WAYZ emission rewards, gatewayz-backend tokenomics — see
+`docs/tokenomics/EMISSION.md`):
+
+```json
+"emission": {
+  "daily_emission_wayz": "100000",
+  "stakers_share_bps": 4100,
+  "your_share": "0.010000000000",
+  "estimated_credits_per_day": "0.410000"
 }
 ```
 
@@ -1280,9 +1295,23 @@ GET /gpu/public/summary
   "regions": [{ "region": "us-east", "nodes": 3 }],
   "models": [{ "id": "llama-3.1-8b-instruct", "nodes": 3 }],
   "last_hour": { "requests": 120, "tokens": 54000, "avg_latency_ms": 340, "error_rate": 0.01 },
-  "updated_at": "2026-09-03T18:00:00+00:00"
+  "updated_at": "2026-09-03T18:00:00+00:00",
+  "emission": {
+    "mode": "per_unit",
+    "daily_emission_wayz": "100000",
+    "providers_bps": 4100,
+    "stakers_bps": 4100,
+    "treasury_bps": 1800,
+    "last_epoch": null
+  }
 }
 ```
+
+`emission` (Chutes-style WAYZ emission rewards, gatewayz-backend
+tokenomics — see `docs/tokenomics/EMISSION.md`) is aggregate config only —
+no per-provider or per-user data, keeping this endpoint's aggregate-only
+guarantee. `last_epoch` is the most recent `emission_epochs.epoch_date`,
+or `null` if the mode has never run.
 
 ### Get Nodes
 
@@ -1347,6 +1376,50 @@ directly from the Pydantic response models — also committed at
 `docs/gpu/public-feed.schema.json`, kept equal to the live schema by a
 test in CI.
 
+### Get My Earnings
+
+```http
+GET /gpu/providers/me/earnings
+```
+
+Requires auth; scoped to the caller's own `gpu_providers` row (404 if
+they haven't registered one). Totals by status, recent work history
+(no prompt/response hashes), settlements, and the sliding-scale payout
+tier standing.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "totals": { "accrued_wei": "1000", "settled_wei": "2000", "void_wei": "0" },
+    "work": [
+      { "billing_ref": "br-1", "model": "llama-3.1-8b-instruct", "prompt_tokens": 100,
+        "completion_tokens": 50, "verification": "verified", "created_at": "2026-09-01T00:00:00Z" }
+    ],
+    "settlements": [
+      { "id": 1, "period_start": "2026-09-01T00:00:00Z", "period_end": "2026-09-02T00:00:00Z",
+        "amount_wei": "2000", "status": "sent", "tx_hash": "0x...",
+        "tx_url": "https://testnet.snowtrace.io/tx/0x...", "error": null, "created_at": "..." }
+    ],
+    "tier": { "current_volume_7d": 150000, "multiplier_bps": 2500, "next_tier_min_tokens_7d": 1000000 },
+    "emission": {
+      "last_epoch": "2026-09-12",
+      "score": { "compute": "1.0", "speed": "0.9", "availability": "1.0", "unique_models": "0.5",
+                 "raw": "0.955", "adjusted": "0.942", "share": "0.558" },
+      "allocation_wayz": "22888",
+      "rank": 1,
+      "providers_scored": 3
+    }
+  }
+}
+```
+
+`emission` (Chutes-style WAYZ emission rewards, gatewayz-backend
+tokenomics — see `docs/tokenomics/EMISSION.md`) is present only once this
+provider has been scored at least once; absent entirely while
+`REWARDS_MODE=per_unit` or before the provider's first qualifying epoch.
+
 ### GPU Marketplace — Full Index
 
 The community GPU marketplace's docs are split across three sections in
@@ -1363,13 +1436,14 @@ workstream) plus two dedicated docs. Starting points:
   `docs/gpu/PROVIDER_ONBOARDING.md`.
 - **Public transparency feed** — "GPU Public Transparency Feed" above:
   `/gpu/public/*`, no auth, aggregate-only, `docs/gpu/PUBLIC_FEED.md`.
-- **Earnings & payouts** (W-B, not yet shipped): will add `GET
-  /gpu/providers/me/earnings` here once merged; `docs/gpu/
-  PROVIDER_ONBOARDING.md`'s "Payouts" section has the operator-facing
-  rate/settlement rules in the meantime.
+- **Earnings & payouts** — "Get My Earnings" above: `GET
+  /gpu/providers/me/earnings`; `docs/gpu/VERIFICATION_AND_PAYOUTS.md` has
+  the full per_unit-vs-emission payout rules.
 - **Admin ops status** — "Admin — WAYZ Ops Status" below: `GET
   /admin/wayz/status`, admin-only, job health + config + counters +
   pending provider approvals in one call.
+- **Emission rewards** (Chutes-style WAYZ emission rewards) — "Admin —
+  Emission Rewards" below and `docs/tokenomics/EMISSION.md`.
 
 ## Admin — Staking Rewards
 
@@ -1441,6 +1515,72 @@ block) plus global totals across every user:
   }
 }
 ```
+
+## Admin — Emission Rewards
+
+Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics) — the
+daily job that splits `WAYZ_DAILY_EMISSION` 41/41/18 between providers (by
+7-day rolling score), stakers (pro-rata to stake), and treasury. See
+`docs/tokenomics/EMISSION.md` for the full design and worked example.
+Envelope is `{success, data}`; error reasons are
+`error.context.parameter_value`, same convention as Admin — Staking
+Rewards above.
+
+```http
+GET /admin/emission/epochs?limit=30
+```
+
+`Depends(require_admin_or_env_key)`. Most recent `emission_epochs` rows,
+newest first (`limit` capped at 90).
+
+```http
+GET /admin/emission/epochs/{epoch_date}
+```
+
+`Depends(require_admin_or_env_key)`. Every `provider_scores` row for one
+day, highest share first.
+
+```http
+POST /admin/emission/run
+```
+
+`Depends(require_superadmin)`. Body: `{"epoch_date": "2026-09-12"}`
+(optional — defaults to yesterday UTC). Runs the job immediately, same
+idempotency as the scheduled run. Audited as `emission.epoch.run`.
+Returns the run summary:
+
+```json
+{
+  "success": true,
+  "data": {
+    "epoch_date": "2026-09-12",
+    "emission_wei": "100000000000000000000000",
+    "split": { "providers_wei": "...", "stakers_wei": "...", "treasury_wei": "..." },
+    "providers_scored": 3,
+    "top_share": "0.558",
+    "stakers_paid": 2,
+    "stakers_pending": 1,
+    "stakers_skipped": 0,
+    "credits_paid": "0.410000",
+    "staker_asset": "credits",
+    "dust_wei": "1000000000000000000"
+  }
+}
+```
+
+A stale on-chain stake sync returns `409`, same shape as
+`POST /admin/staking/rewards/run`.
+
+```http
+GET  /admin/emission/config
+PUT  /admin/emission/config
+```
+
+`GET` (`require_admin_or_env_key`) returns the effective env-derived
+config plus `disabled_reason` (non-null iff the startup bps-sum check
+failed — see `docs/tokenomics/EMISSION.md`). `PUT`
+(`require_superadmin`) returns `501 Not Implemented` — config is env-only
+today; change the env vars and restart.
 
 ## Admin — WAYZ Ops Status
 
@@ -1554,7 +1694,9 @@ precision loss); all timestamps are ISO-8601 with a `Z`/`+00:00` offset.
 `wayz_staking_sync`, `gpu_spot_check`, `gpu_settlement` (the stuck-settlement
 reconciliation pass runs inline as part of this job and is folded into its
 `summary`, not a separate entry), `pricing_drift`, `gpu_liveness_sweep`,
-`gpu_rollup`. `stale` is `true` when a job has never recorded a run, or its
+`gpu_rollup`, `staking_rewards`, `emission_epoch` (Chutes-style WAYZ
+emission rewards — see "Admin — Emission Rewards" above). `stale` is
+`true` when a job has never recorded a run, or its
 last run was more than 2× its configured `interval_minutes` ago. Backed by
 `src/services/ops/job_runs.py` (Redis, 7-day TTL, in-process fallback).
 

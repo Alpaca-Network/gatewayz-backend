@@ -101,6 +101,15 @@ def _is_sync_stale() -> bool:
     return age_minutes > max_age_minutes
 
 
+def is_stake_sync_stale() -> bool:
+    """Public wrapper over _is_sync_stale() -- the same staleness check
+    reused by the emission_epoch job (src/services/emission/epoch.py)'s
+    staker-payout path, which reads wallet_stakes exactly like this
+    module's own daily run and must not trust it any more than this job
+    does."""
+    return _is_sync_stale()
+
+
 def _find_ledger_id(wallet_address: str, reward_date_str: str) -> int | None:
     row = get_transaction_by_request_id(f"staking_reward:{wallet_address}:{reward_date_str}")
     return row.get("id") if row else None
@@ -153,6 +162,16 @@ def _pay_or_leave_pending(accrual: dict[str, Any], capped: bool = False) -> tupl
     credit_transaction_id = _find_ledger_id(wallet_address, reward_date_str)
     mark_accrual_paid(accrual["id"], user_id, credit_transaction_id, datetime.now(UTC).isoformat())
     return "paid", credits
+
+
+def pay_pending_accrual(accrual: dict[str, Any], capped: bool = False) -> tuple[str, Decimal]:
+    """Public wrapper over _pay_or_leave_pending -- shared by both this
+    module's rate-table job and the emission-mode staker path
+    (src/services/emission/epoch.py), which write to the SAME
+    staking_reward_accruals + add_credits_to_user pay path with the same
+    insert-before-pay idempotency, just a different (pro-rata, not
+    rate-table) credits computation upstream of the 'pending' row."""
+    return _pay_or_leave_pending(accrual, capped=capped)
 
 
 def _process_wallet_for_date(
@@ -241,6 +260,14 @@ def run_staking_rewards_once(reward_date: date | None = None) -> dict[str, Any]:
 
     if not Config.STAKING_REWARDS_ENABLED:
         return {"skipped": "disabled"}
+
+    # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics):
+    # once REWARDS_MODE=='emission', stakers are paid pro-rata out of the
+    # daily emission pool (src/services/emission/epoch.py) instead of this
+    # rate-table job -- the two paths must never both pay the same day, or
+    # every staker would be paid twice.
+    if Config.REWARDS_MODE == "emission":
+        return {"skipped": "emission_mode"}
 
     effective_date = reward_date or (started.date() - timedelta(days=1))
     reward_date_str = effective_date.isoformat()

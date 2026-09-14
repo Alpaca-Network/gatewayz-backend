@@ -109,6 +109,86 @@ def test_earnings_returns_404_when_caller_has_no_provider(mock_get_provider):
     assert response.status_code == 404
 
 
+@patch("src.routes.gpu_earnings.get_provider_emission_view")
+@patch("src.routes.gpu_earnings.get_payout_tiers")
+@patch("src.routes.gpu_earnings.get_provider_verified_volume_7d")
+@patch("src.routes.gpu_earnings.list_settlements_for_provider")
+@patch("src.routes.gpu_earnings.list_recent_work_for_provider")
+@patch("src.routes.gpu_earnings.earnings_totals")
+@patch("src.routes.gpu_earnings.get_provider_for_user")
+def test_earnings_includes_emission_block_when_scored(
+    mock_get_provider,
+    mock_totals,
+    mock_work,
+    mock_settlements,
+    mock_volume,
+    mock_tiers,
+    mock_emission,
+):
+    """Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics):
+    once a provider has been scored, GET /gpu/providers/me/earnings gains
+    an `emission` block from get_provider_emission_view()."""
+    mock_get_provider.return_value = {"id": 5, "user_id": 42}
+    mock_totals.return_value = {"accrued": 0, "settled": 0, "void": 0}
+    mock_work.return_value = []
+    mock_settlements.return_value = []
+    mock_volume.return_value = 0
+    mock_tiers.return_value = []
+    mock_emission.return_value = {
+        "last_epoch": "2026-09-12",
+        "score": {
+            "compute": "0.5",
+            "speed": "0.8",
+            "availability": "1.0",
+            "unique_models": "0.3",
+            "raw": "0.6",
+            "adjusted": "0.65",
+            "share": "0.2",
+        },
+        "allocation_wayz": "820",
+        "rank": 2,
+        "providers_scored": 10,
+    }
+
+    response = client.get("/gpu/providers/me/earnings")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["emission"]["last_epoch"] == "2026-09-12"
+    assert data["emission"]["rank"] == 2
+    mock_emission.assert_called_once_with(5)
+
+
+@patch("src.routes.gpu_earnings.get_provider_emission_view")
+@patch("src.routes.gpu_earnings.get_payout_tiers")
+@patch("src.routes.gpu_earnings.get_provider_verified_volume_7d")
+@patch("src.routes.gpu_earnings.list_settlements_for_provider")
+@patch("src.routes.gpu_earnings.list_recent_work_for_provider")
+@patch("src.routes.gpu_earnings.earnings_totals")
+@patch("src.routes.gpu_earnings.get_provider_for_user")
+def test_earnings_omits_emission_block_when_never_scored(
+    mock_get_provider,
+    mock_totals,
+    mock_work,
+    mock_settlements,
+    mock_volume,
+    mock_tiers,
+    mock_emission,
+):
+    mock_get_provider.return_value = {"id": 5, "user_id": 42}
+    mock_totals.return_value = {"accrued": 0, "settled": 0, "void": 0}
+    mock_work.return_value = []
+    mock_settlements.return_value = []
+    mock_volume.return_value = 0
+    mock_tiers.return_value = []
+    mock_emission.return_value = None
+
+    response = client.get("/gpu/providers/me/earnings")
+
+    assert response.status_code == 200
+    assert "emission" not in response.json()["data"]
+
+
 @patch("src.routes.gpu_earnings.get_payout_tiers")
 @patch("src.routes.gpu_earnings.get_provider_verified_volume_7d")
 @patch("src.routes.gpu_earnings.list_settlements_for_provider")

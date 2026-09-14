@@ -282,6 +282,18 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Failed to check provider_payout_tiers seeding: {e}")
 
+        # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics):
+        # validate the two emission bps splits sum to 10000 at boot. Never
+        # fails startup -- a bad sum disables the emission_epoch job (loud
+        # log, see check_emission_config) rather than crashing boot or
+        # silently minting/short-changing WAYZ off a bad split.
+        try:
+            from src.services.emission.epoch import check_emission_config
+
+            check_emission_config()
+        except Exception as e:
+            logger.warning(f"Failed to check emission config: {e}")
+
         # Sync DB providers table with ENABLED_PROVIDERS env var
         try:
             from src.config.config import Config
@@ -755,6 +767,18 @@ async def lifespan(app):
         logger.warning(f"Failed to start staking rewards scheduler: {e}")
         # Don't fail startup if staking rewards scheduler fails to start
 
+    # Start the daily emission_epoch job (Chutes-style WAYZ emission
+    # rewards, gatewayz-backend tokenomics) -- always starts; no-ops
+    # (records a 'skipped' job run) until REWARDS_MODE=='emission'.
+    try:
+        from src.services.scheduled_sync import start_emission_epoch_scheduler
+
+        start_emission_epoch_scheduler()
+        logger.info("Emission epoch service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start emission epoch scheduler: {e}")
+        # Don't fail startup if the emission epoch scheduler fails to start
+
     # Start GPU node liveness sweep (Milestone 4 W-A1, gatewayz-backend#2262)
     try:
         from src.services.scheduled_sync import start_gpu_liveness_scheduler
@@ -1008,6 +1032,15 @@ async def lifespan(app):
         logger.info("Staking rewards service stopped")
     except Exception as e:
         logger.warning(f"Staking rewards shutdown warning: {e}")
+
+    # Stop the emission epoch job
+    try:
+        from src.services.scheduled_sync import stop_emission_epoch_scheduler
+
+        stop_emission_epoch_scheduler()
+        logger.info("Emission epoch service stopped")
+    except Exception as e:
+        logger.warning(f"Emission epoch shutdown warning: {e}")
 
     # Stop GPU node liveness sweep
     try:

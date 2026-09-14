@@ -12,6 +12,30 @@ endpoints backing `wallet_stakes`. This doc covers the reward layer built
 on top: `staking_reward_rates`, `staking_reward_accruals`, the daily job,
 and the admin controls.
 
+## Two modes: `per_unit` (this doc) vs `emission`
+
+`Config.REWARDS_MODE` (default `per_unit`) picks which of two
+mutually-exclusive daily jobs pays stakers:
+
+- **`per_unit`** (default, everything below this section) — the rate
+  table described here, run by `src/services/staking_rewards.py`.
+- **`emission`** — Chutes-style WAYZ emission rewards
+  (`docs/tokenomics/EMISSION.md`): stakers are paid **pro-rata to stake**
+  out of a fixed daily WAYZ emission pool's 41% staker share, run by
+  `src/services/emission/epoch.py`, instead of the rate table.
+
+`run_staking_rewards_once` checks `REWARDS_MODE` first and returns
+`{"skipped": "emission_mode"}` without touching anything once emission
+mode is live, so the two jobs can never both pay the same day. Both write
+to the same `staking_reward_accruals` table (an emission-mode row carries
+`source='emission'` and `wayz_amount_wei`; `rate_id` is `NULL` since
+there's no rate-table row behind it) and both pay through the same
+`add_credits_to_user` path, so `GET /staking/rewards`' totals/history
+report on either mode uniformly. See `docs/tokenomics/EMISSION.md` for the
+full emission design, the worked example, and the `STAKER_REWARD_ASSET=
+wayz` limitation (no payout rail yet -- accruals land `pending` with
+`skip_reason='wayz_payout_not_implemented'` until one exists).
+
 ## How it's computed
 
 Once a day (00:20 UTC by default — `Config.STAKING_REWARDS_CRON_HOUR_UTC` /
@@ -107,7 +131,11 @@ changed retroactively.
 - `GET /staking/rewards` (authenticated) — the calling user's rate table,
   linked wallets with a live daily-credit estimate, running totals
   (`credits_paid_30d`, `credits_paid_all`, `pending_credits`), and the last
-  30 accrual rows. All numbers are strings.
+  30 accrual rows. All numbers are strings. Also carries `mode`
+  (`Config.REWARDS_MODE`) and, once emission mode has run at least one
+  epoch, an `emission: {daily_emission_wayz, stakers_share_bps,
+  your_share, estimated_credits_per_day}` block computed from the caller's
+  own linked-wallet total (see `docs/tokenomics/EMISSION.md`).
 - `GET /staking/wallets/{address}` (public, unchanged otherwise) now also
   returns a `rewards: {estimated_credits_per_day, rate_credits_per_1k}`
   block computed purely from the rate table — no user/wallet-link data, so

@@ -8,6 +8,7 @@ See docs/superpowers/specs/2026-09-01-wayz-staking-indexer-design.md.
 
 import logging
 import re
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from src.config.config import Config
 from src.db.wallet_stakes import get_stake_totals, get_sync_cursor_row, get_wallet_stake
 from src.security.deps import get_current_user
+from src.services.emission.epoch import get_staker_emission_view
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.services.staking_rewards import estimate_rewards_for_stake, get_rewards_view_for_user
 
@@ -29,6 +31,8 @@ _CHAIN_ID = 43113
 # in this read path) or from Config -- a fixed protocol constant, same as
 # the contract enforces on-chain.
 _UNSTAKE_COOLDOWN_SECONDS = 604800
+
+_WEI_PER_WAYZ = Decimal(10) ** 18
 
 staking_wallet_rl = create_endpoint_rate_limit("staking_wallet", max_requests=60, window_seconds=60)
 staking_summary_rl = create_endpoint_rate_limit(
@@ -108,8 +112,22 @@ async def get_staking_rewards(
 ) -> dict[str, Any]:
     """The logged-in user's staking-rewards view: whether the feature is
     live, the current rate table, this user's linked wallets with a daily
-    estimate, running totals, and recent history."""
-    return {"success": True, "data": get_rewards_view_for_user(user["id"])}
+    estimate, running totals, and recent history. Also carries `mode`
+    (Config.REWARDS_MODE) and, once the emission mode has run at least one
+    epoch, an `emission` block (Chutes-style WAYZ emission rewards,
+    gatewayz-backend tokenomics) -- see docs/tokenomics/EMISSION.md."""
+    view = get_rewards_view_for_user(user["id"])
+    view["mode"] = Config.REWARDS_MODE
+
+    # total_staked_wei is derived from the `wallets` list get_rewards_view_
+    # for_user already built (each wallet's staked_wayz) rather than a
+    # second round of DB lookups.
+    total_staked_wei = int(sum(Decimal(w["staked_wayz"]) for w in view["wallets"]) * _WEI_PER_WAYZ)
+    emission = get_staker_emission_view(total_staked_wei)
+    if emission is not None:
+        view["emission"] = emission
+
+    return {"success": True, "data": view}
 
 
 @router.get("/staking/summary", tags=["staking"])

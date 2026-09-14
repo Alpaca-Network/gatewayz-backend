@@ -54,6 +54,9 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     "gpu_rollup": 60,
     # Staking rewards (gatewayz-backend staking rewards) -- once a day.
     "staking_rewards": 1440,
+    # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics) --
+    # once a day, after staking_rewards/gpu_spot_check.
+    "emission_epoch": 1440,
 }
 
 # WAYZ token/staking contracts are deployed on Avalanche Fuji testnet.

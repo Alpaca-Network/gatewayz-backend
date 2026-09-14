@@ -1576,3 +1576,105 @@ def get_pricing_drift_status() -> dict[str, Any]:
         "last_worst_deficit_pct": _last_pricing_drift_status["last_worst_deficit_pct"],
         "last_error": _last_pricing_drift_status["last_error"],
     }
+
+
+# ============================================================================
+# Emission Epoch Job (Chutes-style WAYZ emission rewards, gatewayz-backend
+# tokenomics) -- daily job that splits WAYZ_DAILY_EMISSION 41/41/18 between
+# providers (by 7-day rolling score), stakers (pro-rata to stake), and
+# treasury. Runs once a day at Config.EMISSION_EPOCH_CRON_HOUR_UTC:
+# EMISSION_EPOCH_CRON_MINUTE_UTC (default 00:40 UTC -- after staking_rewards
+# at 00:20 and gpu_spot_check, per docs/tokenomics/EMISSION.md). Gated by
+# Config.REWARDS_MODE == 'emission' itself (default 'per_unit') -- like
+# staking_rewards, this scheduler always starts so a job-run record (a
+# clear "skipped: disabled" / "skipped: bad_config") shows up on the ops
+# page even while the feature is off.
+# ============================================================================
+_emission_epoch_scheduler: AsyncIOScheduler | None = None
+
+
+async def run_scheduled_emission_epoch():
+    """Run one pass of the daily emission_epoch job
+    (src/services/emission/epoch.py::run_emission_epoch)."""
+    from src.services.emission.epoch import run_emission_epoch
+    from src.services.staking_rewards import StakingRewardsStaleError
+
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(run_emission_epoch)
+        duration_ms = int((datetime.now(UTC) - run_started_at).total_seconds() * 1000)
+
+        if isinstance(result, dict) and "skipped" in result:
+            record_job_run("emission_epoch", ok=True, summary=result, duration_ms=duration_ms)
+            return
+
+        logger.info(
+            "✅ Emission epoch OK | epoch_date=%s providers_scored=%s stakers_paid=%s "
+            "credits_paid=%s dust_wei=%s",
+            result.get("epoch_date"),
+            result.get("providers_scored"),
+            result.get("stakers_paid"),
+            result.get("credits_paid"),
+            result.get("dust_wei"),
+        )
+        record_job_run("emission_epoch", ok=True, summary=result, duration_ms=duration_ms)
+    except StakingRewardsStaleError as e:
+        logger.warning("Emission epoch skipped: %s", e)
+        record_job_run(
+            "emission_epoch",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+    except Exception as e:
+        logger.warning("Emission epoch run failed (non-fatal): %s", e)
+        record_job_run(
+            "emission_epoch",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+def start_emission_epoch_scheduler():
+    """Start the APScheduler cron job for the daily emission epoch (app
+    lifespan). Always starts, regardless of REWARDS_MODE -- the job itself
+    no-ops (and records a 'skipped: disabled'/'skipped: bad_config' job
+    run) when the feature isn't live or its bps config is invalid."""
+    global _emission_epoch_scheduler
+
+    hour = Config.EMISSION_EPOCH_CRON_HOUR_UTC
+    minute = Config.EMISSION_EPOCH_CRON_MINUTE_UTC
+    logger.info("Starting emission epoch scheduler (daily at %02d:%02d UTC)", hour, minute)
+    try:
+        _emission_epoch_scheduler = AsyncIOScheduler()
+        _emission_epoch_scheduler.add_job(
+            run_scheduled_emission_epoch,
+            trigger=CronTrigger(hour=hour, minute=minute, timezone="UTC"),
+            id="emission_epoch",
+            name="Emission Epoch Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _emission_epoch_scheduler.start()
+        logger.info("✅ Emission epoch scheduler started (next run at %02d:%02d UTC)", hour, minute)
+    except Exception as e:
+        logger.error("❌ Failed to start emission epoch scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_emission_epoch_scheduler():
+    """Stop the emission-epoch APScheduler gracefully (called during shutdown)."""
+    global _emission_epoch_scheduler
+
+    if _emission_epoch_scheduler is None:
+        return
+    logger.info("Stopping emission epoch scheduler...")
+    try:
+        _emission_epoch_scheduler.shutdown(wait=True)
+        logger.info("✅ Emission epoch scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping emission epoch scheduler: %s", e)
+    finally:
+        _emission_epoch_scheduler = None

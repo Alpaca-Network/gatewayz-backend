@@ -145,6 +145,10 @@ class TestCreateAccrual:
             "credits": "0.010000",
             "status": "pending",
             "skip_reason": None,
+            # Chutes-style WAYZ emission rewards (gatewayz-backend
+            # tokenomics) -- defaults to the pre-existing rate-table path
+            # unless a caller passes source='emission'.
+            "source": "rate_table",
         }
         assert result == created
 

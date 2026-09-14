@@ -437,3 +437,37 @@ async def test_reconcile_is_a_noop_when_nothing_is_stuck(sb):
     assert result.settlements_checked == 0
     mocks["mark_settlement_sent"].assert_not_called()
     mocks["mark_settlement_failed"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_settlement_pays_an_emission_mode_earning_with_null_work_id(sb):
+    """Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics):
+    an emission allocation (source='emission', work_id=NULL, epoch_date
+    set) is summed, claimed, and transferred exactly like a per_unit
+    earning -- settlement.py never selects or filters on work_id, so a
+    null value here needs no special-casing. See
+    docs/gpu/VERIFICATION_AND_PAYOUTS.md's "Settlement" section."""
+    emission_earning = {
+        "id": 1,
+        "amount_wei": str(20 * 10**18),
+        "work_id": None,
+        "source": "emission",
+        "epoch_date": "2026-09-12",
+    }
+    with patch("src.services.gpu.settlement.Config") as mock_config:
+        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+
+        stack, mocks = _patched(
+            list_approved_providers=[_provider()],
+            list_accrued_earnings=[emission_earning],
+        )
+        with stack:
+            client = _client()
+            result = await run_settlement_once(client)
+
+    assert result.settlements_sent == 1
+    assert result.total_sent_wei == 20 * 10**18
+    client.transfer.assert_called_once_with("0xwallet", 20 * 10**18)
+    mocks["mark_earnings_settled"].assert_called_once_with([1], 99)
