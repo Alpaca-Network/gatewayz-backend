@@ -31,70 +31,12 @@ logger = logging.getLogger(__name__)
 if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
     import sentry_sdk
 
-    def sentry_traces_sampler(sampling_context):
-        """
-        Adaptive sampling to control Sentry costs while maintaining visibility.
+    # Options (send_default_pii=False, before_send scrubbing, adaptive
+    # sampling) live in src/utils/sentry_init.py so tests can drive the real
+    # SDK pipeline with the production configuration (threat model G5).
+    from src.utils.sentry_init import build_sentry_init_kwargs
 
-        Sampling strategy:
-        - Development: 100% (all requests)
-        - Health/metrics endpoints: 0% (skip monitoring endpoints)
-        - Critical endpoints: 20% (chat)
-        - Other endpoints: 10%
-        - Errors: Always sampled (parent_sampled)
-        """
-        # Always sample errors
-        if sampling_context.get("parent_sampled") is not None:
-            return 1.0
-
-        # 100% sampling in development
-        if Config.SENTRY_ENVIRONMENT == "development":
-            return 1.0
-
-        # Get endpoint path
-        endpoint = ""
-        if "wsgi_environ" in sampling_context:
-            endpoint = sampling_context["wsgi_environ"].get("PATH_INFO", "")
-        elif "asgi_scope" in sampling_context:
-            endpoint = sampling_context["asgi_scope"].get("path", "")
-
-        # Skip health check and monitoring endpoints (0%)
-        if endpoint in ["/health", "/metrics", "/api/health", "/api/monitoring/health"]:
-            return 0.0
-
-        # Critical inference endpoints: 20% sampling
-        if endpoint in ["/v1/chat/completions", "/v1/images/generations"]:
-            return 0.2
-
-        # Admin endpoints: 50% sampling (important but lower volume)
-        if endpoint.startswith("/api/admin"):
-            return 0.5
-
-        # All other endpoints: 10% sampling
-        return 0.1
-
-    from src.utils.sentry_scrub import strip_sensitive_event
-
-    _on_vercel = bool(os.getenv("VERCEL"))
-    _profiles_rate = 0.0 if _on_vercel else float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.05"))
-    _sentry_init_kwargs = {
-        "dsn": Config.SENTRY_DSN,
-        # Threat model G5: Gatewayz's own error tooling must not be able to
-        # re-link content to identity. send_default_pii would attach the raw
-        # client IP and other PII the SDK collects automatically; we set our
-        # own minimal, deliberate context in AutoSentryMiddleware instead.
-        # before_send is a second, independent layer that strips request
-        # bodies/cookies/auth headers and bounds exception text.
-        "send_default_pii": False,
-        "before_send": strip_sensitive_event,
-        "environment": Config.SENTRY_ENVIRONMENT,
-        "release": Config.SENTRY_RELEASE,
-        "profiles_sample_rate": _profiles_rate,
-    }
-    if _on_vercel:
-        _sentry_init_kwargs["traces_sample_rate"] = 0.0
-    else:
-        _sentry_init_kwargs["traces_sampler"] = sentry_traces_sampler
-    sentry_sdk.init(**_sentry_init_kwargs)
+    sentry_sdk.init(**build_sentry_init_kwargs())
     logger.info(
         f"✅ Sentry initialized with adaptive sampling "
         f"(environment: {Config.SENTRY_ENVIRONMENT}, release: {Config.SENTRY_RELEASE})"
