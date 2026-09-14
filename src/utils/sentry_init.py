@@ -80,6 +80,12 @@ def build_sentry_init_kwargs(**overrides: Any) -> dict[str, Any]:
         # before_send is a second, independent layer that strips request
         # bodies/cookies/auth headers and bounds exception text.
         "send_default_pii": False,
+        # The SDK defaults to serialising every stack frame's local variables
+        # into the event. In a route handler those locals ARE the request:
+        # the Authorization header, the client IP, the parsed body (prompt,
+        # `user` email) — every G5 forbidden item, regardless of
+        # send_default_pii. Caught by tests/security/test_sentry_scrub_roundtrip.py.
+        "include_local_variables": False,
         "before_send": strip_sensitive_event,
         "environment": Config.SENTRY_ENVIRONMENT,
         "release": Config.SENTRY_RELEASE,
