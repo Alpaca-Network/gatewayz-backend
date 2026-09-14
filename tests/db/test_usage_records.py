@@ -71,7 +71,9 @@ class TestRecordUsageNoPlaintextKey:
         assert insert_call.called
         payload = insert_call.call_args[0][0]
 
-        assert payload["api_key"] is None
+        assert (
+            "api_key" not in payload
+        )  # column dropped in prod (20260910190000); sending it 42703s the insert
         assert "gw_live_abcd1234" not in str(payload)
         assert payload["api_key_id"] == 4242
         assert payload["api_key_last4"] == "1234"
@@ -95,7 +97,9 @@ class TestRecordUsageNoPlaintextKey:
             )
 
         payload = queries["usage_records"].insert.call_args[0][0]
-        assert payload["api_key"] is None
+        assert (
+            "api_key" not in payload
+        )  # column dropped in prod (20260910190000); sending it 42703s the insert
         assert payload["api_key_id"] is None
         assert payload["api_key_last4"] == "nkey"
 
@@ -119,7 +123,9 @@ class TestRecordUsageNoPlaintextKey:
             )
 
         payload = queries["usage_records"].insert.call_args[0][0]
-        assert payload["api_key"] is None
+        assert (
+            "api_key" not in payload
+        )  # column dropped in prod (20260910190000); sending it 42703s the insert
         assert payload["api_key_id"] is None
 
     def test_no_api_key_no_lookup(self, sb):
