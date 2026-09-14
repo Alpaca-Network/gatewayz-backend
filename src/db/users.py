@@ -1701,10 +1701,10 @@ def record_usage(
 
     Security (gatewayz-backend#2258, threat model L9): the `api_key` parameter is kept
     for call-site compatibility but is never persisted. Only `api_key_id` (resolved
-    here from the key string) and `api_key_last4` are written; the row's plaintext
-    api_key column is left NULL. The historical column itself is dropped in a later,
-    human-gated staged migration once this stops writing to it in production -- see
-    supabase/staged-migrations/20260903100000_drop_usage_records_api_key.sql.
+    here from the key string) and `api_key_last4` are written. The plaintext
+    api_key column no longer exists (dropped by
+    supabase/migrations/20260910190000_drop_usage_records_api_key.sql), so it must
+    not appear in the insert payload at all.
     """
     try:
         client = get_supabase_client()
@@ -1724,12 +1724,13 @@ def record_usage(
                     sanitize_for_logging(str(lookup_error)),
                 )
 
-        # Only include columns that exist in the schema. api_key is intentionally
-        # NOT written (plaintext key -- see docstring); api_key_id/api_key_last4
-        # replace it as the joinable/display-safe references.
+        # Only include columns that exist in the schema. The plaintext api_key
+        # column was DROPPED in prod (supabase/migrations/20260910190000_drop_
+        # usage_records_api_key.sql); sending it -- even as NULL -- makes
+        # PostgREST reject the whole insert (42703) and silently lose the row.
+        # api_key_id/api_key_last4 are the joinable/display-safe references.
         usage_data = {
             "user_id": user_id,
-            "api_key": None,
             "api_key_id": api_key_id,
             "api_key_last4": last4(api_key) if api_key else None,
             "model": model,
