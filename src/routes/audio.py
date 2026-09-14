@@ -15,7 +15,6 @@ import logging
 import os
 import tempfile
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -26,6 +25,7 @@ from src.db.api_keys import increment_api_key_usage
 from src.db.users import deduct_credits, get_user, record_usage
 from src.security.deps import get_api_key
 from src.security.inference_gates import enforce_subscription_status_gate
+from src.services.billing.billing_ref import resolve_billing_ref
 from src.services.connection_pool import get_openai_pooled_client
 from src.utils.ai_tracing import AIRequestType, AITracer
 from src.utils.rate_limit_guard import enforce_request_rate_limit
@@ -161,7 +161,8 @@ async def _deduct_audio_credits(
         total_cost: Total cost in USD
         duration_minutes: Audio duration in minutes
         elapsed_ms: Request processing time in ms
-        request_id: Request identifier for logging
+        request_id: Server-minted billing ref (request.state.billing_ref); used
+            for logging and as the deduct_credits idempotency key
         endpoint: API endpoint path
         loop: Running event loop
         executor: Thread pool executor for sync DB operations
@@ -189,7 +190,12 @@ async def _deduct_audio_credits(
                 "duration_minutes": round(duration_minutes, 2),
                 "cost_usd": total_cost,
                 "endpoint": endpoint,
+                "request_id": request_id,
             },
+            # Idempotency key: deduct_credits skips the deduction if a
+            # transaction with this request_id already exists, so a retried or
+            # duplicated request cannot double-charge (same as chat, PR #2282).
+            request_id,
         )
 
         # Fetch fresh balance after deduction for accurate reporting
@@ -291,7 +297,9 @@ async def create_transcription(
     # Per-API-key rate limit (transcription is billed per minute of audio).
     await enforce_request_rate_limit(api_key, request=request)
 
-    request_id = str(uuid.uuid4())[:8]
+    # Server-minted billing ref (threat model L7/G4): used for log correlation
+    # AND as the credit-deduction idempotency key, never the client X-Request-ID.
+    request_id = resolve_billing_ref(request)
 
     # Validate content type - only accept known supported formats
     content_type = file.content_type or "application/octet-stream"
@@ -557,7 +565,9 @@ async def create_transcription_base64(
     # Per-API-key rate limit (transcription is billed per minute of audio).
     await enforce_request_rate_limit(api_key, request=request)
 
-    request_id = str(uuid.uuid4())[:8]
+    # Server-minted billing ref (threat model L7/G4): used for log correlation
+    # AND as the credit-deduction idempotency key, never the client X-Request-ID.
+    request_id = resolve_billing_ref(request)
 
     # Handle data URL format
     if audio_data.startswith("data:"):
