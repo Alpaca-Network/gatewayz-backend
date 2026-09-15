@@ -13,9 +13,14 @@ The fixture below is a real row captured from the production view on
 2026-09-15, strings and column names untouched, so it reproduces both.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 
 from src.routes.status_page import _format_model_status, _num
+
+# The fixture row below is dated; pin "now" so these assert formatting, not age.
+NOW_FIXED = datetime(2026, 9, 15, 16, 30, tzinfo=UTC)
 
 # Verbatim from `select * from public.model_status_current limit 1` (prod).
 LIVE_ROW = {
@@ -41,14 +46,14 @@ LIVE_ROW = {
 
 
 def test_formats_a_real_view_row_without_raising():
-    out = _format_model_status(LIVE_ROW)
+    out = _format_model_status(LIVE_ROW, NOW_FIXED)
     assert out["model_id"] == "openai/gpt-4-turbo-2024-04-09"
     assert out["status"] == "major_outage"
     assert out["circuit_breaker_state"] == "open"
 
 
 def test_numeric_strings_become_rounded_numbers():
-    out = _format_model_status(LIVE_ROW)
+    out = _format_model_status(LIVE_ROW, NOW_FIXED)
     assert out["uptime_24h"] == 0.0
     assert out["uptime_7d"] == 12.35
     assert out["uptime_30d"] == 100.0
@@ -57,16 +62,22 @@ def test_numeric_strings_become_rounded_numbers():
 
 def test_reads_the_column_the_view_actually_has():
     """`active_incidents_count` does not exist; reading it 500'd the route."""
-    assert _format_model_status(LIVE_ROW)["active_incidents"] == 0
-    assert "active_incidents_count" not in _format_model_status(LIVE_ROW)
+    assert _format_model_status(LIVE_ROW, NOW_FIXED)["active_incidents"] == 0
+    assert "active_incidents_count" not in _format_model_status(LIVE_ROW, NOW_FIXED)
 
 
 def test_missing_columns_degrade_to_none_not_an_exception():
-    """A view change should cost one field, not the endpoint."""
+    """
+    A view change should cost one field, not the endpoint.
+
+    A row with no `last_called_at` is unmeasured, so it reports `unknown` rather
+    than the view's stored verdict — see tests/routes/test_status_freshness.py.
+    """
     out = _format_model_status({"model": "m", "provider": "p"})
     assert out["model_id"] == "m"
-    assert out["status"] is None
-    assert out["uptime_24h"] == 0.0
+    assert out["status"] == "unknown"
+    assert out["monitored"] is False
+    assert out["uptime_24h"] is None
 
 
 @pytest.mark.parametrize(
