@@ -37,6 +37,50 @@ def _parse_ts(value: Any) -> datetime | None:
     return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
 
 
+def _num(value: Any, default: float = 0.0) -> float:
+    """
+    A numeric column from ``model_status_current``, as a float.
+
+    PostgREST serialises Postgres ``numeric`` as a JSON *string* ("0.0"), so
+    ``round(row[col] or 0, 2)`` raised TypeError on every row that had a
+    measurement — the whole endpoint 500'd while the data was fine.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _format_model_status(model: dict[str, Any]) -> dict[str, Any]:
+    """
+    One ``model_status_current`` row, shaped for the status page.
+
+    Shared by the list and single-model routes so the two cannot drift: both
+    previously read ``active_incidents_count``, a column the view does not
+    have (it is ``active_incidents``), which is a KeyError the route turned
+    into a blanket 500. Reads are ``.get()`` so a future view change degrades
+    one field instead of the endpoint.
+    """
+    return {
+        "model_id": model.get("model"),
+        "provider": model.get("provider"),
+        "gateway": model.get("gateway"),
+        "status": model.get("status_indicator"),
+        "tier": model.get("monitoring_tier"),
+        "uptime_24h": round(_num(model.get("uptime_percentage_24h")), 2),
+        "uptime_7d": round(_num(model.get("uptime_percentage_7d")), 2),
+        "uptime_30d": round(_num(model.get("uptime_percentage_30d")), 2),
+        "avg_response_time_ms": round(_num(model.get("average_response_time_ms"))),
+        "last_checked": model.get("last_called_at"),
+        "last_success": model.get("last_success_at"),
+        "last_failure": model.get("last_failure_at"),
+        "circuit_breaker_state": model.get("circuit_breaker_state"),
+        "active_incidents": model.get("active_incidents"),
+    }
+
+
 def _load_tracking_rows() -> list[dict[str, Any]]:
     """Every enabled ``model_health_tracking`` row.
 
@@ -333,36 +377,15 @@ async def get_models_status(
         if tier:
             query = query.eq("monitoring_tier", tier)
 
-        # Apply pagination
+        # Ordered before the range, and with a tiebreaker: usage_count_24h alone
+        # is not unique, so paging it duplicates and drops rows between pages.
+        query = query.order("usage_count_24h", desc=True).order("provider").order("model")
         query = query.range(offset, offset + limit - 1)
-        query = query.order("usage_count_24h", desc=True)
 
         response = query.execute()
         models = response.data or []
 
-        # Format for frontend
-        formatted = []
-        for model in models:
-            formatted.append(
-                {
-                    "model_id": model["model"],
-                    "provider": model["provider"],
-                    "gateway": model["gateway"],
-                    "status": model["status_indicator"],
-                    "tier": model["monitoring_tier"],
-                    "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
-                    "uptime_7d": round(model["uptime_percentage_7d"] or 0, 2),
-                    "uptime_30d": round(model["uptime_percentage_30d"] or 0, 2),
-                    "avg_response_time_ms": round(model["average_response_time_ms"] or 0, 0),
-                    "last_checked": model["last_called_at"],
-                    "last_success": model["last_success_at"],
-                    "last_failure": model["last_failure_at"],
-                    "circuit_breaker_state": model["circuit_breaker_state"],
-                    "active_incidents": model["active_incidents_count"],
-                }
-            )
-
-        return formatted
+        return [_format_model_status(model) for model in models]
 
     except Exception as e:
         logger.error(f"Failed to get models status: {e}", exc_info=True)
@@ -397,23 +420,10 @@ async def get_model_status(provider: str, model_id: str, gateway: str | None = Q
         model = response.data
 
         return {
-            "model_id": model["model"],
-            "provider": model["provider"],
-            "gateway": model["gateway"],
-            "status": model["status_indicator"],
-            "tier": model["monitoring_tier"],
-            "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
-            "uptime_7d": round(model["uptime_percentage_7d"] or 0, 2),
-            "uptime_30d": round(model["uptime_percentage_30d"] or 0, 2),
-            "avg_response_time_ms": round(model["average_response_time_ms"] or 0, 0),
-            "last_checked": model["last_called_at"],
-            "last_success": model["last_success_at"],
-            "last_failure": model["last_failure_at"],
-            "circuit_breaker_state": model["circuit_breaker_state"],
-            "consecutive_failures": model["consecutive_failures"],
-            "usage_24h": model["usage_count_24h"],
-            "is_enabled": model["is_enabled"],
-            "active_incidents": model["active_incidents_count"],
+            **_format_model_status(model),
+            "consecutive_failures": model.get("consecutive_failures"),
+            "usage_24h": model.get("usage_count_24h"),
+            "is_enabled": model.get("is_enabled"),
         }
 
     except HTTPException:
