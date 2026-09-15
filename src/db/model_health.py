@@ -15,6 +15,32 @@ from src.config.supabase_config import get_supabase_client
 logger = logging.getLogger(__name__)
 
 
+# ``model_health_tracking.last_status`` values that measure OUR ACCESS to a
+# model rather than the model's health: a 429 says a shared quota is exhausted,
+# an auth failure says a provider key is missing or wrong. Neither is evidence
+# the model is broken.
+#
+# This module owns the table, so the vocabulary is defined here and the service
+# layer imports it (services -> db, never the reverse). Two writers maintain
+# these counters — the live prober
+# (``src/services/monitoring/intelligent_health_monitor.py``) and the 6-hourly
+# sweep via this function — and a column that means "errors" from one writer and
+# "errors plus throttling" from the other is exactly the drift that let 419,542
+# throttled probes read as a 95% model error rate on the public status page.
+UNMEASURED_STATUS_VALUES: frozenset[str] = frozenset({"rate_limited", "unauthorized"})
+
+
+def is_unmeasured_status(status: object) -> bool:
+    """True when a status says nothing about the model's own health.
+
+    Accepts a plain string or any ``str`` enum member, because callers read
+    ``last_status`` back out of the database as text.
+    """
+    if status is None:
+        return False
+    return str(getattr(status, "value", status)).strip().lower() in UNMEASURED_STATUS_VALUES
+
+
 def record_model_call(
     provider: str,
     model: str,
@@ -82,7 +108,13 @@ def record_model_call(
             record = existing.data[0]
             new_call_count = record["call_count"] + 1
             new_success_count = record["success_count"] + (1 if status == "success" else 0)
-            new_error_count = record["error_count"] + (1 if status != "success" else 0)
+            # Unmeasured outcomes (429 / auth) are NOT errors — see
+            # UNMEASURED_STATUS_VALUES. call_count still counts them, so
+            # success + error deliberately need not sum to call_count: the gap
+            # is how often we could not get an answer.
+            new_error_count = record["error_count"] + (
+                0 if status == "success" or is_unmeasured_status(status) else 1
+            )
 
             # Calculate new average response time
             if record["average_response_time_ms"] is not None:
@@ -125,7 +157,7 @@ def record_model_call(
                 "last_called_at": datetime.now(UTC).isoformat(),
                 "call_count": 1,
                 "success_count": 1 if status == "success" else 0,
-                "error_count": 1 if status != "success" else 0,
+                "error_count": (0 if status == "success" or is_unmeasured_status(status) else 1),
                 "average_response_time_ms": response_time_ms,
             }
 

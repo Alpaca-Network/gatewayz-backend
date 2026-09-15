@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from src.db.client import get_db
-from src.services.monitoring.intelligent_health_monitor import is_unmeasured_status
+from src.db.model_health import is_unmeasured_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/status", tags=["status-page"])

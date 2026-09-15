@@ -29,6 +29,10 @@ from typing import Any
 
 import httpx
 
+# NOTE: no __all__ here — src/services/intelligent_health_monitor.py is a
+# back-compat alias that does `import *`, which a restrictive __all__ would gut.
+from src.db.model_health import UNMEASURED_STATUS_VALUES, is_unmeasured_status  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,23 +83,12 @@ class HealthCheckStatus(str, Enum):  # noqa: UP042
 # Deliberately NOT here: TIMEOUT, ERROR and NOT_FOUND. Those are real evidence
 # about the model, and keeping them as failures is what preserves genuine
 # outage detection.
-UNMEASURED_STATUSES: frozenset[str] = frozenset(
-    {
-        HealthCheckStatus.RATE_LIMITED,
-        HealthCheckStatus.UNAUTHORIZED,
-    }
+# The vocabulary itself lives in src/db/model_health.py, which owns the
+# model_health_tracking table and is the OTHER writer to these counters (the
+# 6-hourly sweep). One definition, both writers.
+UNMEASURED_STATUSES: frozenset[HealthCheckStatus] = frozenset(
+    s for s in HealthCheckStatus if s.value in UNMEASURED_STATUS_VALUES
 )
-
-
-def is_unmeasured_status(status: Any) -> bool:
-    """True when a probe outcome says nothing about the model's health.
-
-    Accepts the enum or its raw string value, because the status page reads
-    ``last_status`` back out of the database as a plain string.
-    """
-    if isinstance(status, HealthCheckStatus):
-        return status in UNMEASURED_STATUSES
-    return str(status or "").strip().lower() in {s.value for s in UNMEASURED_STATUSES}
 
 
 class CircuitBreakerState(str, Enum):  # noqa: UP042

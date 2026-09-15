@@ -553,6 +553,77 @@ class TestUptimeExcludesUnmeasured:
         assert uptime_from_history(None) == 100.0
 
 
+class TestSweepWriterAgrees:
+    """``model_health_tracking`` has TWO writers: the live prober, and
+    ``record_model_call`` (the 6-hourly sweep in .github/workflows/
+    model-health-sweep.yml, plus the passive monitor). Both had the same
+    ``status != "success" -> error`` bug. A column that means "errors" from one
+    writer and "errors plus throttling" from the other is the drift that made
+    419,542 throttled probes read as a 95% model error rate."""
+
+    def _client(self, existing):
+        captured = {}
+
+        class _Q:
+            def select(self, *a, **k):
+                return self
+
+            def eq(self, *a, **k):
+                return self
+
+            def upsert(self, payload, **k):
+                captured["payload"] = payload
+                return self
+
+            def execute(self):
+                return MagicMock(data=existing)
+
+        client = MagicMock()
+        client.table.return_value = _Q()
+        return client, captured
+
+    def _record(self, monkeypatch, status, existing):
+        from src.db import model_health as mh
+
+        client, captured = self._client(existing)
+        monkeypatch.setattr(mh, "get_supabase_client", lambda: client)
+        mh.record_model_call("openai", "openai/gpt-4.1", 10.0, status)
+        return captured.get("payload", {})
+
+    @pytest.mark.parametrize("status", ["rate_limited", "unauthorized"])
+    def test_unmeasured_statuses_are_not_errors(self, monkeypatch, status):
+        existing = [
+            {
+                "call_count": 5,
+                "success_count": 2,
+                "error_count": 3,
+                "average_response_time_ms": 10.0,
+            }
+        ]
+        payload = self._record(monkeypatch, status, existing)
+        assert payload["error_count"] == 3
+        assert payload["call_count"] == 6
+
+    @pytest.mark.parametrize("status", ["error", "timeout", "not_found", "provider_error"])
+    def test_real_failures_are_still_errors(self, monkeypatch, status):
+        existing = [
+            {
+                "call_count": 5,
+                "success_count": 2,
+                "error_count": 3,
+                "average_response_time_ms": 10.0,
+            }
+        ]
+        payload = self._record(monkeypatch, status, existing)
+        assert payload["error_count"] == 4
+
+    def test_first_ever_row_agrees_too(self, monkeypatch):
+        """The new-record branch had its own copy of the same expression."""
+        assert self._record(monkeypatch, "rate_limited", [])["error_count"] == 0
+        assert self._record(monkeypatch, "error", [])["error_count"] == 1
+        assert self._record(monkeypatch, "success", [])["error_count"] == 0
+
+
 class TestIsUnmeasuredStatus:
     @pytest.mark.parametrize("status", ["rate_limited", "unauthorized"])
     def test_unmeasured(self, status):
