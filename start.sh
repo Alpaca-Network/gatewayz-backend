@@ -47,9 +47,21 @@ echo "🚀 Starting Gatewayz API..."
 # Timeout settings to prevent 504 Gateway Timeouts:
 # - timeout-keep-alive: 75s (slightly more than typical load balancer timeout of 60s)
 # - timeout-graceful-shutdown: 30s (time for graceful shutdown)
+# - proxy-headers: Railway terminates TLS and forwards over plain HTTP. Without
+#   this the app believes its own scheme is http, so every URL it builds is
+#   http://: FastAPI's trailing-slash redirect answered
+#   https://api.gatewayz.ai/v1/status with 307 -> http://api.gatewayz.ai/v1/status/,
+#   downgrading the connection. Harmless on a public status route; not on an
+#   authenticated one, where the client would resend its key in cleartext.
+#   forwarded-allow-ips=* trusts X-Forwarded-Proto/For from the peer, which is
+#   sound here because Railway's edge is the only route to this container — and
+#   request-attributed client IPs (rate limits, allowlists) already prefer
+#   X-Real-IP / the rightmost X-Forwarded-For entry, which this does not change.
 exec uvicorn src.main:app \
   --host 0.0.0.0 \
   --port ${PORT:-8000} \
   --workers 1 \
   --timeout-keep-alive 75 \
-  --timeout-graceful-shutdown 30
+  --timeout-graceful-shutdown 30 \
+  --proxy-headers \
+  --forwarded-allow-ips '*'
