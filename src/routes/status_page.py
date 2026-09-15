@@ -53,7 +53,33 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _format_model_status(model: dict[str, Any]) -> dict[str, Any]:
+def _is_missing_table(error: Exception) -> bool:
+    """True when PostgREST reports the relation does not exist (Postgres 42P01)."""
+    code = getattr(error, "code", None)
+    if code == "42P01":
+        return True
+    text = str(error).lower()
+    return "42p01" in text or "does not exist" in text
+
+
+def _is_stale(row: dict[str, Any], now: datetime | None = None) -> bool:
+    """
+    True when this row's newest check is older than ``MEASUREMENT_MAX_AGE``.
+
+    A row keeps its last verdict forever: since #2202 the prober skips models
+    that left the served catalog, and nothing prunes tracking rows. Without this
+    window ``/v1/status/models`` reported 40 of 100 models as ``operational`` at
+    ``uptime_24h: 100.0`` whose newest check was **50 days old** — the same
+    falsehood #2325 removed from the aggregate, still being served by the routes
+    underneath it.
+    """
+    checked_at = _parse_ts(row.get("last_called_at"))
+    if checked_at is None:
+        return True
+    return checked_at < (now or datetime.now(UTC)) - MEASUREMENT_MAX_AGE
+
+
+def _format_model_status(model: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
     """
     One ``model_status_current`` row, shaped for the status page.
 
@@ -62,8 +88,39 @@ def _format_model_status(model: dict[str, Any]) -> dict[str, Any]:
     have (it is ``active_incidents``), which is a KeyError the route turned
     into a blanket 500. Reads are ``.get()`` so a future view change degrades
     one field instead of the endpoint.
+
+    A stale row is reported as ``status: "unknown"`` with ``monitored: false``
+    and ``null`` uptimes rather than as a healthy model: nobody has measured it,
+    which is not the same as it being up. The measured figures stay available
+    under ``last_measured_*`` so a caller can still show the last known reading,
+    dated.
     """
+    if _is_stale(model, now):
+        return {
+            "model_id": model.get("model"),
+            "provider": model.get("provider"),
+            "gateway": model.get("gateway"),
+            "status": "unknown",
+            "monitored": False,
+            "unmonitored_reason": (
+                f"No health check in the last {int(MEASUREMENT_MAX_AGE.total_seconds() // 3600)}h."
+            ),
+            "tier": model.get("monitoring_tier"),
+            "uptime_24h": None,
+            "uptime_7d": None,
+            "uptime_30d": None,
+            "avg_response_time_ms": None,
+            "last_checked": model.get("last_called_at"),
+            "last_success": model.get("last_success_at"),
+            "last_failure": model.get("last_failure_at"),
+            "circuit_breaker_state": model.get("circuit_breaker_state"),
+            "active_incidents": model.get("active_incidents"),
+            "last_measured_uptime_24h": round(_num(model.get("uptime_percentage_24h")), 2),
+            "last_measured_status": model.get("status_indicator"),
+        }
+
     return {
+        "monitored": True,
         "model_id": model.get("model"),
         "provider": model.get("provider"),
         "gateway": model.get("gateway"),
@@ -385,7 +442,8 @@ async def get_models_status(
         response = query.execute()
         models = response.data or []
 
-        return [_format_model_status(model) for model in models]
+        now = datetime.now(UTC)
+        return [_format_model_status(model, now) for model in models]
 
     except Exception as e:
         logger.error(f"Failed to get models status: {e}", exc_info=True)
@@ -530,7 +588,10 @@ async def get_model_uptime_history(
         else:
             raise HTTPException(status_code=400, detail="Invalid period")
 
-        # Query aggregated data
+        # NOTE: model_health_aggregates does not exist in the database (checked
+        # 2026-09-15), so this route 500'd for every model since it was written.
+        # A missing table is answered honestly below rather than as a server
+        # error the caller should retry.
         query = (
             get_db()
             .table("model_health_aggregates")
@@ -544,28 +605,49 @@ async def get_model_uptime_history(
         if gateway:
             query = query.eq("gateway", gateway)
 
-        response = query.order("period_start", desc=False).execute()
+        try:
+            response = query.order("period_start", desc=False).execute()
+        except Exception as e:
+            # 42P01 = undefined_table. No history is recorded anywhere, so this
+            # is a permanent, knowable state: say so once instead of handing the
+            # caller a 500 it will retry forever.
+            if _is_missing_table(e):
+                logger.warning(
+                    "uptime history requested but model_health_aggregates does not exist"
+                )
+                return {
+                    "provider": provider,
+                    "model": model_id,
+                    "period": period,
+                    "data_points": [],
+                    "history_available": False,
+                    "reason": (
+                        "No uptime history is recorded: the model_health_aggregates "
+                        "table does not exist in this deployment."
+                    ),
+                }
+            raise
+
         data = response.data or []
 
-        # Format for charting
-        points = []
-        for point in data:
-            points.append(
-                {
-                    "timestamp": point["period_start"],
-                    "uptime_percentage": round(point["uptime_percentage"] or 0, 2),
-                    "avg_response_time_ms": round(point["avg_response_time_ms"] or 0, 0),
-                    "total_checks": point["total_checks"],
-                    "successful_checks": point["successful_checks"],
-                    "failed_checks": point["failed_checks"],
-                }
-            )
+        points = [
+            {
+                "timestamp": point.get("period_start"),
+                "uptime_percentage": round(_num(point.get("uptime_percentage")), 2),
+                "avg_response_time_ms": round(_num(point.get("avg_response_time_ms"))),
+                "total_checks": point.get("total_checks"),
+                "successful_checks": point.get("successful_checks"),
+                "failed_checks": point.get("failed_checks"),
+            }
+            for point in data
+        ]
 
         return {
             "provider": provider,
             "model": model_id,
             "period": period,
             "data_points": points,
+            "history_available": True,
         }
 
     except HTTPException:
@@ -601,18 +683,27 @@ async def search_models(
         response = query.execute()
         models = response.data or []
 
-        formatted = []
-        for model in models:
-            formatted.append(
-                {
-                    "model_id": model["model"],
-                    "provider": model["provider"],
-                    "gateway": model["gateway"],
-                    "status": model["status_indicator"],
-                    "tier": model["monitoring_tier"],
-                    "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
+        # Search served the same row shape with the same two faults as the list
+        # route (numeric strings through round(), stale rows as healthy); it goes
+        # through the shared formatter so it cannot drift again.
+        now = datetime.now(UTC)
+        formatted = [
+            {
+                k: v
+                for k, v in _format_model_status(model, now).items()
+                if k
+                in {
+                    "model_id",
+                    "provider",
+                    "gateway",
+                    "status",
+                    "tier",
+                    "uptime_24h",
+                    "monitored",
                 }
-            )
+            }
+            for model in models
+        ]
 
         return formatted
 
@@ -669,9 +760,18 @@ async def get_stats():
         total_checks = checks_response.count or 0
         successful_checks = len([c for c in checks_response.data if c.get("status") == "success"])
 
+        # total_models is the catalog GET /v1/models serves, as in `/v1/status`
+        # (#2325). Summing enabled tracking rows reported 123 against 68 served:
+        # delisted models keep their rows. tracking_rows_enabled keeps the raw
+        # figure visible rather than quietly dropping it.
+        from src.routes.catalog import get_public_catalog_models
+
+        catalog = await asyncio.to_thread(get_public_catalog_models)
+
         return {
             "monitoring": {
-                "total_models": sum(tier_counts.values()),
+                "total_models": len(catalog),
+                "tracking_rows_enabled": sum(tier_counts.values()),
                 "critical_tier": tier_counts.get("critical", 0),
                 "popular_tier": tier_counts.get("popular", 0),
                 "standard_tier": tier_counts.get("standard", 0),
