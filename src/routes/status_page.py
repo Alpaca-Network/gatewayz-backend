@@ -53,13 +53,24 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
+# PostgREST answers a missing table with its OWN code and wording, not Postgres's:
+#   {'code': 'PGRST205', 'message': "Could not find the table 'public.x' in the
+#    schema cache"}
+# The first cut of this check looked for 42P01 / "does not exist" — both plausible,
+# neither what the client raises — so /status/uptime kept 500ing after the fix that
+# was supposed to stop it. The strings below are copied from a real APIError.
+_MISSING_TABLE_CODES = {"PGRST205", "PGRST200", "42P01"}
+_MISSING_TABLE_PHRASES = ("could not find the table", "does not exist")
+
+
 def _is_missing_table(error: Exception) -> bool:
-    """True when PostgREST reports the relation does not exist (Postgres 42P01)."""
-    code = getattr(error, "code", None)
-    if code == "42P01":
+    """True when the client reports the relation is absent, not merely unreachable."""
+    if str(getattr(error, "code", "")) in _MISSING_TABLE_CODES:
         return True
-    text = str(error).lower()
-    return "42p01" in text or "does not exist" in text
+    text = f"{getattr(error, 'message', '')} {error}".lower()
+    if any(code.lower() in text for code in _MISSING_TABLE_CODES):
+        return True
+    return any(phrase in text for phrase in _MISSING_TABLE_PHRASES)
 
 
 def _is_stale(row: dict[str, Any], now: datetime | None = None) -> bool:
