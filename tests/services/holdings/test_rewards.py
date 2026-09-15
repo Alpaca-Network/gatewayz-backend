@@ -144,7 +144,7 @@ def db(monkeypatch):
     monkeypatch.setattr(rewards.Config, "HOLDINGS_REWARDS_ENABLED", True, raising=False)
     monkeypatch.setattr(rewards.Config, "HOLDINGS_DAILY_CAP_CREDITS", 50.0, raising=False)
     monkeypatch.setattr(rewards.Config, "HOLDINGS_SNAPSHOTS_PER_DAY", 4, raising=False)
-    monkeypatch.setattr(rewards.Config, "HOLDINGS_MIN_SNAPSHOT_BATCHES", 2, raising=False)
+    monkeypatch.setattr(rewards.Config, "HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", 2, raising=False)
     monkeypatch.setattr(
         rewards.Config, "HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS", 10000.0, raising=False
     )
@@ -507,7 +507,9 @@ class TestMinimumBatches:
         assert result["skipped"]["too_few_batches"] == 0
 
     def test_the_requirement_is_configurable(self, db, monkeypatch):
-        monkeypatch.setattr(rewards.Config, "HOLDINGS_MIN_SNAPSHOT_BATCHES", 3, raising=False)
+        monkeypatch.setattr(
+            rewards.Config, "HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", 3, raising=False
+        )
         db.observe(W1, 1000, batches=2)
         db.observe(W2, 1000, batches=3)
         db.link(W1, 7)
@@ -520,7 +522,9 @@ class TestMinimumBatches:
         """Requiring more sweeps than the schedule takes would pay nobody --
         a misconfiguration must not be able to switch the feature off."""
         monkeypatch.setattr(rewards.Config, "HOLDINGS_SNAPSHOTS_PER_DAY", 2, raising=False)
-        monkeypatch.setattr(rewards.Config, "HOLDINGS_MIN_SNAPSHOT_BATCHES", 99, raising=False)
+        monkeypatch.setattr(
+            rewards.Config, "HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", 99, raising=False
+        )
         db.observe(W1, 1000, batches=2)
         db.link(W1, 7)
         result = rewards.run_holdings_rewards_once(DAY)
@@ -529,7 +533,9 @@ class TestMinimumBatches:
 
     def test_requirement_of_one_never_drops_below_one(self, db, monkeypatch):
         monkeypatch.setattr(rewards.Config, "HOLDINGS_SNAPSHOTS_PER_DAY", 1, raising=False)
-        monkeypatch.setattr(rewards.Config, "HOLDINGS_MIN_SNAPSHOT_BATCHES", 0, raising=False)
+        monkeypatch.setattr(
+            rewards.Config, "HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", 0, raising=False
+        )
         db.observe(W1, 1000, batches=1)
         db.link(W1, 7)
         result = rewards.run_holdings_rewards_once(DAY)

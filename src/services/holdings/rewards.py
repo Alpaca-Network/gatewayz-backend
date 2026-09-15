@@ -16,7 +16,7 @@ observation sweep drops a wallet's whole batch on an incomplete chain read
 or a held token with no fresh price, so a wallet can legitimately end a day
 with one recorded sweep -- and then "lowest of the day" degenerates into
 "that one moment", which is the hole the rule exists to close. So a day
-with fewer than `HOLDINGS_MIN_SNAPSHOT_BATCHES` distinct sweeps is skipped
+with fewer than `HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY` distinct sweeps is skipped
 outright. Underpaying nobody is acceptable here; paying on a single
 farmable reading is not.
 
@@ -124,7 +124,7 @@ def _required_batches() -> int:
     accident.
     """
     per_day = max(1, int(Config.HOLDINGS_SNAPSHOTS_PER_DAY or 1))
-    return max(1, min(int(Config.HOLDINGS_MIN_SNAPSHOT_BATCHES or 1), per_day))
+    return max(1, min(int(Config.HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY or 1), per_day))
 
 
 def budget_order(wallets: list[str], reward_date_str: str) -> list[str]:

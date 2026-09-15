@@ -162,6 +162,23 @@ def get_snapshot_batch_totals(wallet_address: str, day: date) -> dict[str, Decim
     return batch_totals
 
 
+def count_snapshot_batches_for_date(wallet_address: str, day: date) -> int:
+    """How many distinct observation sweeps the wallet has on that UTC day.
+
+    The daily accrual will not pay a day with too few sweeps: "lowest value
+    seen that day" only has force if several values were seen, and a single
+    recorded sweep makes the minimum just that one moment.
+
+    0 when nothing was observed, and 0 on any lookup error -- which reads as
+    "not enough sweeps to pay", the safe direction. The accrual itself uses
+    get_snapshot_batch_totals() instead, since it needs the minimum too and
+    one read gives it both; this is the standalone count for callers that
+    only need the coverage figure.
+    """
+    totals = get_snapshot_batch_totals(wallet_address, day)
+    return len(totals) if totals else 0
+
+
 def get_min_usd_for_date(wallet_address: str, day: date) -> Decimal | None:
     """The wallet's LOWEST total USD holdings across that UTC day.
 

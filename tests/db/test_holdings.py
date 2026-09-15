@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.db.holdings import (
+    count_snapshot_batches_for_date,
     create_holdings_accrual,
     create_token,
     get_latest_snapshot_usd,
@@ -548,3 +549,24 @@ class TestGetSnapshotBatchTotals:
     def test_returns_none_on_error(self, sb):
         with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
             assert get_snapshot_batch_totals("0xabc", date(2026, 9, 14)) is None
+
+
+class TestCountSnapshotBatchesForDate:
+    def test_counts_distinct_sweeps_not_rows(self, sb):
+        rows = [
+            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "100"},
+            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "50"},
+            {"taken_at": "2026-09-14T06:00:00+00:00", "usd_value": "70"},
+        ]
+        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert count_snapshot_batches_for_date("0xABC", date(2026, 9, 14)) == 2
+
+    def test_nothing_observed_is_zero(self, sb):
+        client = _mock_table_client({"wallet_holdings_snapshots": []})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert count_snapshot_batches_for_date("0xabc", date(2026, 9, 14)) == 0
+
+    def test_lookup_error_is_zero_which_reads_as_too_few_to_pay(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert count_snapshot_batches_for_date("0xabc", date(2026, 9, 14)) == 0

@@ -239,7 +239,9 @@ class Config:
     # price, so this is a real case and not a hypothetical one. Effective
     # value is clamped to [1, HOLDINGS_SNAPSHOTS_PER_DAY]: requiring more
     # sweeps than are ever taken would pay nobody.
-    HOLDINGS_MIN_SNAPSHOT_BATCHES = int(_get_env_var("HOLDINGS_MIN_SNAPSHOT_BATCHES", "2"))
+    HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY = int(
+        _get_env_var("HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", "2")
+    )
     # Per-account daily ceiling, and a global daily budget across all accounts.
     # Both are placeholders until the boss sets the real numbers.
     HOLDINGS_DAILY_CAP_CREDITS = float(_get_env_var("HOLDINGS_DAILY_CAP_CREDITS", "50.0"))

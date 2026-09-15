@@ -41,7 +41,7 @@ Skips are logged with a reason and counted in the run summary.
 
 For each wallet observed on the reward date:
 
-1. The day must have at least `HOLDINGS_MIN_SNAPSHOT_BATCHES` distinct sweeps
+1. The day must have at least `HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY` distinct sweeps
    (default 2, clamped to `HOLDINGS_SNAPSHOTS_PER_DAY`). "Lowest of the day"
    only resists farming when the day has several readings; with one recorded
    sweep the minimum is just that moment, which is the hole the rule exists to
