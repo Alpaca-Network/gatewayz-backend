@@ -70,6 +70,9 @@ Returns list of available AI models.
 - `provider` (optional): Filter by provider (openrouter, portkey, featherless, chutes)
 - `limit` (optional): Limit number of results
 - `offset` (optional): Offset for pagination
+- `tier` (optional): Serving-tier filter — `provider`, `community`, or `all`
+  (default). Anything else is a `400`. See
+  [Serving tiers](#serving-tiers) below.
 
 **Response:**
 ```json
@@ -80,6 +83,7 @@ Returns list of available AI models.
       "id": "openai/gpt-4",
       "name": "GPT-4",
       "provider": "openai",
+      "serving_tier": "provider",
       "context_length": 8192,
       "pricing": {
         "prompt": 0.00003,
@@ -90,6 +94,31 @@ Returns list of available AI models.
   "count": 1
 }
 ```
+
+#### Serving tiers
+
+Every model carries a `serving_tier` saying what kind of infrastructure serves
+it:
+
+- **`provider`** — a contracted upstream provider (OpenAI, Anthropic, xAI,
+  Moonshot, Meta, …). Priced per token; `pricing` is populated.
+- **`community`** — the community GPU network: open-weight models running on
+  operator-run nodes, in beta, verified by sampled replay. These rows carry
+  `pricing: null` with `pricing_status: "unpriced"` (never `0` — an unpriced
+  model must not read as a free one), `available_node_count` for the active
+  nodes serving the model right now, and `servable: false` while the tier has
+  no per-token price.
+
+`?tier=provider` returns only the provider-served catalog and is the value to
+pin if your integration must be unaffected by the community network.
+`total`/`has_more`/`next_offset` describe the filtered set, and the applied
+tier is echoed as `tier` on the envelope.
+
+Reaching a community model is opt-in at request time as well: a caller must
+name the `community/<model>` id explicitly and be authenticated. Community
+nodes are never a failover or auto-routing target, and no requested model is
+ever substituted for one. Full contract:
+[`docs/gpu/CATALOG_COMMUNITY_TIER.md`](gpu/CATALOG_COMMUNITY_TIER.md).
 
 ### Get Model Providers
 
