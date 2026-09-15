@@ -104,6 +104,31 @@ def get_xai_client():
         raise
 
 
+def _uses_openai_fallback(client) -> bool:
+    """True when get_xai_client() fell back to the OpenAI-compatible client.
+
+    The two clients take vendor parameters differently and the difference is
+    not cosmetic: the OpenAI SDK validates its keyword arguments and raises
+    TypeError on anything it does not know, so a top-level `reasoning=` kwarg
+    kills the request before it leaves the process. Non-standard parameters go
+    in `extra_body`, which is the SDK's documented mechanism for exactly this.
+    """
+    return type(client).__module__.split(".")[0] == "openai"
+
+
+def _merge_reasoning(client, kwargs: dict, reasoning_params: dict) -> dict:
+    """Attach xAI reasoning params the way THIS client accepts them."""
+    if not reasoning_params or "reasoning" in kwargs:
+        return kwargs
+    if _uses_openai_fallback(client):
+        extra = dict(kwargs.get("extra_body") or {})
+        extra.update(reasoning_params)
+        kwargs["extra_body"] = extra
+    else:
+        kwargs.update(reasoning_params)
+    return kwargs
+
+
 def _prepare_xai_kwargs(model: str, kwargs: dict) -> dict:
     """grok-4 accepts reasoning_effort and reports usage.reasoning_tokens."""
     from src.services.providers.reasoning_effort import apply_reasoning_effort
@@ -129,9 +154,10 @@ def make_xai_request_openai(messages, model, **kwargs):
         enable_reasoning = kwargs.pop("enable_reasoning", None)
         reasoning_params = get_xai_reasoning_params(model, enable_reasoning)
 
-        # Merge reasoning params with kwargs (kwargs takes precedence if reasoning already set)
-        if reasoning_params and "reasoning" not in kwargs:
-            kwargs.update(reasoning_params)
+        # Merge reasoning params the way this client accepts them (kwargs wins
+        # if reasoning is already set).
+        kwargs = _merge_reasoning(client, kwargs, reasoning_params)
+        if reasoning_params:
             logger.debug(f"xAI request for {model} with reasoning params: {reasoning_params}")
 
         kwargs = _prepare_xai_kwargs(model, kwargs)
@@ -158,9 +184,8 @@ def make_xai_request_openai_stream(messages, model, **kwargs):
         enable_reasoning = kwargs.pop("enable_reasoning", None)
         reasoning_params = get_xai_reasoning_params(model, enable_reasoning)
 
-        # Merge reasoning params with kwargs (kwargs takes precedence if reasoning already set)
-        if reasoning_params and "reasoning" not in kwargs:
-            kwargs.update(reasoning_params)
+        kwargs = _merge_reasoning(client, kwargs, reasoning_params)
+        if reasoning_params:
             logger.debug(
                 f"xAI streaming request for {model} with reasoning params: {reasoning_params}"
             )

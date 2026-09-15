@@ -57,6 +57,11 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics) --
     # once a day, after staking_rewards/gpu_spot_check.
     "emission_epoch": 1440,
+    # Holdings rewards: the observation sweep runs HOLDINGS_SNAPSHOTS_PER_DAY
+    # times a day, the accrual once. Derived from the sweep count rather than
+    # hard-coded, so raising the count doesn't make the job read as stale.
+    "holdings_snapshots": 1440 // max(1, min(Config.HOLDINGS_SNAPSHOTS_PER_DAY, 24)),
+    "holdings_rewards": 1440,
 }
 
 # WAYZ token/staking contracts are deployed on Avalanche Fuji testnet.

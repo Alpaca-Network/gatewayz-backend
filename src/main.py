@@ -538,6 +538,10 @@ def create_app() -> FastAPI:
             "Admin Staking Rewards",
         ),  # Reward-rate control + manual runs (gatewayz-backend staking rewards)
         (
+            "holdings",
+            "Holdings Rewards",
+        ),  # Credits for tokens held in a proven wallet + admin rate/registry control
+        (
             "wallet_auth",
             "Wallet Auth",
         ),  # SIWE wallet sign-in/sign-up + linking (gatewayz-backend#2249-#2252)

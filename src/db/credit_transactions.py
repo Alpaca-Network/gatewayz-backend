@@ -8,10 +8,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from src.config.supabase_config import (
-    execute_with_retry,
-    get_supabase_client,
-)
+from src.config.supabase_config import execute_with_retry, get_supabase_client
 from src.utils.sentry_context import capture_database_error
 
 logger = logging.getLogger(__name__)
@@ -141,6 +138,7 @@ class TransactionType:
     SUBSCRIPTION_UPGRADE = "subscription_upgrade"  # Allowance reset on tier upgrade
     SUBSCRIPTION_DOWNGRADE = "subscription_downgrade"  # Allowance reset on tier downgrade
     STAKING_REWARD = "staking_reward"  # Daily WAYZ staking payout (inference credits)
+    HOLDINGS_REWARD = "holdings_reward"  # Daily payout for tokens held in a proven wallet
 
 
 def get_transaction_by_request_id(request_id: str) -> dict[str, Any] | None:
