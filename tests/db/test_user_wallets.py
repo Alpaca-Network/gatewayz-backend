@@ -9,6 +9,7 @@ from src.db.user_wallets import (
     get_wallet,
     get_wallets_for_user,
     link_wallet,
+    list_all_wallets,
     unlink_wallet,
 )
 
@@ -31,6 +32,7 @@ def _mock_table_client(table_data: dict):
             query.select.return_value = query
             query.eq.return_value = query
             query.order.return_value = query
+            query.limit.return_value = query
             query.insert.return_value = query
             query.delete.return_value = query
             query.execute.return_value = MagicMock(data=table_data.get(name, []))
@@ -134,3 +136,22 @@ def test_unlink_wallet_returns_false_on_error(sb):
     client.table.side_effect = RuntimeError("boom")
     with patch("src.db.user_wallets.get_supabase_client", return_value=client):
         assert unlink_wallet(1, "0x" + "a" * 40) is False
+
+
+def test_list_all_wallets_returns_rows_oldest_first(sb):
+    """The holdings-rewards observation sweep walks every linked wallet;
+    a stable created_at order keeps the sweep reproducible across runs."""
+    rows = [{"wallet_address": "0xabc", "created_at": "2026-09-01T00:00:00Z"}]
+    client = _mock_table_client({"user_wallets": rows})
+    with patch("src.db.user_wallets.get_supabase_client", return_value=client):
+        assert list_all_wallets() == rows
+    query = client.table("user_wallets")
+    assert query.order.call_args.args == ("created_at",)
+    assert query.order.call_args.kwargs == {"desc": False}
+
+
+def test_list_all_wallets_returns_empty_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.user_wallets.get_supabase_client", return_value=client):
+        assert list_all_wallets() == []

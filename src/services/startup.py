@@ -767,6 +767,23 @@ async def lifespan(app):
         logger.warning(f"Failed to start staking rewards scheduler: {e}")
         # Don't fail startup if staking rewards scheduler fails to start
 
+    # Start the holdings-rewards jobs -- the observation sweep (several
+    # times a day) and the daily accrual. Both always start and no-op while
+    # HOLDINGS_REWARDS_ENABLED is off, so the ops page shows them as off
+    # rather than missing.
+    try:
+        from src.services.scheduled_sync import (
+            start_holdings_rewards_scheduler,
+            start_holdings_snapshots_scheduler,
+        )
+
+        start_holdings_snapshots_scheduler()
+        start_holdings_rewards_scheduler()
+        logger.info("Holdings rewards service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start holdings rewards schedulers: {e}")
+        # Don't fail startup if the holdings schedulers fail to start
+
     # Start the daily emission_epoch job (Chutes-style WAYZ emission
     # rewards, gatewayz-backend tokenomics) -- always starts; no-ops
     # (records a 'skipped' job run) until REWARDS_MODE=='emission'.
@@ -1034,6 +1051,19 @@ async def lifespan(app):
         logger.info("Staking rewards service stopped")
     except Exception as e:
         logger.warning(f"Staking rewards shutdown warning: {e}")
+
+    # Stop the holdings-rewards jobs
+    try:
+        from src.services.scheduled_sync import (
+            stop_holdings_rewards_scheduler,
+            stop_holdings_snapshots_scheduler,
+        )
+
+        stop_holdings_snapshots_scheduler()
+        stop_holdings_rewards_scheduler()
+        logger.info("Holdings rewards service stopped")
+    except Exception as e:
+        logger.warning(f"Holdings rewards shutdown warning: {e}")
 
     # Stop the emission epoch job
     try:

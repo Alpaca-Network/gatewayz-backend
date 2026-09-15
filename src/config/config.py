@@ -195,6 +195,69 @@ class Config:
     # src/services/scheduled_sync.py::start_staking_rewards_scheduler.
     STAKING_REWARDS_CRON_HOUR_UTC = int(_get_env_var("STAKING_REWARDS_CRON_HOUR_UTC", "0"))
     STAKING_REWARDS_CRON_MINUTE_UTC = int(_get_env_var("STAKING_REWARDS_CRON_MINUTE_UTC", "20"))
+
+    # Holdings rewards: pay inference credits for *holding* supported top-20
+    # tokens in a wallet the user has proven they control. Strictly
+    # non-custodial -- we only ever READ balances over public RPC, we never
+    # take deposits and never sign or send a transaction.
+    #
+    # One RPC URL per supported EVM chain. Defaults are public endpoints so a
+    # fresh environment works without configuration; production should point
+    # these at a paid provider, since public endpoints rate-limit and a
+    # rate-limited chain is reported as a *failed* read (never a zero balance).
+    ETHEREUM_RPC_URL = _get_env_var("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com")
+    BNB_CHAIN_RPC_URL = _get_env_var("BNB_CHAIN_RPC_URL", "https://bsc-dataseed.binance.org")
+    # Mainnet C-Chain -- distinct from AVALANCHE_FUJI_RPC_URL (testnet, WAYZ staking).
+    AVALANCHE_RPC_URL = _get_env_var("AVALANCHE_RPC_URL", "https://api.avax.network/ext/bc/C/rpc")
+    BASE_RPC_URL = _get_env_var("BASE_RPC_URL", "https://mainnet.base.org")
+    POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-rpc.com")
+    ARBITRUM_RPC_URL = _get_env_var("ARBITRUM_RPC_URL", "https://arb1.arbitrum.io/rpc")
+    # Ships dark, exactly like STAKING_REWARDS_ENABLED did -- the schema, jobs
+    # and endpoints land inert until the rates/caps are a confirmed product
+    # decision.
+    HOLDINGS_REWARDS_ENABLED = _get_env_var("HOLDINGS_REWARDS_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # A USD price older than this is treated as unusable and the token is
+    # skipped for that run (fail closed) rather than valued at a stale price.
+    HOLDINGS_PRICE_MAX_STALENESS_SECONDS = int(
+        _get_env_var("HOLDINGS_PRICE_MAX_STALENESS_SECONDS", "900")
+    )
+    # Balance snapshots taken per UTC day; the day's reward is computed from
+    # these samples rather than one instant, so a momentary top-up can't game it.
+    HOLDINGS_SNAPSHOTS_PER_DAY = int(_get_env_var("HOLDINGS_SNAPSHOTS_PER_DAY", "4"))
+    # Sybil brake: wallets younger than this many days earn nothing.
+    HOLDINGS_MIN_WALLET_AGE_DAYS = int(_get_env_var("HOLDINGS_MIN_WALLET_AGE_DAYS", "3"))
+    # Distinct observation sweeps a wallet must have on a day before that day
+    # can be paid. "Lowest balance of the day" only resists farming if the day
+    # has more than one reading -- with a single recorded sweep the minimum is
+    # just that one moment, which is precisely the hole the rule exists to
+    # close. A wallet can legitimately end a day with one sweep, since the
+    # sweep drops a whole batch on an incomplete chain read or a missing
+    # price, so this is a real case and not a hypothetical one. Effective
+    # value is clamped to [1, HOLDINGS_SNAPSHOTS_PER_DAY]: requiring more
+    # sweeps than are ever taken would pay nobody.
+    HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY = int(
+        _get_env_var("HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", "2")
+    )
+    # Per-account daily ceiling, and a global daily budget across all accounts.
+    # Both are placeholders until the boss sets the real numbers.
+    HOLDINGS_DAILY_CAP_CREDITS = float(_get_env_var("HOLDINGS_DAILY_CAP_CREDITS", "50.0"))
+    HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS = float(
+        _get_env_var("HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS", "10000.0")
+    )
+    # When the daily holdings accrual runs, UTC. It pays for YESTERDAY, so it
+    # only has to land after that day's final observation sweep -- 00:40 is
+    # after the 00:00 sweep and after staking_rewards at 00:20, keeping the
+    # midnight jobs from contending for the same worker.
+    HOLDINGS_REWARDS_CRON_HOUR_UTC = int(_get_env_var("HOLDINGS_REWARDS_CRON_HOUR_UTC", "0"))
+    HOLDINGS_REWARDS_CRON_MINUTE_UTC = int(_get_env_var("HOLDINGS_REWARDS_CRON_MINUTE_UTC", "40"))
+    # Minute-past-the-hour each observation sweep fires, so a sweep never
+    # starts exactly on a UTC day boundary where its taken_at could land on
+    # either side of the day it is meant to belong to.
+    HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC = int(_get_env_var("HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC", "5"))
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.

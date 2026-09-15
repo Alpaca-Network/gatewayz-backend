@@ -119,6 +119,8 @@ class TestResponseShape:
             "pricing_drift",
             "gpu_liveness_sweep",
             "gpu_rollup",
+            "holdings_snapshots",
+            "holdings_rewards",
         ):
             assert name in jobs
 
