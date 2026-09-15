@@ -65,6 +65,17 @@ async def run_once() -> int:
 
     monitor = intelligent_health_monitor
 
+    # This one-shot entrypoint never starts _tier_update_loop, so the orphan
+    # prune that loop owns would otherwise never run in the cron deployment —
+    # and the cron IS the deployment. Prune first so the pass below does not
+    # spend probes on rows that match no catalog model.
+    if Config.HEALTH_PROBE_PRUNE_ORPHANS:
+        try:
+            summary = await monitor.prune_orphaned_tracking_rows()
+            logger.info(f"Orphan prune: {summary}")
+        except Exception as e:
+            logger.warning(f"Orphan prune warning (non-fatal): {e}")
+
     try:
         models = await monitor._get_models_for_checking()
     except Exception as e:

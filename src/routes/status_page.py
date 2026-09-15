@@ -13,14 +13,17 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from src.db.client import get_db
+from src.services.monitoring.intelligent_health_monitor import is_unmeasured_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/status", tags=["status-page"])
 
 
 # A health measurement older than this is history, not current state. The
-# slowest monitoring tier (on_demand) re-probes every 4h and failing models every
-# 5 min, so 24h is six missed probe cycles — past it the prober is not watching.
+# slowest monitoring tier (on_demand) re-probes every 4h, and a model in maximum
+# backoff every 6h (Config.HEALTH_PROBE_BACKOFF_MAX_SECONDS, deliberately sized
+# against this window), so 24h is several missed probe cycles — past it the
+# prober is not watching.
 MEASUREMENT_MAX_AGE = timedelta(hours=24)
 
 _TRACKING_PAGE_SIZE = 1000
@@ -94,6 +97,83 @@ def _latest_measurement_by_model(
     return latest, orphaned
 
 
+def _round_or_zero(value: Any, digits: int) -> float:
+    """``round()`` that survives a NULL, a missing column or a non-numeric cell.
+
+    ``model_status_current`` is a database VIEW. ``CREATE OR REPLACE VIEW``
+    cannot reorder or retype existing columns, so a migration that tried to
+    widen it fails and silently leaves the OLD definition in place. Indexing the
+    row with ``row["col"]`` then raises KeyError for EVERY row, which is how
+    ``GET /v1/status/models`` returned 500 in production while ``/v1/status/search``
+    — reading a narrower subset of the same view — returned 200.
+    """
+    try:
+        return round(float(value or 0), digits)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _format_model_status(row: dict[str, Any]) -> dict[str, Any]:
+    """Shape one ``model_status_current`` row for the public status page.
+
+    Every field is read with ``.get()``: a view missing a column must degrade to
+    a null in one field, never to a 500 for the whole endpoint.
+    """
+    return {
+        "model_id": row.get("model"),
+        "provider": row.get("provider"),
+        "gateway": row.get("gateway"),
+        "status": row.get("status_indicator"),
+        "tier": row.get("monitoring_tier"),
+        "uptime_24h": _round_or_zero(row.get("uptime_percentage_24h"), 2),
+        "uptime_7d": _round_or_zero(row.get("uptime_percentage_7d"), 2),
+        "uptime_30d": _round_or_zero(row.get("uptime_percentage_30d"), 2),
+        "avg_response_time_ms": _round_or_zero(row.get("average_response_time_ms"), 0),
+        "last_checked": row.get("last_called_at"),
+        "last_success": row.get("last_success_at"),
+        "last_failure": row.get("last_failure_at"),
+        "circuit_breaker_state": row.get("circuit_breaker_state"),
+        "active_incidents": row.get("active_incidents_count") or 0,
+    }
+
+
+def _warn_on_missing_columns(rows: list[dict[str, Any]], expected: set[str]) -> None:
+    """Name the columns the view failed to supply, once per request.
+
+    Without this the failure mode is a field that is quietly always null. The
+    log line is what turns "the status page looks wrong" into a migration to run.
+    """
+    if not rows:
+        return
+    missing = sorted(expected - set(rows[0].keys()))
+    if missing:
+        logger.warning(
+            "model_status_current is missing column(s) %s — the view is behind its "
+            "definition. Apply "
+            "supabase/staged-migrations/20260915000000_rebuild_model_status_views.sql. "
+            "Affected fields are reported as null/0.",
+            missing,
+        )
+
+
+_MODEL_STATUS_COLUMNS = {
+    "model",
+    "provider",
+    "gateway",
+    "status_indicator",
+    "monitoring_tier",
+    "uptime_percentage_24h",
+    "uptime_percentage_7d",
+    "uptime_percentage_30d",
+    "average_response_time_ms",
+    "last_called_at",
+    "last_success_at",
+    "last_failure_at",
+    "circuit_breaker_state",
+    "active_incidents_count",
+}
+
+
 def _gateway_of(model: dict[str, Any]) -> str:
     gateway = model.get("source_gateway") or model.get("provider_slug") or ""
     if not gateway:
@@ -122,6 +202,10 @@ async def get_overall_status():
     - ``healthy_models``: monitored models whose latest check succeeded.
     - ``offline_models``: monitored models whose circuit breaker is open.
     - ``degraded_models``: monitored, latest check failed, circuit not open.
+    - ``rate_limited_models`` / ``unauthorized_models``: models whose latest
+      probe was throttled (429) or rejected for auth. Those outcomes measure the
+      PROBER's access, not the model, so they count as UNMONITORED — never as
+      degraded or offline — and are reported here so the condition stays visible.
     - ``uptime_percentage``: healthy / monitored * 100 — a point-in-time share of
       models passing their latest check, not a time-weighted availability. ``null``
       when nothing is monitored, with ``uptime_reason`` saying why.
@@ -158,6 +242,7 @@ async def get_overall_status():
         cutoff = now - MEASUREMENT_MAX_AGE
         gateways: dict[str, dict[str, bool]] = {}
         healthy = offline = degraded = monitored = 0
+        rate_limited = unauthorized = 0
         for model in catalog:
             gateway = _gateway_of(model)
             gw = (
@@ -171,12 +256,33 @@ async def get_overall_status():
             if checked_at is None or checked_at < cutoff:
                 continue  # unmonitored: no current measurement, so no verdict
 
+            last_status = (row.get("last_status") or "").lower()
+
+            if (row.get("circuit_breaker_state") or "").lower() == "open":
+                # An open breaker is earned by real failures only (429s and auth
+                # failures never move it), so it outranks a latest probe that
+                # merely could not get an answer. Real outages still surface.
+                monitored += 1
+                if gw is not None:
+                    gw["monitored"] = True
+                offline += 1
+                continue
+
+            if is_unmeasured_status(last_status):
+                # The prober was throttled or has no working key for this
+                # gateway. That measures our access, not the model — counting it
+                # as degraded is what turned a healthy catalog into a public
+                # "major outage". Excluded from uptime, reported separately.
+                if last_status == "rate_limited":
+                    rate_limited += 1
+                else:
+                    unauthorized += 1
+                continue
+
             monitored += 1
             if gw is not None:
                 gw["monitored"] = True
-            if (row.get("circuit_breaker_state") or "").lower() == "open":
-                offline += 1
-            elif (row.get("last_status") or "").lower() == "success":
+            if last_status == "success":
                 healthy += 1
                 if gw is not None:
                     gw["healthy"] = True
@@ -240,6 +346,12 @@ async def get_overall_status():
             "healthy_models": healthy,
             "degraded_models": degraded,
             "offline_models": offline,
+            # Unmeasured: the probe could not get an answer about the model.
+            # Counted in unmonitored_models, never in uptime or status, but
+            # reported so a throttled prober or a missing provider key is
+            # visible instead of silently inflating "degraded".
+            "rate_limited_models": rate_limited,
+            "unauthorized_models": unauthorized,
             "measurement_window_hours": window_hours,
             "excluded_tracking_rows": orphaned_rows,
             "total_providers": len(providers),
@@ -272,8 +384,8 @@ async def get_providers_status():
         # Format for frontend display
         formatted = []
         for provider in providers:
-            healthy = provider["healthy_models"]
-            total = provider["total_models"]
+            healthy = provider.get("healthy_models") or 0
+            total = provider.get("total_models") or 0
 
             # Apply same data consistency check as main status endpoint
             if healthy > total:
@@ -285,16 +397,16 @@ async def get_providers_status():
 
             formatted.append(
                 {
-                    "name": provider["provider"],
-                    "gateway": provider["gateway"],
-                    "status": provider["status_indicator"],
-                    "uptime_24h": round(provider["avg_uptime_24h"] or 0, 2),
-                    "uptime_7d": round(provider["avg_uptime_7d"] or 0, 2),
+                    "name": provider.get("provider"),
+                    "gateway": provider.get("gateway"),
+                    "status": provider.get("status_indicator"),
+                    "uptime_24h": _round_or_zero(provider.get("avg_uptime_24h"), 2),
+                    "uptime_7d": _round_or_zero(provider.get("avg_uptime_7d"), 2),
                     "total_models": total,
                     "healthy_models": healthy,
-                    "offline_models": provider["offline_models"],
-                    "avg_response_time_ms": round(provider["avg_response_time_ms"] or 0, 0),
-                    "last_checked": provider["last_checked_at"],
+                    "offline_models": provider.get("offline_models") or 0,
+                    "avg_response_time_ms": _round_or_zero(provider.get("avg_response_time_ms"), 0),
+                    "last_checked": provider.get("last_checked_at"),
                 }
             )
 
@@ -340,29 +452,8 @@ async def get_models_status(
         response = query.execute()
         models = response.data or []
 
-        # Format for frontend
-        formatted = []
-        for model in models:
-            formatted.append(
-                {
-                    "model_id": model["model"],
-                    "provider": model["provider"],
-                    "gateway": model["gateway"],
-                    "status": model["status_indicator"],
-                    "tier": model["monitoring_tier"],
-                    "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
-                    "uptime_7d": round(model["uptime_percentage_7d"] or 0, 2),
-                    "uptime_30d": round(model["uptime_percentage_30d"] or 0, 2),
-                    "avg_response_time_ms": round(model["average_response_time_ms"] or 0, 0),
-                    "last_checked": model["last_called_at"],
-                    "last_success": model["last_success_at"],
-                    "last_failure": model["last_failure_at"],
-                    "circuit_breaker_state": model["circuit_breaker_state"],
-                    "active_incidents": model["active_incidents_count"],
-                }
-            )
-
-        return formatted
+        _warn_on_missing_columns(models, _MODEL_STATUS_COLUMNS)
+        return [_format_model_status(model) for model in models]
 
     except Exception as e:
         logger.error(f"Failed to get models status: {e}", exc_info=True)
@@ -391,29 +482,19 @@ async def get_model_status(provider: str, model_id: str, gateway: str | None = Q
 
         response = query.maybe_single().execute()
 
-        if not response.data:
+        # maybe_single() returns None (not a response with empty data) when
+        # nothing matches, so `response.data` raised AttributeError and this
+        # endpoint answered 500 for every unknown model instead of 404.
+        if response is None or not response.data:
             raise HTTPException(status_code=404, detail="Model not found")
 
         model = response.data
 
         return {
-            "model_id": model["model"],
-            "provider": model["provider"],
-            "gateway": model["gateway"],
-            "status": model["status_indicator"],
-            "tier": model["monitoring_tier"],
-            "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
-            "uptime_7d": round(model["uptime_percentage_7d"] or 0, 2),
-            "uptime_30d": round(model["uptime_percentage_30d"] or 0, 2),
-            "avg_response_time_ms": round(model["average_response_time_ms"] or 0, 0),
-            "last_checked": model["last_called_at"],
-            "last_success": model["last_success_at"],
-            "last_failure": model["last_failure_at"],
-            "circuit_breaker_state": model["circuit_breaker_state"],
-            "consecutive_failures": model["consecutive_failures"],
-            "usage_24h": model["usage_count_24h"],
-            "is_enabled": model["is_enabled"],
-            "active_incidents": model["active_incidents_count"],
+            **_format_model_status(model),
+            "consecutive_failures": model.get("consecutive_failures"),
+            "usage_24h": model.get("usage_count_24h"),
+            "is_enabled": model.get("is_enabled"),
         }
 
     except HTTPException:
@@ -542,12 +623,12 @@ async def get_model_uptime_history(
         for point in data:
             points.append(
                 {
-                    "timestamp": point["period_start"],
-                    "uptime_percentage": round(point["uptime_percentage"] or 0, 2),
-                    "avg_response_time_ms": round(point["avg_response_time_ms"] or 0, 0),
-                    "total_checks": point["total_checks"],
-                    "successful_checks": point["successful_checks"],
-                    "failed_checks": point["failed_checks"],
+                    "timestamp": point.get("period_start"),
+                    "uptime_percentage": _round_or_zero(point.get("uptime_percentage"), 2),
+                    "avg_response_time_ms": _round_or_zero(point.get("avg_response_time_ms"), 0),
+                    "total_checks": point.get("total_checks") or 0,
+                    "successful_checks": point.get("successful_checks") or 0,
+                    "failed_checks": point.get("failed_checks") or 0,
                 }
             )
 
@@ -591,20 +672,17 @@ async def search_models(
         response = query.execute()
         models = response.data or []
 
-        formatted = []
-        for model in models:
-            formatted.append(
-                {
-                    "model_id": model["model"],
-                    "provider": model["provider"],
-                    "gateway": model["gateway"],
-                    "status": model["status_indicator"],
-                    "tier": model["monitoring_tier"],
-                    "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
-                }
-            )
-
-        return formatted
+        return [
+            {
+                "model_id": model.get("model"),
+                "provider": model.get("provider"),
+                "gateway": model.get("gateway"),
+                "status": model.get("status_indicator"),
+                "tier": model.get("monitoring_tier"),
+                "uptime_24h": _round_or_zero(model.get("uptime_percentage_24h"), 2),
+            }
+            for model in models
+        ]
 
     except Exception as e:
         logger.error(f"Failed to search models: {e}", exc_info=True)
