@@ -1,13 +1,27 @@
 """The holdings-rewards observation sweep.
 
 Runs `Config.HOLDINGS_SNAPSHOTS_PER_DAY` times a day. Each run reads every
-eligible wallet's balance of every enabled registry token, prices it in USD,
-and writes one `wallet_holdings_snapshots` row per token the wallet actually
-holds. Every row written by one sweep shares a single `taken_at`, which is
-what lets `src/db/holdings.py::get_min_usd_for_date` recognise a batch and
-pay on the day's LOWEST batch total.
+eligible wallet's balance of every enabled registry token and prices it in
+USD. A wallet that was fully measured gets:
 
-Two rules here are about not recording wrong data, not about saving money:
+* exactly one `wallet_holdings_sweeps` row -- the sweep's total USD value,
+  **written even when that total is zero**; and
+* one `wallet_holdings_snapshots` row per token it actually holds, the
+  per-token detail behind that total.
+
+The sweep row is the unit the daily accrual reads, and the zero case is why
+it exists. Per-token rows do not exist for an empty wallet, so if the sweep
+were inferred from them, a wallet emptied between sweeps would leave no
+trace at all rather than being valued at zero -- and the day's minimum would
+be taken across only the sweeps in which it happened to be funded. Fund a
+wallet just before two of four daily sweeps, empty it the rest of the day,
+and it would be paid as though it held that balance all day. Recording the
+zero is what makes "paid on the lowest value seen that day" true.
+
+Two rules are about not recording wrong data, not about saving money. Both
+suppress the sweep row as well as the detail, because they are cases where
+we do not KNOW the total -- and "we could not measure it" must never be
+written down as "they held zero":
 
 1. **An incomplete chain read records nothing for that wallet.**
    `BalanceReadResult.is_complete` is false whenever any chain failed, and a
@@ -21,11 +35,12 @@ Two rules here are about not recording wrong data, not about saving money:
 
 A token the wallet holds **zero** of is irrelevant to both rules -- it
 contributes nothing to the total either way, so a missing price for it must
-not block the batch.
+not block the sweep.
 
-Every skip is logged with its reason and counted in the run summary, so an
-operator can see coverage gaps on the ops page rather than inferring them
-from missing credits.
+Every row written by one sweep shares a single `taken_at`, which is what
+joins the detail to its sweep row. Every skip is logged with its reason and
+counted in the run summary, so an operator can see coverage gaps on the ops
+page rather than inferring them from missing credits.
 """
 
 from __future__ import annotations
@@ -36,7 +51,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.config.config import Config
-from src.db.holdings import list_enabled_tokens, record_snapshot
+from src.db.holdings import list_enabled_tokens, record_snapshot, record_sweep
 from src.db.user_wallets import list_all_wallets
 from src.services.holdings.chains import BalanceReading, TokenRef, read_balances
 from src.services.holdings.prices import get_usd_prices
@@ -145,9 +160,11 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
         "unknown_age": 0,
         "incomplete_read": 0,
         "missing_price": 0,
+        "sweep_write_failed": 0,
         "error": 0,
     }
     considered = 0
+    sweeps_recorded = 0
     wallets_recorded = 0
     wallets_empty = 0
     rows_recorded = 0
@@ -191,9 +208,6 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
             continue
 
         held = [r for r in result.readings if r.raw_amount > 0]
-        if not held:
-            wallets_empty += 1
-            continue
 
         unpriced = sorted(
             {
@@ -212,8 +226,33 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
             )
             continue
 
+        # Everything below this line is a fully measured sweep: every chain
+        # was read and every held token has a fresh price. Its total is
+        # therefore authoritative -- including a total of zero.
+        valued = [(r, _usd_value(r, prices[r.token.price_id].price)) for r in held]
+        sweep_total = sum((value for _, value in valued), Decimal(0))
+
+        # The sweep row goes first and gates the per-token detail. It is the
+        # row the payout reads, and an empty wallet has no per-token rows at
+        # all -- so without it, a wallet emptied between sweeps would leave
+        # no trace and never drag the day's minimum down. Detail rows are
+        # skipped when it fails, so detail never exists without the sweep it
+        # belongs to.
+        if record_sweep(address, taken_at, sweep_total) is None:
+            skipped["sweep_write_failed"] += 1
+            logger.warning(
+                "holdings_snapshots: sweep row write failed for %s, recording no detail either",
+                address,
+            )
+            continue
+
+        sweeps_recorded += 1
+        if not held:
+            wallets_empty += 1
+            continue
+
         wrote_any = False
-        for reading in held:
+        for reading, usd_value in valued:
             key = _token_key(reading.token.chain_id, reading.token.contract_address)
             token_id = token_ids.get(key)
             if token_id is None:
@@ -228,7 +267,7 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
                 wallet_address=address,
                 token_id=token_id,
                 raw_amount=reading.raw_amount,
-                usd_value=_usd_value(reading, prices[reading.token.price_id].price),
+                usd_value=usd_value,
                 taken_at=taken_at,
             )
             if created is None:
@@ -246,6 +285,7 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
         "taken_at": taken_at.isoformat(),
         "tokens": len(tokens),
         "wallets_considered": considered,
+        "sweeps_recorded": sweeps_recorded,
         "wallets_recorded": wallets_recorded,
         "wallets_empty": wallets_empty,
         "rows_recorded": rows_recorded,

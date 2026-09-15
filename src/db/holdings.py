@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _TOKENS_TABLE = "holdings_tokens"
 _SNAPSHOTS_TABLE = "wallet_holdings_snapshots"
+_SWEEPS_TABLE = "wallet_holdings_sweeps"
 _RATES_TABLE = "holdings_reward_rates"
 _ACCRUALS_TABLE = "holdings_reward_accruals"
 
@@ -109,20 +110,19 @@ def record_snapshot(
         return None
 
 
-def get_snapshot_batch_totals(wallet_address: str, day: date) -> dict[str, Decimal] | None:
-    """The wallet's total USD value per sweep on that UTC day, keyed by the
-    sweep's `taken_at`.
+def get_min_usd_for_date(wallet_address: str, day: date) -> Decimal | None:
+    """The wallet's LOWEST per-token-derived total across that UTC day.
 
-    Rows sharing a `taken_at` are one sweep, so this sums within a sweep and
-    never across sweeps. Callers need both the minimum (what gets paid) and
-    the NUMBER of sweeps (whether the minimum means anything -- a single
-    recorded sweep makes "lowest of the day" just "that one moment"), and
-    both come from this one read rather than two.
+    DETAIL ONLY -- the daily job does NOT use this. wallet_holdings_snapshots
+    holds no rows for a wallet that held nothing, so a day's minimum derived
+    from it silently omits every sweep in which the wallet was empty. The
+    payout reads get_sweep_totals_for_date() instead, which has a real zero
+    row for those sweeps. Kept for per-token audit and analysis, where "the
+    lowest total across the sweeps that had holdings" is the intended
+    question.
 
-    Returns None when the day has no snapshots at all, or when a stored
-    usd_value cannot be parsed -- in either case there is no total we can
-    stand behind. An empty dict is never returned; "observed holding
-    nothing" is a sweep whose total is Decimal(0).
+    Returns None when the day has no per-token rows at all, or when a stored
+    usd_value cannot be parsed.
     """
     start, end = _day_bounds(day)
     try:
@@ -159,45 +159,7 @@ def get_snapshot_batch_totals(wallet_address: str, day: date) -> dict[str, Decim
             return None
         batch_totals[batch] = batch_totals.get(batch, Decimal(0)) + value
 
-    return batch_totals
-
-
-def count_snapshot_batches_for_date(wallet_address: str, day: date) -> int:
-    """How many distinct observation sweeps the wallet has on that UTC day.
-
-    The daily accrual will not pay a day with too few sweeps: "lowest value
-    seen that day" only has force if several values were seen, and a single
-    recorded sweep makes the minimum just that one moment.
-
-    0 when nothing was observed, and 0 on any lookup error -- which reads as
-    "not enough sweeps to pay", the safe direction. The accrual itself uses
-    get_snapshot_batch_totals() instead, since it needs the minimum too and
-    one read gives it both; this is the standalone count for callers that
-    only need the coverage figure.
-    """
-    totals = get_snapshot_batch_totals(wallet_address, day)
-    return len(totals) if totals else 0
-
-
-def get_min_usd_for_date(wallet_address: str, day: date) -> Decimal | None:
-    """The wallet's LOWEST total USD holdings across that UTC day.
-
-    A wallet is paid on what it actually held at its thinnest point that
-    day, never on a flash-funded peak and never on the sum of every row in
-    the day.
-
-    Returns None when the day has no snapshots at all (nothing was
-    observed, so there is no basis to pay on). A wallet that genuinely held
-    nothing returns Decimal(0), which is a real basis and must not be
-    confused with None.
-
-    Callers that also need to know how many sweeps that minimum came from
-    should use get_snapshot_batch_totals() directly and avoid a second read.
-    """
-    totals = get_snapshot_batch_totals(wallet_address, day)
-    if not totals:
-        return None
-    return min(totals.values())
+    return min(batch_totals.values())
 
 
 def list_wallets_with_snapshots_for_date(day: date) -> list[str]:
@@ -218,6 +180,132 @@ def list_wallets_with_snapshots_for_date(day: date) -> list[str]:
         rows = result.data or []
     except Exception as e:
         logger.warning(f"wallet_holdings_snapshots wallet list failed for {day.isoformat()}: {e}")
+        return []
+
+    return sorted({str(row["wallet_address"]).lower() for row in rows if row.get("wallet_address")})
+
+
+def record_sweep(
+    wallet_address: str,
+    taken_at: datetime,
+    usd_total: Decimal,
+) -> dict[str, Any] | None:
+    """Record that one COMPLETED observation sweep valued this wallet at
+    `usd_total`.
+
+    Exactly one row per wallet per sweep, written whenever the sweep was
+    fully measurable -- **including a zero row when the wallet held
+    nothing**. That zero is the whole point: per-token rows do not exist for
+    an empty wallet, so without this the sweep would leave no trace and an
+    emptied wallet would be invisible to the day's minimum rather than
+    dragging it to zero. A sweep that could NOT be measured (an unread chain,
+    a held token with no fresh price) must not call this at all -- "we do not
+    know" is not "they held zero".
+
+    usd_total is sent as a string so a Decimal never round-trips through a
+    float. Returns the created row, or None on any failure -- including the
+    (wallet_address, taken_at) UNIQUE conflict, which means this sweep was
+    already recorded.
+    """
+    payload = {
+        "wallet_address": wallet_address.lower(),
+        "taken_at": taken_at.isoformat(),
+        "usd_total": str(usd_total),
+    }
+    try:
+        client = get_supabase_client()
+        result = client.table(_SWEEPS_TABLE).insert(payload).execute()
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"wallet_holdings_sweeps insert failed for {wallet_address}: {e}")
+        return None
+
+
+def get_sweep_totals_for_date(wallet_address: str, day: date) -> dict[str, Decimal] | None:
+    """Every completed sweep's USD total for one wallet on one UTC day,
+    keyed by `taken_at`.
+
+    This is what the daily accrual pays on. It answers both of the job's
+    questions from one read: how many times the wallet was successfully
+    observed (the anti-farm coverage check) and the LOWEST total among those
+    observations (the basis). A sweep in which the wallet held nothing is
+    present here with a total of Decimal(0) and pulls the minimum down,
+    which is precisely what stops a wallet being funded just before a couple
+    of sweeps and paid as though it held that balance all day.
+
+    Returns None when the day has no completed sweeps at all, or when a
+    stored usd_total cannot be parsed. An empty dict is never returned.
+    """
+    start, end = _day_bounds(day)
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_SWEEPS_TABLE)
+            .select("taken_at,usd_total")
+            .eq("wallet_address", wallet_address.lower())
+            .gte("taken_at", start)
+            .lt("taken_at", end)
+            .limit(_ROW_CAP)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        logger.warning(
+            f"wallet_holdings_sweeps lookup failed for {wallet_address}/{day.isoformat()}: {e}"
+        )
+        return None
+
+    if not rows:
+        return None
+
+    totals: dict[str, Decimal] = {}
+    for row in rows:
+        try:
+            totals[str(row.get("taken_at"))] = Decimal(str(row.get("usd_total", "0")))
+        except (InvalidOperation, ValueError):
+            logger.warning(
+                f"wallet_holdings_sweeps has unparseable usd_total "
+                f"{row.get('usd_total')!r} for {wallet_address}/{day.isoformat()}"
+            )
+            return None
+    return totals
+
+
+def count_sweeps_for_date(wallet_address: str, day: date) -> int:
+    """How many completed observation sweeps the wallet has on that UTC day.
+
+    The daily accrual will not pay a day with too few: "lowest value seen
+    that day" only has force if several values were seen. 0 when nothing was
+    observed, and 0 on any lookup error -- which reads as "not enough sweeps
+    to pay", the safe direction. The accrual uses get_sweep_totals_for_date()
+    instead, since it needs the minimum as well and one read gives it both;
+    this is the standalone count for callers that only want coverage.
+    """
+    totals = get_sweep_totals_for_date(wallet_address, day)
+    return len(totals) if totals else 0
+
+
+def list_wallets_with_sweeps_for_date(day: date) -> list[str]:
+    """Every distinct wallet with at least one completed sweep on that UTC
+    day, lowercased and sorted -- the daily job's work list. Includes a
+    wallet observed holding nothing, which must still be considered so its
+    zero counts toward the day. Empty list on any lookup error."""
+    start, end = _day_bounds(day)
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_SWEEPS_TABLE)
+            .select("wallet_address")
+            .gte("taken_at", start)
+            .lt("taken_at", end)
+            .limit(_ROW_CAP)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        logger.warning(f"wallet_holdings_sweeps wallet list failed for {day.isoformat()}: {e}")
         return []
 
     return sorted({str(row["wallet_address"]).lower() for row in rows if row.get("wallet_address")})

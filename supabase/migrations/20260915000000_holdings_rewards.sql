@@ -1,5 +1,6 @@
 -- Migration: holdings_tokens, wallet_holdings_snapshots,
---            holdings_reward_rates, holdings_reward_accruals
+--            wallet_holdings_sweeps, holdings_reward_rates,
+--            holdings_reward_accruals
 -- (gatewayz-backend holdings rewards -- pay inference credits for HOLDING
 -- top-20 tokens in a wallet the user has proven they control. This is
 -- NON-CUSTODIAL: we never take a deposit, we only read balances, so there
@@ -50,12 +51,14 @@ create unique index if not exists idx_holdings_tokens_chain_contract
 create index if not exists idx_holdings_tokens_enabled
   on public.holdings_tokens (chain_id) where is_enabled;
 
--- 2. Observed balances. One row per (wallet, token, observation); every row
---    written by a single sweep shares one taken_at, which is what makes a
---    "batch" identifiable -- src/db/holdings.py::get_min_usd_for_date sums
---    per batch and then takes the day's MINIMUM, so a wallet is paid on
---    what it held at its thinnest point that day rather than on a
---    flash-funded peak.
+-- 2. Per-token observed balances. One row per (wallet, token, observation);
+--    every row written by a single sweep shares that sweep's taken_at, which
+--    joins it to its wallet_holdings_sweeps row below.
+--
+--    This is DETAIL, not the payout input: a wallet holding nothing produces
+--    no rows here at all, so "no rows" cannot tell an empty wallet apart from
+--    a sweep that never ran. The sweep total in 2b is what the daily job
+--    reads. See the note there.
 create table if not exists public.wallet_holdings_snapshots (
   id bigserial primary key,
   wallet_address text not null,
@@ -69,6 +72,41 @@ create index if not exists idx_whs_wallet_taken_at
   on public.wallet_holdings_snapshots (wallet_address, taken_at);
 create index if not exists idx_whs_taken_at
   on public.wallet_holdings_snapshots (taken_at);
+
+-- 2b. The sweep ledger: one row per wallet per COMPLETED observation sweep,
+--     holding that sweep's total USD value. This is the unit the daily job
+--     reads -- both "how many times did we observe this wallet today" and
+--     "what was the lowest total we saw".
+--
+--     It exists because absence of token rows is ambiguous. A wallet holding
+--     nothing produces no wallet_holdings_snapshots rows at all, which is
+--     indistinguishable from a sweep that never ran -- so an emptied wallet
+--     would be invisible rather than valued at zero, and would never drag the
+--     day's minimum down. That turns the anti-farm rule inside out: fund a
+--     wallet just before two of the four daily sweeps, keep it empty the rest
+--     of the day, and the only readings on record are the funded ones.
+--
+--     So a clean, fully-priced sweep of an empty wallet writes a row here
+--     with usd_total = 0. A sweep we could NOT measure -- an incomplete chain
+--     read, or a held token with no fresh price -- writes nothing at all,
+--     here or in wallet_holdings_snapshots, because "we do not know" must
+--     never be recorded as "they held zero".
+--
+--     wallet_holdings_snapshots stays as the per-token detail behind these
+--     totals: audit and user-facing breakdown, not the payout input.
+create table if not exists public.wallet_holdings_sweeps (
+  id bigserial primary key,
+  wallet_address text not null,
+  taken_at timestamptz not null,
+  usd_total numeric(38,18) not null,
+  created_at timestamptz not null default now(),
+  unique (wallet_address, taken_at)
+);
+
+create index if not exists idx_whsw_wallet_taken_at
+  on public.wallet_holdings_sweeps (wallet_address, taken_at);
+create index if not exists idx_whsw_taken_at
+  on public.wallet_holdings_sweeps (taken_at);
 
 -- 3. The tiered rate table. Same semantics as staking_reward_rates: the
 --    active row with the largest min_usd <= the wallet's USD value wins,
@@ -132,7 +170,9 @@ create index if not exists idx_hra_pending
 comment on table public.holdings_tokens is
   'Registry of top-20 tokens whose balances earn inference credits. contract_address null = the chain native asset. Filled by ops, not by the migration.';
 comment on table public.wallet_holdings_snapshots is
-  'Observed (non-custodial) wallet balances. Rows sharing one taken_at are one sweep; the daily job pays on the minimum batch total for the day.';
+  'Per-token detail behind each sweep -- audit and user-facing breakdown. NOT the payout input: an empty wallet has no rows here, so absence is ambiguous. The daily job reads wallet_holdings_sweeps instead.';
+comment on table public.wallet_holdings_sweeps is
+  'One row per wallet per COMPLETED observation sweep, with that sweep''s total USD value. The daily job pays on the MINIMUM usd_total of the day and refuses a day with too few sweeps. A clean sweep of an empty wallet is a zero row; a sweep we could not measure writes nothing at all.';
 comment on table public.holdings_reward_rates is
   'Tiered credits-per-1000-USD-held-per-day rate table. Largest active min_usd <= the wallet value wins; a min_usd = 0 tier is mandatory.';
 comment on table public.holdings_reward_accruals is
@@ -140,23 +180,28 @@ comment on table public.holdings_reward_accruals is
 
 alter table public.holdings_tokens enable row level security;
 alter table public.wallet_holdings_snapshots enable row level security;
+alter table public.wallet_holdings_sweeps enable row level security;
 alter table public.holdings_reward_rates enable row level security;
 alter table public.holdings_reward_accruals enable row level security;
 
 revoke all on public.holdings_tokens from anon, authenticated;
 revoke all on public.wallet_holdings_snapshots from anon, authenticated;
+revoke all on public.wallet_holdings_sweeps from anon, authenticated;
 revoke all on public.holdings_reward_rates from anon, authenticated;
 revoke all on public.holdings_reward_accruals from anon, authenticated;
 revoke all on sequence public.holdings_tokens_id_seq from anon, authenticated;
 revoke all on sequence public.wallet_holdings_snapshots_id_seq from anon, authenticated;
+revoke all on sequence public.wallet_holdings_sweeps_id_seq from anon, authenticated;
 revoke all on sequence public.holdings_reward_rates_id_seq from anon, authenticated;
 revoke all on sequence public.holdings_reward_accruals_id_seq from anon, authenticated;
 
 grant all on public.holdings_tokens to service_role;
 grant all on public.wallet_holdings_snapshots to service_role;
+grant all on public.wallet_holdings_sweeps to service_role;
 grant all on public.holdings_reward_rates to service_role;
 grant all on public.holdings_reward_accruals to service_role;
 grant all on sequence public.holdings_tokens_id_seq to service_role;
 grant all on sequence public.wallet_holdings_snapshots_id_seq to service_role;
+grant all on sequence public.wallet_holdings_sweeps_id_seq to service_role;
 grant all on sequence public.holdings_reward_rates_id_seq to service_role;
 grant all on sequence public.holdings_reward_accruals_id_seq to service_role;

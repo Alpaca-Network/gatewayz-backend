@@ -26,22 +26,39 @@ read as off rather than missing.
 ### The sweep
 
 For every wallet in `user_wallets` at least `HOLDINGS_MIN_WALLET_AGE_DAYS` old,
-read its balance of every enabled `holdings_tokens` row across six EVM chains,
-price it in USD, and write one `wallet_holdings_snapshots` row per token held.
-Every row of one sweep shares one `taken_at`; that is what identifies a batch.
+read its balance of every enabled `holdings_tokens` row across six EVM chains
+and price it in USD. A fully measured wallet gets:
 
-Two rules exist to avoid recording wrong data, not to save money. **A wallet
-whose chain read was incomplete records nothing, and a wallet holding a token
-with no fresh price records nothing.** In both cases the partial total would be
-smaller than the truth, and under the lowest-of-day rule below a smaller total
-silently underpays the holder. A token the wallet holds zero of blocks nothing.
-Skips are logged with a reason and counted in the run summary.
+- exactly one `wallet_holdings_sweeps` row, that sweep's total USD value,
+  **written even when the total is zero**; and
+- one `wallet_holdings_snapshots` row per token actually held, the per-token
+  detail behind that total.
+
+All rows of one sweep share one `taken_at`, which joins the detail to its sweep.
+
+**The zero row is load-bearing.** An empty wallet produces no per-token rows, so
+if the sweep were inferred from those rows, a wallet emptied between sweeps
+would leave no trace rather than being valued at zero. The day's minimum would
+then be taken across only the sweeps in which it happened to be funded: fund a
+wallet just before two of four daily sweeps, empty it the rest of the day, and
+it gets paid as though it held that balance all day. Recording the zero is what
+makes "paid on the lowest value seen that day" true. `wallet_holdings_snapshots`
+is audit and user-facing detail only; the payout never reads it.
+
+Two rules exist to avoid recording wrong data, not to save money, and both
+suppress the sweep row as well as the detail. **A wallet whose chain read was
+incomplete records nothing, and a wallet holding a token with no fresh price
+records nothing.** These are cases where we do not know the total, and "we could
+not measure it" must never be written down as "they held zero" — an RPC outage
+would otherwise zero out every holder's day. A token the wallet holds zero of
+blocks nothing. Skips are logged with a reason and counted in the run summary.
 
 ### The accrual
 
 For each wallet observed on the reward date:
 
-1. The day must have at least `HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY` distinct sweeps
+1. The day must have at least `HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY` completed
+   sweeps in `wallet_holdings_sweeps`
    (default 2, clamped to `HOLDINGS_SNAPSHOTS_PER_DAY`). "Lowest of the day"
    only resists farming when the day has several readings; with one recorded
    sweep the minimum is just that moment, which is the hole the rule exists to
@@ -50,8 +67,9 @@ For each wallet observed on the reward date:
    is a real case. Fewer than the required number and the day is skipped as
    `too_few_batches` — underpaying nobody is fine, paying on one farmable
    reading is not.
-2. basis = the day's **lowest** batch total. Not an average, not the latest.
-   A wallet funded for ten minutes is worth its empty total.
+2. basis = the day's **lowest** sweep total, zero rows included. Not an
+   average, not the latest. A wallet funded for ten minutes is worth its empty
+   total.
 3. credits = basis / 1000 x the matching tier's `credits_per_1k_usd_per_day`,
    rounded down at 6 dp.
 4. Cap at `HOLDINGS_DAILY_CAP_CREDITS`, **per account** — an account's other
@@ -94,7 +112,8 @@ count because it is the ceiling operators watch directly, and a
 whole-run no-op reports `{"skipped": "disabled"}` instead of the dict.
 
 The sweep's own summary is broken out the same way: `too_new`, `unknown_age`,
-`incomplete_read`, `missing_price`, `error`. A rise in `incomplete_read` or
+`incomplete_read`, `missing_price`, `sweep_write_failed`, `error`, alongside
+`sweeps_recorded`. A rise in `incomplete_read` or
 `missing_price` there shows up as a rise in `too_few_batches` here a day later.
 
 ## API

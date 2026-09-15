@@ -63,8 +63,28 @@ def _price(value: str) -> PricePoint:
     return PricePoint(price=Decimal(value), as_of=NOW)
 
 
+class SweepRecorder:
+    """Captures record_sweep() calls -- one per fully measured wallet-sweep,
+    zero total included."""
+
+    def __init__(self):
+        self.rows: list[dict] = []
+        self.fail = False
+
+    def __call__(self, wallet_address, taken_at, usd_total):
+        if self.fail:
+            return None
+        row = {
+            "wallet_address": wallet_address,
+            "taken_at": taken_at,
+            "usd_total": usd_total,
+        }
+        self.rows.append(row)
+        return dict(row, id=len(self.rows))
+
+
 class Recorder:
-    """Captures record_snapshot() calls."""
+    """Captures record_snapshot() calls (the per-token detail)."""
 
     def __init__(self):
         self.rows: list[dict] = []
@@ -96,6 +116,7 @@ def wired(monkeypatch):
             }
             self.balances: dict[str, BalanceReadResult] = {}
             self.recorder = Recorder()
+            self.sweeps = SweepRecorder()
             self.enabled = True
 
     w = Wiring()
@@ -106,6 +127,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(snapshots, "list_all_wallets", lambda: list(w.wallets))
     monkeypatch.setattr(snapshots, "get_usd_prices", lambda ids: dict(w.prices))
     monkeypatch.setattr(snapshots, "record_snapshot", w.recorder)
+    monkeypatch.setattr(snapshots, "record_sweep", w.sweeps)
 
     def fake_read(address, tokens):
         result = w.balances.get(address.lower())
@@ -215,13 +237,19 @@ class TestHappyPath:
         snapshots.run_holdings_snapshots_once(now=NOW)
         assert [r["token_id"] for r in wired.recorder.rows] == [2]
 
-    def test_wallet_holding_nothing_records_nothing(self, wired):
+    def test_wallet_holding_nothing_records_a_zero_sweep_and_no_token_rows(self, wired):
+        """An empty wallet must still leave a trace. Per-token rows cannot
+        carry it -- there are none -- so the sweep row does, with a total of
+        zero, which is what drags the day's minimum down for a wallet that
+        was emptied between sweeps."""
         wired.balances[WALLET] = BalanceReadResult(
             readings=[_reading(WETH_ROW, 0), _reading(USDC_ROW, 0)], failures=[]
         )
         result = snapshots.run_holdings_snapshots_once(now=NOW)
         assert wired.recorder.rows == []
+        assert [r["usd_total"] for r in wired.sweeps.rows] == [Decimal(0)]
         assert result["wallets_empty"] == 1
+        assert result["sweeps_recorded"] == 1
         assert result["wallets_recorded"] == 0
 
     def test_prices_are_fetched_once_for_the_whole_sweep(self, wired, monkeypatch):
@@ -340,3 +368,75 @@ class TestTokenRefsFromRows:
     def test_malformed_row_is_dropped_not_fatal(self):
         refs = snapshots.token_refs_from_rows([{"id": 9, "symbol": "BROKEN"}, USDC_ROW])
         assert [r.symbol for r in refs] == ["USDC"]
+
+
+class TestSweepRows:
+    """One sweep row per fully measured wallet-sweep. It is the unit the
+    payout reads, so what it does and does not record is the anti-farm rule."""
+
+    def test_a_funded_sweep_records_the_total_alongside_the_token_rows(self, wired):
+        wired.balances[WALLET] = BalanceReadResult(
+            readings=[
+                _reading(WETH_ROW, 2 * 10**18),  # $4000
+                _reading(USDC_ROW, 250_000_000),  # $250
+            ],
+            failures=[],
+        )
+        result = snapshots.run_holdings_snapshots_once(now=NOW)
+        assert [r["usd_total"] for r in wired.sweeps.rows] == [Decimal("4250")]
+        assert result["sweeps_recorded"] == 1
+        assert result["rows_recorded"] == 2
+
+    def test_the_sweep_row_shares_taken_at_with_its_token_rows(self, wired):
+        wired.balances[WALLET] = BalanceReadResult(
+            readings=[_reading(USDC_ROW, 1_000_000)], failures=[]
+        )
+        snapshots.run_holdings_snapshots_once(now=NOW)
+        assert {r["taken_at"] for r in wired.sweeps.rows} == {
+            r["taken_at"] for r in wired.recorder.rows
+        }
+
+    def test_an_incomplete_read_records_no_sweep_row(self, wired):
+        """ "We could not measure it" must never be written down as "they
+        held zero" -- an RPC outage would otherwise zero out every holder."""
+        wired.balances[WALLET] = BalanceReadResult(
+            readings=[_reading(USDC_ROW, 250_000_000)],
+            failures=[ChainReadFailure(chain_id=8453, reason="timeout")],
+        )
+        result = snapshots.run_holdings_snapshots_once(now=NOW)
+        assert wired.sweeps.rows == []
+        assert result["sweeps_recorded"] == 0
+
+    def test_a_held_token_without_a_price_records_no_sweep_row(self, wired):
+        wired.prices = {"usd-coin": _price("1")}
+        wired.balances[WALLET] = BalanceReadResult(
+            readings=[_reading(WETH_ROW, 2 * 10**18), _reading(USDC_ROW, 250_000_000)],
+            failures=[],
+        )
+        result = snapshots.run_holdings_snapshots_once(now=NOW)
+        assert wired.sweeps.rows == []
+        assert result["sweeps_recorded"] == 0
+
+    def test_a_failed_sweep_write_suppresses_the_token_rows_too(self, wired):
+        """Detail must never outlive the sweep it belongs to, or the audit
+        trail shows holdings for a moment the payout cannot see."""
+        wired.sweeps.fail = True
+        wired.balances[WALLET] = BalanceReadResult(
+            readings=[_reading(USDC_ROW, 250_000_000)], failures=[]
+        )
+        result = snapshots.run_holdings_snapshots_once(now=NOW)
+        assert wired.recorder.rows == []
+        assert result["skipped"]["sweep_write_failed"] == 1
+        assert result["rows_recorded"] == 0
+
+    def test_every_wallet_in_one_sweep_gets_its_own_row(self, wired):
+        wired.wallets = [_wallet_row(WALLET), _wallet_row(OTHER_WALLET)]
+        wired.balances[WALLET] = BalanceReadResult(
+            readings=[_reading(USDC_ROW, 1_000_000)], failures=[]
+        )
+        wired.balances[OTHER_WALLET] = BalanceReadResult(
+            readings=[_reading(USDC_ROW, 0)], failures=[]
+        )
+        result = snapshots.run_holdings_snapshots_once(now=NOW)
+        assert len(wired.sweeps.rows) == 2
+        assert result["sweeps_recorded"] == 2

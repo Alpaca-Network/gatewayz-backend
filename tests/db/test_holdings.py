@@ -12,14 +12,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.db.holdings import (
-    count_snapshot_batches_for_date,
     create_holdings_accrual,
     create_token,
     get_latest_snapshot_usd,
     get_active_holdings_rates,
     get_holdings_accrual,
+    count_sweeps_for_date,
     get_min_usd_for_date,
-    get_snapshot_batch_totals,
+    get_sweep_totals_for_date,
     list_all_tokens,
     list_enabled_tokens,
     list_holdings_accruals_for_wallet,
@@ -28,7 +28,9 @@ from src.db.holdings import (
     list_pending_holdings_accruals_since,
     list_wallets_with_snapshots_for_date,
     mark_holdings_accrual_paid,
+    list_wallets_with_sweeps_for_date,
     record_snapshot,
+    record_sweep,
     replace_active_holdings_rates,
     select_holdings_rate,
     update_token,
@@ -508,65 +510,97 @@ class TestReplaceActiveHoldingsRates:
             )
 
 
-class TestGetSnapshotBatchTotals:
-    def test_sums_within_a_sweep_and_never_across_sweeps(self, sb):
-        rows = [
-            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "100"},
-            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "50"},
-            {"taken_at": "2026-09-14T06:00:00+00:00", "usd_value": "70"},
-        ]
-        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+class TestRecordSweep:
+    def test_inserts_one_row_with_the_total_as_a_string(self, sb):
+        created = {"id": 3}
+        client = _mock_table_client({"wallet_holdings_sweeps": [created]})
+        taken_at = datetime(2026, 9, 14, 6, 5, tzinfo=UTC)
         with patch("src.db.holdings.get_supabase_client", return_value=client):
-            totals = get_snapshot_batch_totals("0xABC", date(2026, 9, 14))
+            assert record_sweep("0xABC", taken_at, Decimal("4250.5")) == created
+        payload = client.table("wallet_holdings_sweeps").insert.call_args.args[0]
+        assert payload["wallet_address"] == "0xabc"
+        assert payload["usd_total"] == "4250.5"
+        assert payload["taken_at"] == taken_at.isoformat()
+
+    def test_a_zero_total_is_a_real_row_not_a_skip(self, sb):
+        """The zero row is the whole point -- it is what makes an emptied
+        wallet visible to the day's minimum."""
+        client = _mock_table_client({"wallet_holdings_sweeps": [{"id": 4}]})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert record_sweep("0xabc", datetime.now(UTC), Decimal(0)) is not None
+        assert client.table("wallet_holdings_sweeps").insert.call_args.args[0]["usd_total"] == "0"
+
+    def test_returns_none_on_conflict_or_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert record_sweep("0xabc", datetime.now(UTC), Decimal(1)) is None
+
+
+class TestGetSweepTotalsForDate:
+    def test_returns_one_entry_per_sweep(self, sb):
+        rows = [
+            {"taken_at": "2026-09-14T00:05:00+00:00", "usd_total": "1000"},
+            {"taken_at": "2026-09-14T06:05:00+00:00", "usd_total": "0"},
+        ]
+        client = _mock_table_client({"wallet_holdings_sweeps": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            totals = get_sweep_totals_for_date("0xABC", date(2026, 9, 14))
         assert totals == {
-            "2026-09-14T00:00:00+00:00": Decimal("150"),
-            "2026-09-14T06:00:00+00:00": Decimal("70"),
+            "2026-09-14T00:05:00+00:00": Decimal("1000"),
+            "2026-09-14T06:05:00+00:00": Decimal("0"),
         }
+        assert min(totals.values()) == Decimal(0)
 
-    def test_the_count_of_sweeps_is_recoverable(self, sb):
-        """The daily job needs how MANY sweeps a day had, not just the
-        minimum -- one sweep makes "lowest of the day" meaningless."""
-        rows = [
-            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "100"},
-            {"taken_at": "2026-09-14T06:00:00+00:00", "usd_value": "100"},
-            {"taken_at": "2026-09-14T12:00:00+00:00", "usd_value": "100"},
-        ]
-        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+    def test_bounds_the_read_to_that_utc_day(self, sb):
+        client = _mock_table_client({"wallet_holdings_sweeps": []})
         with patch("src.db.holdings.get_supabase_client", return_value=client):
-            assert len(get_snapshot_batch_totals("0xabc", date(2026, 9, 14))) == 3
+            get_sweep_totals_for_date("0xabc", date(2026, 9, 14))
+        query = client.table("wallet_holdings_sweeps")
+        assert query.gte.call_args.args == ("taken_at", "2026-09-14T00:00:00+00:00")
+        assert query.lt.call_args.args == ("taken_at", "2026-09-15T00:00:00+00:00")
 
-    def test_day_with_no_snapshots_is_none(self, sb):
-        client = _mock_table_client({"wallet_holdings_snapshots": []})
+    def test_no_sweeps_is_none(self, sb):
+        client = _mock_table_client({"wallet_holdings_sweeps": []})
         with patch("src.db.holdings.get_supabase_client", return_value=client):
-            assert get_snapshot_batch_totals("0xabc", date(2026, 9, 14)) is None
+            assert get_sweep_totals_for_date("0xabc", date(2026, 9, 14)) is None
 
-    def test_unparseable_value_returns_none_rather_than_a_wrong_total(self, sb):
-        rows = [{"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "nope"}]
-        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+    def test_unparseable_total_returns_none_rather_than_a_wrong_basis(self, sb):
+        rows = [{"taken_at": "2026-09-14T00:05:00+00:00", "usd_total": "nope"}]
+        client = _mock_table_client({"wallet_holdings_sweeps": rows})
         with patch("src.db.holdings.get_supabase_client", return_value=client):
-            assert get_snapshot_batch_totals("0xabc", date(2026, 9, 14)) is None
+            assert get_sweep_totals_for_date("0xabc", date(2026, 9, 14)) is None
 
     def test_returns_none_on_error(self, sb):
         with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
-            assert get_snapshot_batch_totals("0xabc", date(2026, 9, 14)) is None
+            assert get_sweep_totals_for_date("0xabc", date(2026, 9, 14)) is None
 
 
-class TestCountSnapshotBatchesForDate:
-    def test_counts_distinct_sweeps_not_rows(self, sb):
+class TestCountSweepsForDate:
+    def test_counts_completed_sweeps_including_empty_ones(self, sb):
         rows = [
-            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "100"},
-            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "50"},
-            {"taken_at": "2026-09-14T06:00:00+00:00", "usd_value": "70"},
+            {"taken_at": "2026-09-14T00:05:00+00:00", "usd_total": "1000"},
+            {"taken_at": "2026-09-14T06:05:00+00:00", "usd_total": "0"},
+            {"taken_at": "2026-09-14T12:05:00+00:00", "usd_total": "0"},
         ]
-        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+        client = _mock_table_client({"wallet_holdings_sweeps": rows})
         with patch("src.db.holdings.get_supabase_client", return_value=client):
-            assert count_snapshot_batches_for_date("0xABC", date(2026, 9, 14)) == 2
-
-    def test_nothing_observed_is_zero(self, sb):
-        client = _mock_table_client({"wallet_holdings_snapshots": []})
-        with patch("src.db.holdings.get_supabase_client", return_value=client):
-            assert count_snapshot_batches_for_date("0xabc", date(2026, 9, 14)) == 0
+            assert count_sweeps_for_date("0xabc", date(2026, 9, 14)) == 3
 
     def test_lookup_error_is_zero_which_reads_as_too_few_to_pay(self, sb):
         with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
-            assert count_snapshot_batches_for_date("0xabc", date(2026, 9, 14)) == 0
+            assert count_sweeps_for_date("0xabc", date(2026, 9, 14)) == 0
+
+
+class TestListWalletsWithSweepsForDate:
+    def test_returns_sorted_lowercased_distinct_addresses(self, sb):
+        rows = [
+            {"wallet_address": "0xBBB"},
+            {"wallet_address": "0xaaa"},
+            {"wallet_address": "0xaaa"},
+        ]
+        client = _mock_table_client({"wallet_holdings_sweeps": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert list_wallets_with_sweeps_for_date(date(2026, 9, 14)) == ["0xaaa", "0xbbb"]
+
+    def test_returns_empty_on_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert list_wallets_with_sweeps_for_date(date(2026, 9, 14)) == []

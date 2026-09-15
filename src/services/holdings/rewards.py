@@ -11,14 +11,21 @@ insert-pending-then-pay order, the same two independent idempotency guards
 never the latest sweep. That is the whole anti-farm rule: a wallet funded
 for ten minutes and emptied again is worth its empty total, not its peak.
 
-That rule only bites if the day actually has several readings. The
-observation sweep drops a wallet's whole batch on an incomplete chain read
-or a held token with no fresh price, so a wallet can legitimately end a day
-with one recorded sweep -- and then "lowest of the day" degenerates into
-"that one moment", which is the hole the rule exists to close. So a day
-with fewer than `HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY` distinct sweeps is skipped
-outright. Underpaying nobody is acceptable here; paying on a single
-farmable reading is not.
+"Seen" means a completed sweep in `wallet_holdings_sweeps`, NOT the presence
+of per-token rows. A wallet holding nothing has no per-token rows, so
+inferring sweeps from them would make an emptied wallet invisible instead of
+worth zero -- and funding a wallet just before two of four daily sweeps
+would buy a full day of credits. The sweep ledger has a real zero row for
+those moments, and that zero is what the minimum picks up.
+
+The rule only bites if the day actually has several readings. The sweep
+records nothing at all when it could not measure a wallet -- an incomplete
+chain read, or a held token with no fresh price -- so a wallet can
+legitimately end a day with one recorded sweep, and then "lowest of the day"
+degenerates into "that one moment". So a day with fewer than
+`HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY` completed sweeps is skipped outright.
+Underpaying nobody is acceptable here; paying on a single farmable reading
+is not.
 
 Two ceilings apply, in this order:
 
@@ -59,10 +66,10 @@ from src.db.holdings import (
     create_holdings_accrual,
     get_active_holdings_rates,
     get_holdings_accrual,
-    get_snapshot_batch_totals,
+    get_sweep_totals_for_date,
     list_pending_holdings_accruals,
     list_pending_holdings_accruals_since,
-    list_wallets_with_snapshots_for_date,
+    list_wallets_with_sweeps_for_date,
     mark_holdings_accrual_paid,
     select_holdings_rate,
 )
@@ -245,7 +252,7 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
     effective_date = reward_date or (_today() - timedelta(days=1))
     reward_date_str = effective_date.isoformat()
 
-    wallets = list_wallets_with_snapshots_for_date(effective_date)
+    wallets = list_wallets_with_sweeps_for_date(effective_date)
     if not wallets:
         raise HoldingsSnapshotsMissingError(f"no observed balances for {reward_date_str}")
 
@@ -287,12 +294,12 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
                 credits_paid += paid
                 continue
 
-            batches = get_snapshot_batch_totals(address, effective_date)
-            if not batches:
+            sweeps = get_sweep_totals_for_date(address, effective_date)
+            if not sweeps:
                 skipped["no_snapshots"] += 1
                 continue
 
-            if len(batches) < required_batches:
+            if len(sweeps) < required_batches:
                 # "Lowest of the day" is only an anti-farm rule when the day
                 # has several readings. With fewer, the minimum is just one
                 # moment -- which is exactly what the rule exists to defeat,
@@ -302,12 +309,12 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
                     "holdings_rewards: skipping %s for %s -- %s observed sweep(s), %s required",
                     address,
                     reward_date_str,
-                    len(batches),
+                    len(sweeps),
                     required_batches,
                 )
                 continue
 
-            basis = min(batches.values())
+            basis = min(sweeps.values())
 
             rate = select_holdings_rate(rates, basis)
             if rate is None:

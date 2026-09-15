@@ -38,8 +38,9 @@ class FakeHoldingsDB:
             {"id": 1, "min_usd": "0", "credits_per_1k_usd_per_day": "1.000000"},
             {"id": 2, "min_usd": "1000", "credits_per_1k_usd_per_day": "2.000000"},
         ]
-        # (wallet, day) -> {taken_at: batch total}. Several batches per day
-        # is the normal case; one batch is the farmable case the job refuses.
+        # (wallet, day) -> {taken_at: sweep total}. These stand in for
+        # wallet_holdings_sweeps rows: several sweeps a day is the normal
+        # case, one sweep is the farmable case the job refuses.
         self.batches: dict[tuple[str, str], dict[str, Decimal] | None] = {}
         self.accruals: dict[tuple[str, str], dict] = {}
         self._next_id = 1
@@ -51,12 +52,12 @@ class FakeHoldingsDB:
     def get_active_holdings_rates(self):
         return list(self.rates)
 
-    def list_wallets_with_snapshots_for_date(self, day):
+    def list_wallets_with_sweeps_for_date(self, day):
         return sorted(
             {w for (w, d) in self.batches if d == day.isoformat()},
         )
 
-    def get_snapshot_batch_totals(self, wallet_address, day):
+    def get_sweep_totals_for_date(self, wallet_address, day):
         return self.batches.get((wallet_address.lower(), day.isoformat()))
 
     def get_holdings_accrual(self, wallet_address, reward_date):
@@ -121,7 +122,8 @@ class FakeHoldingsDB:
         self.linked[address.lower()] = {"wallet_address": address.lower(), "user_id": user_id}
 
     def observe(self, address, usd, day=DAY, batches=2):
-        """Record `batches` sweeps for the day whose LOWEST total is `usd`.
+        """Record `batches` completed sweeps for the day whose LOWEST total
+        is `usd`.
 
         The extra sweeps are worth more, so the minimum is unambiguously the
         one asserted on -- a test that passes because every sweep is equal
@@ -150,8 +152,8 @@ def db(monkeypatch):
     )
     for name in (
         "get_active_holdings_rates",
-        "list_wallets_with_snapshots_for_date",
-        "get_snapshot_batch_totals",
+        "list_wallets_with_sweeps_for_date",
+        "get_sweep_totals_for_date",
         "get_holdings_accrual",
         "create_holdings_accrual",
         "mark_holdings_accrual_paid",
@@ -409,14 +411,14 @@ class TestPayoutAndIdempotency:
         db.link(W1, 7)
         db.link(W2, 8)
 
-        real_basis = db.get_snapshot_batch_totals
+        real_basis = db.get_sweep_totals_for_date
 
         def exploding_basis(wallet_address, day):
             if wallet_address.lower() == W1:
                 raise RuntimeError("boom")
             return real_basis(wallet_address, day)
 
-        monkeypatch.setattr(rewards, "get_snapshot_batch_totals", exploding_basis)
+        monkeypatch.setattr(rewards, "get_sweep_totals_for_date", exploding_basis)
         result = rewards.run_holdings_rewards_once(DAY)
         assert result["errors"] == 1
         assert result["paid"] == 1
