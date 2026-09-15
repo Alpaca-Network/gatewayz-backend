@@ -12,12 +12,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.db.holdings import (
+    count_sweeps_for_date,
     create_holdings_accrual,
     create_token,
-    get_latest_snapshot_usd,
     get_active_holdings_rates,
     get_holdings_accrual,
-    count_sweeps_for_date,
+    get_latest_snapshot_usd,
     get_min_usd_for_date,
     get_sweep_totals_for_date,
     list_all_tokens,
@@ -27,8 +27,8 @@ from src.db.holdings import (
     list_pending_holdings_accruals,
     list_pending_holdings_accruals_since,
     list_wallets_with_snapshots_for_date,
-    mark_holdings_accrual_paid,
     list_wallets_with_sweeps_for_date,
+    mark_holdings_accrual_paid,
     record_snapshot,
     record_sweep,
     replace_active_holdings_rates,

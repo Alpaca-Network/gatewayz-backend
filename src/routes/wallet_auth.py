@@ -38,11 +38,7 @@ from src.schemas import AuthMethod, PrivyAuthRequest, PrivyAuthResponse, PrivyUs
 from src.security.deps import get_user_id
 from src.security.siwe import SIWE_MESSAGE_TTL_SECONDS, build_siwe_message
 from src.security.wallet_signature import recover_wallet_address
-from src.services.auth_rate_limiting import (
-    AuthRateLimitType,
-    check_auth_rate_limit,
-    get_client_ip,
-)
+from src.services.auth_rate_limiting import AuthRateLimitType, check_auth_rate_limit, get_client_ip
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.services.payment_gate import resolve_key_environment
 from src.utils.wallet_address import normalize_wallet_address

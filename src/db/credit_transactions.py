@@ -8,10 +8,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from src.config.supabase_config import (
-    execute_with_retry,
-    get_supabase_client,
-)
+from src.config.supabase_config import execute_with_retry, get_supabase_client
 from src.utils.sentry_context import capture_database_error
 
 logger = logging.getLogger(__name__)
