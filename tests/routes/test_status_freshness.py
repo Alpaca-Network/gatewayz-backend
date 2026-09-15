@@ -99,12 +99,36 @@ class _PgError(Exception):
     code = "42P01"
 
 
+class _PostgrestApiError(Exception):
+    """Shaped like postgrest.exceptions.APIError: str() is the dict repr."""
+
+    def __init__(self, payload: dict):
+        super().__init__(str(payload))
+        self.code = payload.get("code")
+        self.message = payload.get("message")
+
+
+# Verbatim from postgrest APIError for a table that does not exist. The first
+# implementation guessed at "42P01"/"does not exist" and missed this, so
+# /status/uptime kept 500ing.
+REAL_MISSING_TABLE_ERROR = _PostgrestApiError(
+    {
+        "code": "PGRST205",
+        "details": None,
+        "hint": None,
+        "message": "Could not find the table 'public.model_health_aggregates' in the schema cache",
+    }
+)
+
+
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
+        (REAL_MISSING_TABLE_ERROR, True),
         (_PgError("relation does not exist"), True),
         (Exception('relation "model_health_aggregates" does not exist'), True),
         (Exception("connection reset by peer"), False),
+        (Exception("timed out"), False),
     ],
 )
 def test_missing_table_detection(error, expected):
