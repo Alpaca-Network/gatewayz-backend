@@ -296,8 +296,22 @@ def _pay_pending_staking_rewards(address: str, user_id: int) -> None:
         logger.warning("staking_rewards.pay_pending_for_wallet failed for %s: %s", address, e)
 
 
+def _pay_pending_holdings_rewards(address: str, user_id: int) -> None:
+    """A wallet just got linked -- pay any holdings rewards that accrued
+    while it was unlinked (src/services/holdings/rewards.py). Lazy import +
+    never raises, same convention as the helper above: a signup/link
+    request must never fail because of a rewards side effect."""
+    try:
+        from src.services.holdings.rewards import pay_pending_holdings_for_wallet
+
+        pay_pending_holdings_for_wallet(address, user_id)
+    except Exception as e:
+        logger.warning("holdings.pay_pending_holdings_for_wallet failed for %s: %s", address, e)
+
+
 def _wallet_signup_new_user(
-    address: str, background_tasks: BackgroundTasks  # noqa: ARG001 -- kept for signature symmetry
+    address: str,
+    background_tasks: BackgroundTasks,  # noqa: ARG001 -- kept for signature symmetry
 ) -> PrivyAuthResponse:
     client = supabase_config.get_supabase_client()
     username = _generate_unique_username(client, f"wallet_{address[2:8]}")
@@ -350,6 +364,7 @@ def _wallet_signup_new_user(
         )
     else:
         _pay_pending_staking_rewards(address, user_id)
+        _pay_pending_holdings_rewards(address, user_id)
 
     return PrivyAuthResponse(
         success=True,
@@ -461,6 +476,7 @@ async def wallet_link(
         raise HTTPException(status_code=500, detail="wallet_link_failed")
 
     _pay_pending_staking_rewards(body.wallet_address, user_id)
+    _pay_pending_holdings_rewards(body.wallet_address, user_id)
     return {"success": True, "data": {"wallet": _wallet_view(wallet_row)}}
 
 

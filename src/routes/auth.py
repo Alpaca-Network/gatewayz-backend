@@ -179,6 +179,19 @@ def _pay_pending_staking_rewards(address: str, user_id: int) -> None:
         logger.warning("staking_rewards.pay_pending_for_wallet failed for %s: %s", address, e)
 
 
+def _pay_pending_holdings_rewards(address: str, user_id: int) -> None:
+    """A wallet just got linked -- pay any holdings rewards that accrued
+    while it was unlinked (src/services/holdings/rewards.py). Lazy import +
+    never raises, same convention as the helper above: a signup/link
+    request must never fail because of a rewards side effect."""
+    try:
+        from src.services.holdings.rewards import pay_pending_holdings_for_wallet
+
+        pay_pending_holdings_for_wallet(address, user_id)
+    except Exception as e:
+        logger.warning("holdings.pay_pending_holdings_for_wallet failed for %s: %s", address, e)
+
+
 def _ingest_privy_wallets(user_id: int, linked_accounts: list, verified: bool) -> int:
     """Upsert verified Privy wallet linked-accounts into user_wallets
     (gatewayz-backend#2251).
@@ -238,6 +251,7 @@ def _ingest_privy_wallets(user_id: int, linked_accounts: list, verified: bool) -
                 has_wallet = True
                 linked_count += 1
                 _pay_pending_staking_rewards(address, user_id)
+                _pay_pending_holdings_rewards(address, user_id)
     except Exception as e:
         logger.warning("privy_auth.wallet_ingest_failed user_id=%s: %s", user_id, e)
 

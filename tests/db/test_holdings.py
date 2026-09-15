@@ -13,16 +13,23 @@ import pytest
 
 from src.db.holdings import (
     create_holdings_accrual,
+    create_token,
+    get_latest_snapshot_usd,
     get_active_holdings_rates,
     get_holdings_accrual,
     get_min_usd_for_date,
+    list_all_tokens,
     list_enabled_tokens,
+    list_holdings_accruals_for_wallet,
+    list_holdings_accruals_since,
     list_pending_holdings_accruals,
     list_pending_holdings_accruals_since,
     list_wallets_with_snapshots_for_date,
     mark_holdings_accrual_paid,
     record_snapshot,
+    replace_active_holdings_rates,
     select_holdings_rate,
+    update_token,
 )
 
 
@@ -361,3 +368,139 @@ class TestListPendingHoldingsAccrualsSince:
     def test_returns_empty_on_error(self, sb):
         with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
             assert list_pending_holdings_accruals_since(date(2026, 8, 15)) == []
+
+
+class TestListAllTokens:
+    def test_returns_disabled_rows_too(self, sb):
+        rows = [{"id": 1, "symbol": "WETH", "is_enabled": False}]
+        client = _mock_table_client({"holdings_tokens": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert list_all_tokens() == rows
+        assert client.table("holdings_tokens").eq.call_count == 0
+
+    def test_returns_empty_on_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert list_all_tokens() == []
+
+
+class TestCreateToken:
+    def test_lowercases_the_contract_address(self, sb):
+        created = {"id": 4}
+        client = _mock_table_client({"holdings_tokens": [created]})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert create_token(1, "0xAbCd", "WETH", 18, "weth") == created
+        payload = client.table("holdings_tokens").insert.call_args.args[0]
+        assert payload["contract_address"] == "0xabcd"
+        assert payload["is_enabled"] is True
+
+    def test_native_asset_keeps_a_null_contract(self, sb):
+        client = _mock_table_client({"holdings_tokens": [{"id": 5}]})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            create_token(1, None, "ETH", 18, "ethereum")
+        assert client.table("holdings_tokens").insert.call_args.args[0]["contract_address"] is None
+
+    def test_returns_none_on_conflict_or_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert create_token(1, None, "ETH", 18, "ethereum") is None
+
+
+class TestUpdateToken:
+    def test_writes_only_the_supplied_fields(self, sb):
+        client = _mock_table_client({"holdings_tokens": [{"id": 4, "is_enabled": False}]})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert update_token(4, {"is_enabled": False})["is_enabled"] is False
+        assert client.table("holdings_tokens").update.call_args.args[0] == {"is_enabled": False}
+
+    def test_empty_patch_is_rejected_without_a_round_trip(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert update_token(4, {}) is None
+
+    def test_returns_none_on_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert update_token(4, {"is_enabled": True}) is None
+
+
+class TestGetLatestSnapshotUsd:
+    def test_sums_only_the_newest_sweep(self, sb):
+        rows = [
+            {"taken_at": "2026-09-15T12:00:00+00:00", "usd_value": "100"},
+            {"taken_at": "2026-09-15T12:00:00+00:00", "usd_value": "50"},
+            {"taken_at": "2026-09-15T06:00:00+00:00", "usd_value": "999"},
+        ]
+        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert get_latest_snapshot_usd("0xABC") == Decimal("150")
+
+    def test_never_observed_returns_none(self, sb):
+        client = _mock_table_client({"wallet_holdings_snapshots": []})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert get_latest_snapshot_usd("0xabc") is None
+
+    def test_unparseable_value_returns_none_rather_than_a_wrong_total(self, sb):
+        rows = [{"taken_at": "2026-09-15T12:00:00+00:00", "usd_value": "not-a-number"}]
+        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert get_latest_snapshot_usd("0xabc") is None
+
+    def test_returns_none_on_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert get_latest_snapshot_usd("0xabc") is None
+
+
+class TestAccrualListings:
+    def test_wallet_history_is_newest_first(self, sb):
+        rows = [{"id": 1, "reward_date": "2026-09-14"}]
+        client = _mock_table_client({"holdings_reward_accruals": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert list_holdings_accruals_for_wallet("0xABC", limit=5) == rows
+        query = client.table("holdings_reward_accruals")
+        assert query.order.call_args.kwargs == {"desc": True}
+        assert query.limit.call_args.args == (5,)
+
+    def test_wallet_history_returns_empty_on_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert list_holdings_accruals_for_wallet("0xabc") == []
+
+    def test_summary_listing_filters_on_the_floor_date(self, sb):
+        client = _mock_table_client({"holdings_reward_accruals": []})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            list_holdings_accruals_since(date(2026, 8, 15))
+        assert client.table("holdings_reward_accruals").gte.call_args.args == (
+            "reward_date",
+            "2026-08-15",
+        )
+
+    def test_summary_listing_returns_empty_on_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert list_holdings_accruals_since("2026-08-15") == []
+
+
+class TestReplaceActiveHoldingsRates:
+    def test_deactivates_the_old_set_then_inserts_the_new_one(self, sb):
+        new_rows = [{"id": 9, "min_usd": "0"}]
+        client = _mock_table_client({"holdings_reward_rates": new_rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert (
+                replace_active_holdings_rates(
+                    [{"min_usd": 0, "credits_per_1k_usd_per_day": 1.5, "note": "n"}]
+                )
+                == new_rows
+            )
+        query = client.table("holdings_reward_rates")
+        assert query.update.call_args.args[0] == {"is_active": False}
+        inserted = query.insert.call_args.args[0]
+        assert inserted == [
+            {
+                "min_usd": "0",
+                "credits_per_1k_usd_per_day": "1.5",
+                "note": "n",
+                "is_active": True,
+            }
+        ]
+
+    def test_returns_none_on_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert (
+                replace_active_holdings_rates([{"min_usd": 0, "credits_per_1k_usd_per_day": 1}])
+                is None
+            )

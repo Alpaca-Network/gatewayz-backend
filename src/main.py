@@ -402,9 +402,7 @@ def create_app() -> FastAPI:
     # Write to file for debugging in CI (development/CI only)
     if not Config.IS_PRODUCTION:
         try:
-            with open(
-                "/tmp/route_loading_debug.txt", "w"
-            ) as f:  # nosec B108 - CI debug file, gated behind IS_PRODUCTION
+            with open("/tmp/route_loading_debug.txt", "w") as f:  # nosec B108 - CI debug file, gated behind IS_PRODUCTION
                 f.write("Starting route loading...\n")
                 f.flush()
         except Exception as e:
@@ -500,6 +498,10 @@ def create_app() -> FastAPI:
             "admin_staking",
             "Admin Staking Rewards",
         ),  # Reward-rate control + manual runs (gatewayz-backend staking rewards)
+        (
+            "holdings",
+            "Holdings Rewards",
+        ),  # Credits for tokens held in a proven wallet + admin rate/registry control
         (
             "wallet_auth",
             "Wallet Auth",

@@ -36,6 +36,11 @@ _ACCRUALS_TABLE = "holdings_reward_accruals"
 # far under this.
 _ROW_CAP = 10000
 
+# Rows read back when resolving a wallet's most recent sweep. One sweep is
+# (enabled tokens) rows, so this covers many sweeps' worth of history and
+# still bounds the read.
+_LATEST_SWEEP_ROW_CAP = 200
+
 
 def _day_bounds(day: date) -> tuple[str, str]:
     """The half-open UTC [start, end) ISO bounds of one reward day, so a
@@ -176,6 +181,199 @@ def list_wallets_with_snapshots_for_date(day: date) -> list[str]:
         return []
 
     return sorted({str(row["wallet_address"]).lower() for row in rows if row.get("wallet_address")})
+
+
+def list_all_tokens() -> list[dict[str, Any]]:
+    """The whole token registry, enabled or not -- the admin view, where a
+    disabled row has to stay visible so it can be re-enabled. Empty list on
+    any lookup error."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_TOKENS_TABLE)
+            .select("*")
+            .order("chain_id", desc=False)
+            .limit(_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"holdings_tokens full list failed: {e}")
+        return []
+
+
+def create_token(
+    chain_id: int,
+    contract_address: str | None,
+    symbol: str,
+    decimals: int,
+    price_id: str,
+    is_enabled: bool = True,
+) -> dict[str, Any] | None:
+    """Add one asset to the registry. `contract_address` is None for a
+    chain's native coin. Returns the created row, or None on any failure --
+    including the (chain_id, contract) UNIQUE conflict, which means the
+    asset is already registered and should be updated instead."""
+    payload = {
+        "chain_id": chain_id,
+        "contract_address": contract_address.lower() if contract_address else None,
+        "symbol": symbol,
+        "decimals": decimals,
+        "price_id": price_id,
+        "is_enabled": is_enabled,
+    }
+    try:
+        client = get_supabase_client()
+        result = client.table(_TOKENS_TABLE).insert(payload).execute()
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"holdings_tokens insert failed for chain {chain_id}/{symbol}: {e}")
+        return None
+
+
+def update_token(token_id: int, updates: dict[str, Any]) -> dict[str, Any] | None:
+    """Patch one registry row. Only the caller-supplied fields are written,
+    so disabling an asset does not have to restate its address or decimals.
+    Returns the updated row, or None on any failure (including no such
+    row)."""
+    if not updates:
+        return None
+    payload = dict(updates)
+    if payload.get("contract_address"):
+        payload["contract_address"] = str(payload["contract_address"]).lower()
+    try:
+        client = get_supabase_client()
+        result = client.table(_TOKENS_TABLE).update(payload).eq("id", token_id).execute()
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"holdings_tokens update failed for id={token_id}: {e}")
+        return None
+
+
+def get_latest_snapshot_usd(wallet_address: str) -> Decimal | None:
+    """The wallet's total USD value at its most recent observation.
+
+    Rows sharing a `taken_at` are one sweep, so this takes the newest
+    `taken_at` present and sums only that sweep -- never the sum of every
+    recent row, which would multiply the wallet by the number of sweeps
+    read back. Returns None when the wallet has never been observed (or on
+    error); a wallet observed holding nothing returns Decimal(0).
+
+    This is the "what am I holding right now" figure the user-facing view
+    shows. It is deliberately NOT what the payout uses: the payout uses the
+    day's LOWEST sweep (get_min_usd_for_date), which is usually smaller.
+    """
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_SNAPSHOTS_TABLE)
+            .select("taken_at,usd_value")
+            .eq("wallet_address", wallet_address.lower())
+            .order("taken_at", desc=True)
+            .limit(_LATEST_SWEEP_ROW_CAP)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        logger.warning(f"wallet_holdings_snapshots latest lookup failed for {wallet_address}: {e}")
+        return None
+
+    if not rows:
+        return None
+
+    newest = max(str(row.get("taken_at")) for row in rows)
+    total = Decimal(0)
+    for row in rows:
+        if str(row.get("taken_at")) != newest:
+            continue
+        try:
+            total += Decimal(str(row.get("usd_value", "0")))
+        except (InvalidOperation, ValueError):
+            logger.warning(
+                f"wallet_holdings_snapshots has unparseable usd_value "
+                f"{row.get('usd_value')!r} for {wallet_address}"
+            )
+            return None
+    return total
+
+
+def list_holdings_accruals_for_wallet(wallet_address: str, limit: int = 30) -> list[dict[str, Any]]:
+    """One wallet's accruals, newest reward_date first, for the user-facing
+    history. Empty list on any lookup error."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_ACCRUALS_TABLE)
+            .select("*")
+            .eq("wallet_address", wallet_address.lower())
+            .order("reward_date", desc=True)
+            .limit(max(1, min(int(limit), _ROW_CAP)))
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"holdings_reward_accruals history failed for {wallet_address}: {e}")
+        return []
+
+
+def list_holdings_accruals_since(min_reward_date: date | str) -> list[dict[str, Any]]:
+    """Every accrual on or after `min_reward_date`, across all wallets,
+    newest first -- the admin summary's input. Empty list on any lookup
+    error."""
+    day = _day_str(min_reward_date)
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_ACCRUALS_TABLE)
+            .select("*")
+            .gte("reward_date", day)
+            .order("reward_date", desc=True)
+            .limit(_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"holdings_reward_accruals summary failed since {day}: {e}")
+        return []
+
+
+def replace_active_holdings_rates(rates: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """Deactivate every currently-active tier and insert `rates` as the new
+    active set.
+
+    Existing tier rows are never mutated in place -- a tier that an accrual
+    was already computed against must not change out from under it -- so a
+    rate change always means "deactivate old, insert new." Not transactional
+    (an UPDATE then an INSERT); a failure between the two leaves zero active
+    tiers, which the caller surfaces as a 500 and which a retry fixes, since
+    regenerating the set is itself idempotent.
+
+    The table's mandatory min_usd = 0 row is unaffected: deactivating a row
+    does not delete it, so the constraint trigger still sees a zero tier.
+
+    Returns the newly-inserted rows, or None on any failure.
+    """
+    try:
+        client = get_supabase_client()
+        client.table(_RATES_TABLE).update({"is_active": False}).eq("is_active", True).execute()
+        rows = [
+            {
+                "min_usd": str(rate["min_usd"]),
+                "credits_per_1k_usd_per_day": str(rate["credits_per_1k_usd_per_day"]),
+                "note": rate.get("note"),
+                "is_active": True,
+            }
+            for rate in rates
+        ]
+        result = client.table(_RATES_TABLE).insert(rows).execute()
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"holdings_reward_rates replace failed: {e}")
+        return None
 
 
 def get_active_holdings_rates() -> list[dict[str, Any]]:
