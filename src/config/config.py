@@ -236,6 +236,16 @@ class Config:
     HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS = float(
         _get_env_var("HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS", "10000.0")
     )
+    # When the daily holdings accrual runs, UTC. It pays for YESTERDAY, so it
+    # only has to land after that day's final observation sweep -- 00:40 is
+    # after the 00:00 sweep and after staking_rewards at 00:20, keeping the
+    # midnight jobs from contending for the same worker.
+    HOLDINGS_REWARDS_CRON_HOUR_UTC = int(_get_env_var("HOLDINGS_REWARDS_CRON_HOUR_UTC", "0"))
+    HOLDINGS_REWARDS_CRON_MINUTE_UTC = int(_get_env_var("HOLDINGS_REWARDS_CRON_MINUTE_UTC", "40"))
+    # Minute-past-the-hour each observation sweep fires, so a sweep never
+    # starts exactly on a UTC day boundary where its taken_at could land on
+    # either side of the day it is meant to belong to.
+    HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC = int(_get_env_var("HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC", "5"))
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.

@@ -1559,6 +1559,213 @@ def stop_staking_rewards_scheduler():
         _staking_rewards_scheduler = None
 
 
+# ============================================================================
+# Holdings rewards -- inference credits for tokens a user holds in a wallet
+# they proved. Two jobs:
+#
+#   holdings_snapshots -- the observation sweep, Config.HOLDINGS_SNAPSHOTS_
+#     PER_DAY times a day at evenly spaced hours. Each sweep writes one
+#     batch of wallet_holdings_snapshots rows; the day's payout is computed
+#     from the LOWEST batch, so more sweeps means a tighter floor.
+#   holdings_rewards -- the daily accrual, once a day, paying for
+#     YESTERDAY. It therefore only needs to land after that day's final
+#     sweep, which any hour today satisfies.
+#
+# Both schedulers always start, regardless of HOLDINGS_REWARDS_ENABLED --
+# the jobs themselves no-op and record a "skipped: disabled" run, so the
+# ops page shows them as healthy-but-off rather than as missing.
+# ============================================================================
+_holdings_snapshots_scheduler: AsyncIOScheduler | None = None
+_holdings_rewards_scheduler: AsyncIOScheduler | None = None
+
+
+def holdings_snapshot_cron_hours(snapshots_per_day: int) -> list[int]:
+    """The UTC hours an observation sweep fires, for `snapshots_per_day`
+    sweeps spread as evenly as whole hours allow.
+
+    Uses (i * 24) // n rather than a `*/step` cron expression so a count
+    that does not divide 24 still produces exactly that many sweeps -- with
+    a step, 5 would silently become 6.
+    """
+    count = max(1, min(int(snapshots_per_day or 1), 24))
+    return sorted({(i * 24) // count for i in range(count)})
+
+
+async def run_scheduled_holdings_snapshots():
+    """Run one holdings observation sweep
+    (src/services/holdings/snapshots.py::run_holdings_snapshots_once)."""
+    from src.services.holdings.snapshots import run_holdings_snapshots_once
+
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(run_holdings_snapshots_once)
+        duration_ms = int((datetime.now(UTC) - run_started_at).total_seconds() * 1000)
+
+        if result.get("skipped"):
+            record_job_run("holdings_snapshots", ok=True, summary=result, duration_ms=duration_ms)
+            return
+
+        logger.info(
+            "✅ Holdings snapshots OK | considered=%s recorded=%s empty=%s rows=%s skipped=%s",
+            result.get("wallets_considered"),
+            result.get("wallets_recorded"),
+            result.get("wallets_empty"),
+            result.get("rows_recorded"),
+            result.get("skipped"),
+        )
+        record_job_run("holdings_snapshots", ok=True, summary=result, duration_ms=duration_ms)
+    except Exception as e:
+        logger.warning("Holdings snapshots run failed (non-fatal): %s", e)
+        record_job_run(
+            "holdings_snapshots",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+async def run_scheduled_holdings_rewards():
+    """Run one pass of the daily holdings accrual
+    (src/services/holdings/rewards.py::run_holdings_rewards_once)."""
+    from src.services.holdings.rewards import (
+        HoldingsSnapshotsMissingError,
+        run_holdings_rewards_once,
+    )
+
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(run_holdings_rewards_once)
+        duration_ms = int((datetime.now(UTC) - run_started_at).total_seconds() * 1000)
+
+        if result.get("skipped") == "disabled":
+            record_job_run(
+                "holdings_rewards",
+                ok=True,
+                summary={"skipped": "disabled"},
+                duration_ms=duration_ms,
+            )
+            return
+
+        logger.info(
+            "✅ Holdings rewards OK | reward_date=%s wallets=%s paid=%s pending=%s "
+            "credits_paid=%s capped=%s budget_skipped=%s",
+            result.get("reward_date"),
+            result.get("wallets"),
+            result.get("paid"),
+            result.get("pending"),
+            result.get("credits_paid"),
+            result.get("capped"),
+            result.get("budget_skipped"),
+        )
+        record_job_run("holdings_rewards", ok=True, summary=result, duration_ms=duration_ms)
+    except HoldingsSnapshotsMissingError as e:
+        # Not a crash, but not a success either: the date has no observed
+        # balances, which means the sweep did not run. An operator has to
+        # see that rather than a silently empty payout.
+        logger.warning("Holdings rewards skipped: %s", e)
+        record_job_run(
+            "holdings_rewards",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+    except Exception as e:
+        logger.warning("Holdings rewards run failed (non-fatal): %s", e)
+        record_job_run(
+            "holdings_rewards",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+def start_holdings_snapshots_scheduler():
+    """Start the APScheduler cron job for the holdings observation sweep
+    (app lifespan). Always starts -- see this section's header."""
+    global _holdings_snapshots_scheduler
+
+    hours = holdings_snapshot_cron_hours(Config.HOLDINGS_SNAPSHOTS_PER_DAY)
+    minute = Config.HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC
+    hour_expr = ",".join(str(h) for h in hours)
+    logger.info("Starting holdings snapshots scheduler (UTC hours %s at :%02d)", hour_expr, minute)
+    try:
+        _holdings_snapshots_scheduler = AsyncIOScheduler()
+        _holdings_snapshots_scheduler.add_job(
+            run_scheduled_holdings_snapshots,
+            trigger=CronTrigger(hour=hour_expr, minute=minute, timezone="UTC"),
+            id="holdings_snapshots",
+            name="Holdings Snapshots Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _holdings_snapshots_scheduler.start()
+        logger.info("✅ Holdings snapshots scheduler started (%s sweeps/day)", len(hours))
+    except Exception as e:
+        logger.error("❌ Failed to start holdings snapshots scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_holdings_snapshots_scheduler():
+    """Stop the holdings observation sweep scheduler gracefully."""
+    global _holdings_snapshots_scheduler
+
+    if _holdings_snapshots_scheduler is None:
+        return
+    logger.info("Stopping holdings snapshots scheduler...")
+    try:
+        _holdings_snapshots_scheduler.shutdown(wait=True)
+        logger.info("✅ Holdings snapshots scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping holdings snapshots scheduler: %s", e)
+    finally:
+        _holdings_snapshots_scheduler = None
+
+
+def start_holdings_rewards_scheduler():
+    """Start the APScheduler cron job for the daily holdings accrual (app
+    lifespan). Always starts -- see this section's header."""
+    global _holdings_rewards_scheduler
+
+    hour = Config.HOLDINGS_REWARDS_CRON_HOUR_UTC
+    minute = Config.HOLDINGS_REWARDS_CRON_MINUTE_UTC
+    logger.info("Starting holdings rewards scheduler (daily at %02d:%02d UTC)", hour, minute)
+    try:
+        _holdings_rewards_scheduler = AsyncIOScheduler()
+        _holdings_rewards_scheduler.add_job(
+            run_scheduled_holdings_rewards,
+            trigger=CronTrigger(hour=hour, minute=minute, timezone="UTC"),
+            id="holdings_rewards",
+            name="Holdings Rewards Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _holdings_rewards_scheduler.start()
+        logger.info(
+            "✅ Holdings rewards scheduler started (next run at %02d:%02d UTC)", hour, minute
+        )
+    except Exception as e:
+        logger.error("❌ Failed to start holdings rewards scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_holdings_rewards_scheduler():
+    """Stop the daily holdings accrual scheduler gracefully."""
+    global _holdings_rewards_scheduler
+
+    if _holdings_rewards_scheduler is None:
+        return
+    logger.info("Stopping holdings rewards scheduler...")
+    try:
+        _holdings_rewards_scheduler.shutdown(wait=True)
+        logger.info("✅ Holdings rewards scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping holdings rewards scheduler: %s", e)
+    finally:
+        _holdings_rewards_scheduler = None
+
+
 def get_pricing_drift_status() -> dict[str, Any]:
     """Get the current status of the pricing-drift monitor (for health monitoring)."""
     return {
