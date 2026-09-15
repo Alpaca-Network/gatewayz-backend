@@ -115,6 +115,31 @@ def count_all_wallets() -> int:
         return 0
 
 
+_ALL_WALLETS_ROW_CAP = 10000
+
+
+def list_all_wallets() -> list[dict[str, Any]]:
+    """Every linked wallet, oldest-linked first, for jobs that sweep the
+    whole set (the holdings-rewards observation sweep in
+    src/services/holdings/snapshots.py). Ordered by created_at so the sweep
+    visits wallets in a stable order across runs, and row-capped like every
+    other bulk read here. Empty list on any lookup error -- a sweep that
+    sees no wallets records nothing, which is the safe outcome."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_TABLE)
+            .select("*")
+            .order("created_at", desc=False)
+            .limit(_ALL_WALLETS_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"user_wallets full list failed: {e}")
+        return []
+
+
 _BY_SOURCE_ROW_CAP = 10000
 
 
