@@ -7,10 +7,18 @@ is `src/services/staking_rewards.py` reused verbatim -- the same
 insert-pending-then-pay order, the same two independent idempotency guards
 -- with only the "how much do you have" input swapped.
 
-**The basis is the day's LOWEST observed value**, from
-`get_min_usd_for_date`, never an average and never the latest sweep. That
-is the whole anti-farm rule: a wallet funded for ten minutes and emptied
-again is worth its empty total, not its peak.
+**The basis is the day's LOWEST observed value**, never an average and
+never the latest sweep. That is the whole anti-farm rule: a wallet funded
+for ten minutes and emptied again is worth its empty total, not its peak.
+
+That rule only bites if the day actually has several readings. The
+observation sweep drops a wallet's whole batch on an incomplete chain read
+or a held token with no fresh price, so a wallet can legitimately end a day
+with one recorded sweep -- and then "lowest of the day" degenerates into
+"that one moment", which is the hole the rule exists to close. So a day
+with fewer than `HOLDINGS_MIN_SNAPSHOT_BATCHES` distinct sweeps is skipped
+outright. Underpaying nobody is acceptable here; paying on a single
+farmable reading is not.
 
 Two ceilings apply, in this order:
 
@@ -20,19 +28,26 @@ Two ceilings apply, in this order:
   when its day is decided has no account to charge the cap against, so it
   is capped on its own; once it links, the accrual is paid as recorded.
 * `HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS`, across the run. Wallets are
-  processed in ascending address order (what
-  `list_wallets_with_snapshots_for_date` already returns), so the same
-  wallets win the budget on a re-run. Accruals that already exist for the
-  date consume budget before any new grant is considered, so re-running the
-  job for one date can never hand out a second budget's worth.
+  processed in an order derived from a hash of (reward date, address): the
+  SAME order every time that date is processed, so a re-run pays exactly
+  the same wallets, but a DIFFERENT order tomorrow, so no wallet is
+  permanently advantaged by its address on the days the budget runs out.
+  Accruals that already exist for the date consume budget before any new
+  grant is considered, so re-running the job for one date can never hand
+  out a second budget's worth.
 
 Idempotent twice over, exactly like staking rewards: the accrual's UNIQUE
 (wallet_address, reward_date) index, and the credit ledger's partial unique
 index on `credit_transactions.request_id`.
+
+Every wallet the run declines to pay is counted under its own reason in
+`summary["skipped"]`, never collapsed into one number: when this
+misbehaves in production, which reason grew is the whole diagnosis.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
@@ -44,7 +59,7 @@ from src.db.holdings import (
     create_holdings_accrual,
     get_active_holdings_rates,
     get_holdings_accrual,
-    get_min_usd_for_date,
+    get_snapshot_batch_totals,
     list_pending_holdings_accruals,
     list_pending_holdings_accruals_since,
     list_wallets_with_snapshots_for_date,
@@ -98,6 +113,38 @@ def _request_id(wallet_address: str, reward_date_str: str) -> str:
 
 def _daily_cap() -> Decimal:
     return _quantize(_decimal(Config.HOLDINGS_DAILY_CAP_CREDITS))
+
+
+def _required_batches() -> int:
+    """How many distinct sweeps a day must have before it can be paid.
+
+    Clamped to [1, HOLDINGS_SNAPSHOTS_PER_DAY]: requiring more sweeps than
+    the schedule ever takes would silently pay nobody, which is a
+    misconfiguration that should not be able to turn the feature off by
+    accident.
+    """
+    per_day = max(1, int(Config.HOLDINGS_SNAPSHOTS_PER_DAY or 1))
+    return max(1, min(int(Config.HOLDINGS_MIN_SNAPSHOT_BATCHES or 1), per_day))
+
+
+def budget_order(wallets: list[str], reward_date_str: str) -> list[str]:
+    """The order wallets are considered in when the global budget is scarce.
+
+    Sorting by address alone is deterministic but permanently unfair: the
+    same low addresses would win every single day the budget runs out.
+    Seeding the sort with the reward date instead rotates the order daily
+    while keeping it fully reproducible for any given date -- a re-run of
+    one date pays exactly the wallets the first run paid.
+
+    The address is included as a tiebreaker so two wallets that hash alike
+    still order stably.
+    """
+
+    def key(address: str) -> tuple[bytes, str]:
+        digest = hashlib.sha256(f"{reward_date_str}:{address}".encode()).digest()
+        return digest, address
+
+    return sorted(wallets, key=key)
 
 
 def _account_headroom(user_id: int, reward_date_str: str, this_wallet: str) -> Decimal:
@@ -205,15 +252,24 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
     rates = get_active_holdings_rates()
     cap = _daily_cap()
     budget = _decimal(Config.HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS)
+    required_batches = _required_batches()
 
     committed = Decimal(0)  # credits this date already owes, existing + new
     credits_paid = Decimal(0)
-    counts = {"paid": 0, "pending": 0, "skipped": 0, "already": 0, "errors": 0}
+    counts = {"paid": 0, "pending": 0, "already": 0, "errors": 0}
+    # Each reason is counted separately and never folded together: when a
+    # run pays less than expected, WHICH reason grew is the diagnosis.
+    skipped = {
+        "no_snapshots": 0,
+        "too_few_batches": 0,
+        "no_rate_tier": 0,
+        "zero_credits": 0,
+        "budget_exhausted": 0,
+    }
     capped = 0
-    budget_skipped = 0
     budget_exhausted = False
 
-    for address in wallets:
+    for address in budget_order(wallets, reward_date_str):
         try:
             existing = get_holdings_accrual(address, reward_date_str)
 
@@ -231,19 +287,32 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
                 credits_paid += paid
                 continue
 
-            if budget_exhausted:
-                budget_skipped += 1
+            batches = get_snapshot_batch_totals(address, effective_date)
+            if not batches:
+                skipped["no_snapshots"] += 1
                 continue
 
-            basis = get_min_usd_for_date(address, effective_date)
-            if basis is None:
-                counts["skipped"] += 1
+            if len(batches) < required_batches:
+                # "Lowest of the day" is only an anti-farm rule when the day
+                # has several readings. With fewer, the minimum is just one
+                # moment -- which is exactly what the rule exists to defeat,
+                # so pay nothing rather than pay on a farmable reading.
+                skipped["too_few_batches"] += 1
+                logger.info(
+                    "holdings_rewards: skipping %s for %s -- %s observed sweep(s), %s required",
+                    address,
+                    reward_date_str,
+                    len(batches),
+                    required_batches,
+                )
                 continue
+
+            basis = min(batches.values())
 
             rate = select_holdings_rate(rates, basis)
             if rate is None:
                 logger.warning("holdings_rewards: no active tier covers $%s (%s)", basis, address)
-                counts["skipped"] += 1
+                skipped["no_rate_tier"] += 1
                 continue
 
             credits = _credits_for(basis, rate)
@@ -256,20 +325,24 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
                 was_capped = True
 
             if credits <= 0:
-                counts["skipped"] += 1
+                skipped["zero_credits"] += 1
                 continue
 
-            if committed + credits > budget:
-                # Stop granting entirely rather than letting smaller wallets
-                # leapfrog the one that did not fit -- which wallets get paid
-                # must not depend on how much budget happened to be left.
-                budget_exhausted = True
-                budget_skipped += 1
-                logger.warning(
-                    "holdings_rewards: global daily budget of %s credits exhausted at %s",
-                    budget,
-                    address,
-                )
+            if budget_exhausted or committed + credits > budget:
+                # Once one wallet does not fit, stop granting entirely rather
+                # than letting smaller wallets leapfrog it -- which wallets
+                # get paid must not depend on how much budget happened to be
+                # left. The wallet is still fully evaluated first, above, so
+                # one that would have been skipped for its own reason is
+                # counted under that reason and does not inflate this one.
+                if not budget_exhausted:
+                    budget_exhausted = True
+                    logger.warning(
+                        "holdings_rewards: global daily budget of %s credits exhausted at %s",
+                        budget,
+                        address,
+                    )
+                skipped["budget_exhausted"] += 1
                 continue
 
             created = create_holdings_accrual(address, effective_date, basis, credits)
@@ -305,12 +378,19 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
         "wallets": len(wallets),
         "paid": counts["paid"],
         "pending": counts["pending"],
-        "skipped": counts["skipped"],
         "already": counts["already"],
         "errors": counts["errors"],
         "capped": capped,
-        "budget_skipped": budget_skipped,
+        # Broken out by reason, never summed into one number -- see the
+        # module docstring. skipped_total is the convenience sum.
+        "skipped": dict(skipped),
+        "skipped_total": sum(skipped.values()),
+        # Duplicated out of `skipped` because the budget is the one ceiling
+        # an operator watches directly, and it is the number the scheduler
+        # logs on every run.
+        "budget_skipped": skipped["budget_exhausted"],
         "budget_exhausted": budget_exhausted,
+        "required_batches": required_batches,
         "credits_paid": str(credits_paid),
         "retried_paid": retried_paid,
         "duration": (datetime.now(UTC) - started).total_seconds(),

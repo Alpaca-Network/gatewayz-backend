@@ -1648,7 +1648,7 @@ async def run_scheduled_holdings_rewards():
 
         logger.info(
             "✅ Holdings rewards OK | reward_date=%s wallets=%s paid=%s pending=%s "
-            "credits_paid=%s capped=%s budget_skipped=%s",
+            "credits_paid=%s capped=%s budget_skipped=%s skipped=%s",
             result.get("reward_date"),
             result.get("wallets"),
             result.get("paid"),
@@ -1656,6 +1656,7 @@ async def run_scheduled_holdings_rewards():
             result.get("credits_paid"),
             result.get("capped"),
             result.get("budget_skipped"),
+            result.get("skipped"),
         )
         record_job_run("holdings_rewards", ok=True, summary=result, duration_ms=duration_ms)
     except HoldingsSnapshotsMissingError as e:

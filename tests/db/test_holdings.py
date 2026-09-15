@@ -18,6 +18,7 @@ from src.db.holdings import (
     get_active_holdings_rates,
     get_holdings_accrual,
     get_min_usd_for_date,
+    get_snapshot_batch_totals,
     list_all_tokens,
     list_enabled_tokens,
     list_holdings_accruals_for_wallet,
@@ -504,3 +505,46 @@ class TestReplaceActiveHoldingsRates:
                 replace_active_holdings_rates([{"min_usd": 0, "credits_per_1k_usd_per_day": 1}])
                 is None
             )
+
+
+class TestGetSnapshotBatchTotals:
+    def test_sums_within_a_sweep_and_never_across_sweeps(self, sb):
+        rows = [
+            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "100"},
+            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "50"},
+            {"taken_at": "2026-09-14T06:00:00+00:00", "usd_value": "70"},
+        ]
+        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            totals = get_snapshot_batch_totals("0xABC", date(2026, 9, 14))
+        assert totals == {
+            "2026-09-14T00:00:00+00:00": Decimal("150"),
+            "2026-09-14T06:00:00+00:00": Decimal("70"),
+        }
+
+    def test_the_count_of_sweeps_is_recoverable(self, sb):
+        """The daily job needs how MANY sweeps a day had, not just the
+        minimum -- one sweep makes "lowest of the day" meaningless."""
+        rows = [
+            {"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "100"},
+            {"taken_at": "2026-09-14T06:00:00+00:00", "usd_value": "100"},
+            {"taken_at": "2026-09-14T12:00:00+00:00", "usd_value": "100"},
+        ]
+        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert len(get_snapshot_batch_totals("0xabc", date(2026, 9, 14))) == 3
+
+    def test_day_with_no_snapshots_is_none(self, sb):
+        client = _mock_table_client({"wallet_holdings_snapshots": []})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert get_snapshot_batch_totals("0xabc", date(2026, 9, 14)) is None
+
+    def test_unparseable_value_returns_none_rather_than_a_wrong_total(self, sb):
+        rows = [{"taken_at": "2026-09-14T00:00:00+00:00", "usd_value": "nope"}]
+        client = _mock_table_client({"wallet_holdings_snapshots": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert get_snapshot_batch_totals("0xabc", date(2026, 9, 14)) is None
+
+    def test_returns_none_on_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert get_snapshot_batch_totals("0xabc", date(2026, 9, 14)) is None

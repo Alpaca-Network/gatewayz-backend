@@ -230,6 +230,16 @@ class Config:
     HOLDINGS_SNAPSHOTS_PER_DAY = int(_get_env_var("HOLDINGS_SNAPSHOTS_PER_DAY", "4"))
     # Sybil brake: wallets younger than this many days earn nothing.
     HOLDINGS_MIN_WALLET_AGE_DAYS = int(_get_env_var("HOLDINGS_MIN_WALLET_AGE_DAYS", "3"))
+    # Distinct observation sweeps a wallet must have on a day before that day
+    # can be paid. "Lowest balance of the day" only resists farming if the day
+    # has more than one reading -- with a single recorded sweep the minimum is
+    # just that one moment, which is precisely the hole the rule exists to
+    # close. A wallet can legitimately end a day with one sweep, since the
+    # sweep drops a whole batch on an incomplete chain read or a missing
+    # price, so this is a real case and not a hypothetical one. Effective
+    # value is clamped to [1, HOLDINGS_SNAPSHOTS_PER_DAY]: requiring more
+    # sweeps than are ever taken would pay nobody.
+    HOLDINGS_MIN_SNAPSHOT_BATCHES = int(_get_env_var("HOLDINGS_MIN_SNAPSHOT_BATCHES", "2"))
     # Per-account daily ceiling, and a global daily budget across all accounts.
     # Both are placeholders until the boss sets the real numbers.
     HOLDINGS_DAILY_CAP_CREDITS = float(_get_env_var("HOLDINGS_DAILY_CAP_CREDITS", "50.0"))

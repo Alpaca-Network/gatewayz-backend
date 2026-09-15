@@ -41,21 +41,35 @@ Skips are logged with a reason and counted in the run summary.
 
 For each wallet observed on the reward date:
 
-1. basis = `get_min_usd_for_date` — the day's **lowest** batch total. Not an
-   average, not the latest. This is the anti-farm rule: a wallet funded for ten
-   minutes is worth its empty total.
-2. credits = basis / 1000 x the matching tier's `credits_per_1k_usd_per_day`,
+1. The day must have at least `HOLDINGS_MIN_SNAPSHOT_BATCHES` distinct sweeps
+   (default 2, clamped to `HOLDINGS_SNAPSHOTS_PER_DAY`). "Lowest of the day"
+   only resists farming when the day has several readings; with one recorded
+   sweep the minimum is just that moment, which is the hole the rule exists to
+   close. A wallet can legitimately end a day with one sweep, because the sweep
+   drops a whole batch on an incomplete chain read or a missing price, so this
+   is a real case. Fewer than the required number and the day is skipped as
+   `too_few_batches` — underpaying nobody is fine, paying on one farmable
+   reading is not.
+2. basis = the day's **lowest** batch total. Not an average, not the latest.
+   A wallet funded for ten minutes is worth its empty total.
+3. credits = basis / 1000 x the matching tier's `credits_per_1k_usd_per_day`,
    rounded down at 6 dp.
-3. Cap at `HOLDINGS_DAILY_CAP_CREDITS`, **per account** — an account's other
+4. Cap at `HOLDINGS_DAILY_CAP_CREDITS`, **per account** — an account's other
    wallets' accruals for that day are subtracted first, so splitting a balance
    across wallets cannot multiply the ceiling. A wallet not yet linked to an
    account has none to charge against and is capped on its own.
-4. Cap at `HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS` across the run, spent in
-   ascending wallet-address order. Accruals that already exist for the date
-   consume budget first, so re-running one date cannot spend a second budget.
-   Once a wallet does not fit, granting stops entirely rather than letting
-   smaller wallets leapfrog it; the rest are reported as `budget_skipped`.
-5. Insert the accrual **pending**, then grant via `add_credits_to_user(...,
+5. Cap at `HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS` across the run. Wallets are
+   considered in an order seeded by a hash of (reward date, address): the same
+   order every time that date is processed, so a re-run pays exactly the same
+   wallets, but a different order tomorrow, so no wallet is permanently
+   advantaged by its address on the days the budget runs out. Accruals that
+   already exist for the date consume budget first, so re-running one date
+   cannot spend a second budget. Once a wallet does not fit, granting stops
+   entirely rather than letting smaller wallets leapfrog it; the rest are
+   reported as `budget_skipped`. Each wallet is still evaluated on its own
+   merits first, so one that would have been skipped anyway is counted under
+   its own reason rather than inflating the budget count.
+6. Insert the accrual **pending**, then grant via `add_credits_to_user(...,
    transaction_type="holdings_reward",
    request_id="holdings_reward:{wallet}:{date}")`, then mark it paid.
 
@@ -69,6 +83,19 @@ A reward date with no observations at all raises
 `HoldingsSnapshotsMissingError`, recorded as a **failed** job run and returned
 as a 409 from the manual-run endpoint. It means the sweep did not run, which an
 operator has to see rather than read as an empty but healthy payout.
+
+### Reading a run summary
+
+`summary["skipped"]` breaks every declined wallet out by reason and never sums
+them: `no_snapshots`, `too_few_batches`, `no_rate_tier`, `zero_credits`,
+`budget_exhausted`. When a run pays less than expected, which reason grew is
+the diagnosis. `skipped_total` is the sum, `budget_skipped` repeats the budget
+count because it is the ceiling operators watch directly, and a
+whole-run no-op reports `{"skipped": "disabled"}` instead of the dict.
+
+The sweep's own summary is broken out the same way: `too_new`, `unknown_age`,
+`incomplete_read`, `missing_price`, `error`. A rise in `incomplete_read` or
+`missing_price` there shows up as a rise in `too_few_batches` here a day later.
 
 ## API
 
@@ -106,8 +133,8 @@ is capped at the daily ceiling (what would actually be paid);
 3. Set the tiers: `PUT /admin/holdings/rates` with a superadmin key. The
    migration's placeholder pays 0.
 4. Set `HOLDINGS_REWARDS_ENABLED=true` on Railway `api`.
-5. Let a full day of sweeps run before the first accrual, or the day's minimum
-   is taken from however few batches exist.
+5. Let a full day of sweeps run before the first accrual. A partial first day
+   has too few batches and is skipped rather than paid on one reading.
 
 ## Gotchas
 

@@ -109,18 +109,20 @@ def record_snapshot(
         return None
 
 
-def get_min_usd_for_date(wallet_address: str, day: date) -> Decimal | None:
-    """The wallet's LOWEST total USD holdings across that UTC day.
+def get_snapshot_batch_totals(wallet_address: str, day: date) -> dict[str, Decimal] | None:
+    """The wallet's total USD value per sweep on that UTC day, keyed by the
+    sweep's `taken_at`.
 
-    Rows sharing a `taken_at` are one sweep, so this sums per sweep first
-    and then takes the minimum across sweeps -- a wallet is paid on what it
-    actually held at its thinnest point that day, never on a flash-funded
-    peak and never on the sum of every row in the day.
+    Rows sharing a `taken_at` are one sweep, so this sums within a sweep and
+    never across sweeps. Callers need both the minimum (what gets paid) and
+    the NUMBER of sweeps (whether the minimum means anything -- a single
+    recorded sweep makes "lowest of the day" just "that one moment"), and
+    both come from this one read rather than two.
 
-    Returns None when the day has no snapshots at all (nothing was
-    observed, so there is no basis to pay on). A wallet that genuinely held
-    nothing returns Decimal(0), which is a real basis and must not be
-    confused with None.
+    Returns None when the day has no snapshots at all, or when a stored
+    usd_value cannot be parsed -- in either case there is no total we can
+    stand behind. An empty dict is never returned; "observed holding
+    nothing" is a sweep whose total is Decimal(0).
     """
     start, end = _day_bounds(day)
     try:
@@ -157,7 +159,28 @@ def get_min_usd_for_date(wallet_address: str, day: date) -> Decimal | None:
             return None
         batch_totals[batch] = batch_totals.get(batch, Decimal(0)) + value
 
-    return min(batch_totals.values())
+    return batch_totals
+
+
+def get_min_usd_for_date(wallet_address: str, day: date) -> Decimal | None:
+    """The wallet's LOWEST total USD holdings across that UTC day.
+
+    A wallet is paid on what it actually held at its thinnest point that
+    day, never on a flash-funded peak and never on the sum of every row in
+    the day.
+
+    Returns None when the day has no snapshots at all (nothing was
+    observed, so there is no basis to pay on). A wallet that genuinely held
+    nothing returns Decimal(0), which is a real basis and must not be
+    confused with None.
+
+    Callers that also need to know how many sweeps that minimum came from
+    should use get_snapshot_batch_totals() directly and avoid a second read.
+    """
+    totals = get_snapshot_batch_totals(wallet_address, day)
+    if not totals:
+        return None
+    return min(totals.values())
 
 
 def list_wallets_with_snapshots_for_date(day: date) -> list[str]:
