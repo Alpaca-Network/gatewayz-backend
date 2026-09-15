@@ -216,18 +216,36 @@ These views are optimized for the public status page and include calculated stat
 ### Public Status Page (No Authentication)
 
 #### GET /v1/status/
-Get overall system status
+Get overall system status. Reports only what is measured: counts are over the
+models `GET /v1/models` serves, a model counts toward uptime/status only if it
+has a health check in the last `measurement_window_hours`, and with no
+measurements `uptime_percentage` is `null` with an `uptime_reason`.
 ```json
 {
   "status": "operational",
   "status_message": "All Systems Operational",
-  "uptime_percentage": 99.95,
-  "total_models": 10547,
-  "healthy_models": 10542,
-  "offline_models": 5,
-  "active_incidents": 0
+  "uptime_percentage": 95.0,
+  "uptime_reason": null,
+  "total_models": 68,
+  "monitored_models": 20,
+  "unmonitored_models": 48,
+  "monitoring_coverage_percentage": 29.4,
+  "healthy_models": 19,
+  "degraded_models": 1,
+  "offline_models": 0,
+  "measurement_window_hours": 24,
+  "excluded_tracking_rows": 55,
+  "total_providers": 5,
+  "total_gateways": 5,
+  "monitored_gateways": 4,
+  "healthy_gateways": 4,
+  "gateway_health_percentage": 100.0,
+  "active_incidents": 0,
+  "last_updated": "2026-09-15T00:00:00+00:00"
 }
 ```
+`uptime_percentage` = healthy / monitored: the share of monitored models whose
+latest check passed, not time-weighted availability.
 
 #### GET /v1/status/providers
 List all provider statuses

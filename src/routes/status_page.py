@@ -5,6 +5,7 @@ Provides public-facing endpoints for status page display without authentication.
 Optimized for performance with caching and pre-aggregated data.
 """
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,58 +18,195 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/status", tags=["status-page"])
 
 
+# A health measurement older than this is history, not current state. The
+# slowest monitoring tier (on_demand) re-probes every 4h and failing models every
+# 5 min, so 24h is six missed probe cycles — past it the prober is not watching.
+MEASUREMENT_MAX_AGE = timedelta(hours=24)
+
+_TRACKING_PAGE_SIZE = 1000
+_TRACKING_MAX_PAGES = 50
+
+
+def _parse_ts(value: Any) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+
+
+def _load_tracking_rows() -> list[dict[str, Any]]:
+    """Every enabled ``model_health_tracking`` row.
+
+    Paged with a total ORDER BY on the primary key: PostgREST caps a response at
+    1000 rows, and ``range()`` without a stable order duplicates and drops rows
+    between pages.
+    """
+    rows: list[dict[str, Any]] = []
+    for page in range(_TRACKING_MAX_PAGES):
+        start = page * _TRACKING_PAGE_SIZE
+        response = (
+            get_db()
+            .table("model_health_tracking")
+            .select("provider,model,gateway,last_status,last_called_at,circuit_breaker_state")
+            .eq("is_enabled", True)
+            .order("provider")
+            .order("model")
+            .range(start, start + _TRACKING_PAGE_SIZE - 1)
+            .execute()
+        )
+        batch = response.data or []
+        rows.extend(batch)
+        if len(batch) < _TRACKING_PAGE_SIZE:
+            break
+    return rows
+
+
+def _latest_measurement_by_model(
+    tracking_rows: list[dict[str, Any]], catalog_ids: set[str]
+) -> tuple[dict[str, dict[str, Any]], int]:
+    """Map catalog model id -> its most recent tracking row.
+
+    Tracking rows store the gateway-prefixed catalog id ("openai/gpt-5.5");
+    a bare id is matched as "<gateway>/<model>". Returns the map and the number
+    of rows that match no catalog model (delisted models, disabled providers) —
+    those describe nothing we serve and are excluded from every figure.
+    """
+    latest: dict[str, dict[str, Any]] = {}
+    orphaned = 0
+    for row in tracking_rows:
+        model = row.get("model") or ""
+        key = model if model in catalog_ids else None
+        if key is None and "/" not in model:
+            prefix = row.get("gateway") or row.get("provider") or ""
+            candidate = f"{prefix}/{model}"
+            key = candidate if candidate in catalog_ids else None
+        if key is None:
+            orphaned += 1
+            continue
+        current = latest.get(key)
+        epoch = datetime.min.replace(tzinfo=UTC)
+        row_ts = _parse_ts(row.get("last_called_at")) or epoch
+        if current is None or row_ts > (_parse_ts(current.get("last_called_at")) or epoch):
+            latest[key] = row
+    return latest, orphaned
+
+
+def _gateway_of(model: dict[str, Any]) -> str:
+    gateway = model.get("source_gateway") or model.get("provider_slug") or ""
+    if not gateway:
+        model_id = model.get("id") or ""
+        gateway = model_id.split("/", 1)[0] if "/" in model_id else ""
+    return str(gateway).strip().lower()
+
+
 @router.get("/", response_model=dict[str, Any])
 async def get_overall_status():
     """
     Get overall system status for status page
 
-    Public endpoint - no authentication required.
-    Returns current status, uptime, and basic metrics.
+    Public endpoint - no authentication required. Reports only what is measured.
+
+    Field meanings (changed 2026-09 — previously every figure came from the
+    ``provider_health_current`` view, which counted every enabled
+    ``model_health_tracking`` row: delisted models, never-refreshed rows and
+    week-old verdicts all counted, so ``total_models`` disagreed with
+    ``/v1/models`` and stale failures read as a live major outage):
+
+    - ``total_models``: models ``GET /v1/models`` serves (same source and filters).
+    - ``monitored_models``: catalog models with a health check in the last
+      ``measurement_window_hours``. ``unmonitored_models`` = the rest; they are
+      excluded from uptime and status and never treated as down.
+    - ``healthy_models``: monitored models whose latest check succeeded.
+    - ``offline_models``: monitored models whose circuit breaker is open.
+    - ``degraded_models``: monitored, latest check failed, circuit not open.
+    - ``uptime_percentage``: healthy / monitored * 100 — a point-in-time share of
+      models passing their latest check, not a time-weighted availability. ``null``
+      when nothing is monitored, with ``uptime_reason`` saying why.
+    - ``status``: from monitored models only; ``unknown`` when there are none.
+    - ``total_gateways``: gateways in the catalog; ``healthy_gateways``: those with
+      at least one healthy monitored model; ``gateway_health_percentage`` is over
+      ``monitored_gateways`` and ``null`` when none are monitored.
     """
     try:
-        # Get overall system health from view
-        response = get_db().table("provider_health_current").select("*").execute()
+        from src.routes.catalog import get_public_catalog_models
 
-        providers = response.data or []
+        catalog = await asyncio.to_thread(get_public_catalog_models)
+        now = datetime.now(UTC)
+        window_hours = int(MEASUREMENT_MAX_AGE.total_seconds() // 3600)
 
-        if not providers:
+        if not catalog:
             return {
                 "status": "unknown",
+                "status_message": "Model catalog unavailable",
                 "message": "Status data not available",
-                "timestamp": datetime.now(UTC).isoformat(),
+                "uptime_percentage": None,
+                "uptime_reason": "Model catalog unavailable; nothing to measure against.",
+                "total_models": 0,
+                "monitored_models": 0,
+                "unmonitored_models": 0,
+                "timestamp": now.isoformat(),
+                "last_updated": now.isoformat(),
             }
 
-        # Calculate overall metrics
-        total_models = sum(p["total_models"] for p in providers)
-        healthy_models = sum(p["healthy_models"] for p in providers)
-        offline_models = sum(p["offline_models"] for p in providers)
+        catalog_ids = {m["id"] for m in catalog if m.get("id")}
+        tracking_rows = await asyncio.to_thread(_load_tracking_rows)
+        latest, orphaned_rows = _latest_measurement_by_model(tracking_rows, catalog_ids)
 
-        # Ensure healthy_models doesn't exceed total_models (data consistency fix)
-        # This can happen when the database view has stale data
-        if healthy_models > total_models:
-            logger.warning(
-                f"Data inconsistency: healthy_models ({healthy_models}) > total_models ({total_models}). "
-                "Constraining healthy_models to total_models."
+        cutoff = now - MEASUREMENT_MAX_AGE
+        gateways: dict[str, dict[str, bool]] = {}
+        healthy = offline = degraded = monitored = 0
+        for model in catalog:
+            gateway = _gateway_of(model)
+            gw = (
+                gateways.setdefault(gateway, {"monitored": False, "healthy": False})
+                if gateway
+                else None
             )
-            healthy_models = total_models
 
-        # Determine overall status
-        if total_models == 0:
+            row = latest.get(model.get("id") or "")
+            checked_at = _parse_ts(row.get("last_called_at")) if row else None
+            if checked_at is None or checked_at < cutoff:
+                continue  # unmonitored: no current measurement, so no verdict
+
+            monitored += 1
+            if gw is not None:
+                gw["monitored"] = True
+            if (row.get("circuit_breaker_state") or "").lower() == "open":
+                offline += 1
+            elif (row.get("last_status") or "").lower() == "success":
+                healthy += 1
+                if gw is not None:
+                    gw["healthy"] = True
+            else:
+                degraded += 1
+
+        total_models = len(catalog)
+        unmonitored = total_models - monitored
+
+        if monitored == 0:
             status = "unknown"
             status_message = "No models monitored"
-        elif offline_models == 0:
-            status = "operational"
-            status_message = "All Systems Operational"
-        elif offline_models < total_models * 0.1:
-            status = "degraded"
-            status_message = "Partial Service Degradation"
+            uptime_percentage = None
+            uptime_reason = (
+                f"None of the {total_models} catalog models has a health check in the "
+                f"last {window_hours}h."
+            )
         else:
-            status = "major_outage"
-            status_message = "Major Service Disruption"
+            if offline == 0:
+                status = "operational"
+                status_message = "All Systems Operational"
+            elif offline < monitored * 0.1:
+                status = "degraded"
+                status_message = "Partial Service Degradation"
+            else:
+                status = "major_outage"
+                status_message = "Major Service Disruption"
+            uptime_percentage = round(healthy / monitored * 100, 2)
+            uptime_reason = None
 
-        uptime_percentage = (healthy_models / total_models * 100) if total_models > 0 else 0
-
-        # Get active incidents count
         incidents_response = (
             get_db()
             .table("model_health_incidents")
@@ -76,46 +214,41 @@ async def get_overall_status():
             .eq("status", "active")
             .execute()
         )
-
         active_incidents = incidents_response.count or 0
 
-        # Calculate gateway health metrics
-        # Filter out None and empty string gateways
-        gateways_set = set(
-            p["gateway"] for p in providers if p.get("gateway") and p["gateway"].strip()
-        )
-        total_gateways = len(gateways_set) if gateways_set else 0
-
-        # Calculate healthy gateways (gateways that have at least one healthy provider)
-        gateway_health = {}
-        for p in providers:
-            gw = p.get("gateway")
-            if gw and gw.strip():  # Filter out None and empty strings
-                if gw not in gateway_health:
-                    gateway_health[gw] = {"has_healthy": False}
-                # Consider a gateway healthy if any of its providers are operational
-                if p.get("status_indicator") == "operational":
-                    gateway_health[gw]["has_healthy"] = True
-        healthy_gateways = sum(1 for g in gateway_health.values() if g.get("has_healthy", False))
-
-        # Calculate gateway health percentage
+        total_gateways = len(gateways)
+        monitored_gateways = sum(1 for g in gateways.values() if g["monitored"])
+        healthy_gateways = sum(1 for g in gateways.values() if g["healthy"])
         gateway_health_percentage = (
-            round((healthy_gateways / total_gateways) * 100, 1) if total_gateways > 0 else 0.0
+            round(healthy_gateways / monitored_gateways * 100, 1) if monitored_gateways else None
         )
+        providers = {
+            str(m.get("provider_slug") or _gateway_of(m)).lower()
+            for m in catalog
+            if m.get("provider_slug") or _gateway_of(m)
+        }
 
         return {
             "status": status,
             "status_message": status_message,
-            "uptime_percentage": round(uptime_percentage, 2),
+            "uptime_percentage": uptime_percentage,
+            "uptime_reason": uptime_reason,
             "total_models": total_models,
-            "healthy_models": healthy_models,
-            "offline_models": offline_models,
+            "monitored_models": monitored,
+            "unmonitored_models": unmonitored,
+            "monitoring_coverage_percentage": round(monitored / total_models * 100, 1),
+            "healthy_models": healthy,
+            "degraded_models": degraded,
+            "offline_models": offline,
+            "measurement_window_hours": window_hours,
+            "excluded_tracking_rows": orphaned_rows,
             "total_providers": len(providers),
             "total_gateways": total_gateways,
+            "monitored_gateways": monitored_gateways,
             "healthy_gateways": healthy_gateways,
             "gateway_health_percentage": gateway_health_percentage,
             "active_incidents": active_incidents,
-            "last_updated": datetime.now(UTC).isoformat(),
+            "last_updated": now.isoformat(),
         }
 
     except Exception as e:

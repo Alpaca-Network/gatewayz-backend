@@ -270,6 +270,26 @@ def _annotate_servability(models: list, copy_rows: bool = False) -> list:
     return annotated
 
 
+def get_public_catalog_models() -> list[dict]:
+    """The flat model list ``GET /v1/models`` serves with its default parameters.
+
+    Mirrors the ``gateway=all`` path of :func:`get_models` with no ``provider`` /
+    ``is_private`` filter: the aggregated catalog cache (falling back to merging
+    the per-provider caches), plus live community models, minus models health
+    gating hides. Pagination and response caching are deliberately left out —
+    this is the set ``total`` counts.
+
+    Other public surfaces (``GET /v1/status``) count models from here so that
+    they can never disagree with the catalog about how many models exist.
+    Synchronous: callers on the event loop should use ``asyncio.to_thread``.
+    """
+    models = get_cached_models("all") or []
+    if not models:
+        models = merge_models_by_slug(*((get_cached_models(s) or []) for s in get_provider_slugs()))
+    models = _append_community_models(models, "all")
+    return [m for m in _apply_health_gating(models) if isinstance(m, dict)]
+
+
 @router.get("/routers", tags=["routers"])
 async def get_intelligent_routers():
     """
