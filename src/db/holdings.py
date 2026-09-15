@@ -303,6 +303,35 @@ def mark_holdings_accrual_paid(accrual_id: int, ledger_request_id: str) -> dict[
         return None
 
 
+def list_pending_holdings_accruals_since(min_reward_date: date | str) -> list[dict[str, Any]]:
+    """Every still-pending accrual on or after `min_reward_date`, across all
+    wallets, oldest first.
+
+    This is the daily job's retry sweep: an accrual left pending by a failed
+    credit write, or by a wallet that was unlinked when the day was decided,
+    would otherwise never be revisited (the pay-on-link hook only covers the
+    link event itself). Bounded by a caller-supplied floor rather than
+    unbounded, so the sweep's cost does not grow forever. Empty list on any
+    lookup error.
+    """
+    day = _day_str(min_reward_date)
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_ACCRUALS_TABLE)
+            .select("*")
+            .eq("status", "pending")
+            .gte("reward_date", day)
+            .order("reward_date", desc=False)
+            .limit(_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"holdings_reward_accruals pending sweep failed since {day}: {e}")
+        return []
+
+
 def list_pending_holdings_accruals(wallet_address: str) -> list[dict[str, Any]]:
     """Every still-pending accrual for one wallet, oldest reward_date first
     (they are paid in order once the wallet is payable). Empty list on any

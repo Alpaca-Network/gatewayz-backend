@@ -141,6 +141,7 @@ class TransactionType:
     SUBSCRIPTION_UPGRADE = "subscription_upgrade"  # Allowance reset on tier upgrade
     SUBSCRIPTION_DOWNGRADE = "subscription_downgrade"  # Allowance reset on tier downgrade
     STAKING_REWARD = "staking_reward"  # Daily WAYZ staking payout (inference credits)
+    HOLDINGS_REWARD = "holdings_reward"  # Daily payout for tokens held in a proven wallet
 
 
 def get_transaction_by_request_id(request_id: str) -> dict[str, Any] | None:

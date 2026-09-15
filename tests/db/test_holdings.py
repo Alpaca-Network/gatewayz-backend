@@ -18,6 +18,7 @@ from src.db.holdings import (
     get_min_usd_for_date,
     list_enabled_tokens,
     list_pending_holdings_accruals,
+    list_pending_holdings_accruals_since,
     list_wallets_with_snapshots_for_date,
     mark_holdings_accrual_paid,
     record_snapshot,
@@ -340,3 +341,23 @@ class TestListPendingHoldingsAccruals:
     def test_returns_empty_on_error(self, sb):
         with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
             assert list_pending_holdings_accruals("0xabc") == []
+
+
+class TestListPendingHoldingsAccrualsSince:
+    def test_returns_pending_rows_on_or_after_the_floor(self, sb):
+        rows = [{"id": 3, "wallet_address": "0xabc", "reward_date": "2026-09-14"}]
+        client = _mock_table_client({"holdings_reward_accruals": rows})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert list_pending_holdings_accruals_since(date(2026, 8, 15)) == rows
+        query = client.table("holdings_reward_accruals")
+        assert query.eq.call_args.args == ("status", "pending")
+        assert query.gte.call_args.args == ("reward_date", "2026-08-15")
+
+    def test_accepts_a_date_string(self, sb):
+        client = _mock_table_client({"holdings_reward_accruals": []})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert list_pending_holdings_accruals_since("2026-08-15") == []
+
+    def test_returns_empty_on_error(self, sb):
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            assert list_pending_holdings_accruals_since(date(2026, 8, 15)) == []
