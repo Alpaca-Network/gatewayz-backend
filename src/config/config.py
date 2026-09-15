@@ -331,6 +331,12 @@ class Config:
     # rollout mode explicitly ("enforce"|"log"|"off"); when unset it defaults
     # to "enforce" once a verification key is configured, else "log" so
     # environments without the key don't 401 every login.
+    # Bearer token for /metrics and /api/metrics/parsed. Those surfaces publish
+    # request volume per route and credits_used_total per model, so they are
+    # gated (src/main.py::_require_metrics_auth). ADMIN_API_KEY is accepted too.
+    # Unset: open outside production, 404 in production — fail closed.
+    METRICS_TOKEN = _get_env_var("METRICS_TOKEN")
+
     PRIVY_APP_ID = _get_env_var("PRIVY_APP_ID")
     PRIVY_VERIFICATION_KEY = _get_env_var("PRIVY_VERIFICATION_KEY")
     # Optional override of the JWKS URL (default: https://auth.privy.io/api/v1/apps/<app_id>/jwks.json)
