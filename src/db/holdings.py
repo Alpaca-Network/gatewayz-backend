@@ -1,0 +1,324 @@
+"""DB access for the holdings-rewards tables -- holdings_tokens,
+wallet_holdings_snapshots, holdings_reward_rates and
+holdings_reward_accruals (see
+supabase/migrations/20260915000000_holdings_rewards.sql).
+
+Holdings rewards pay inference credits for HOLDING top-20 tokens in a
+wallet the user has proven they control (src/db/user_wallets.py). It is
+non-custodial -- we never take a deposit, we only read balances -- so the
+input is an observed USD valuation rather than a staked amount. Everything
+downstream of that input is the staking-rewards payout half reused
+verbatim, so this module mirrors src/db/staking_rewards.py: try/except +
+logger.warning + a safe default, never a raise. Callers (the daily job in
+src/services/holdings/, and the admin/user routes) must treat a lookup
+failure as "no data," never as a hard failure.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from src.config.supabase_config import get_supabase_client
+
+logger = logging.getLogger(__name__)
+
+_TOKENS_TABLE = "holdings_tokens"
+_SNAPSHOTS_TABLE = "wallet_holdings_snapshots"
+_RATES_TABLE = "holdings_reward_rates"
+_ACCRUALS_TABLE = "holdings_reward_accruals"
+
+# Row cap for snapshot/accrual reads -- same convention as
+# src/db/staking_rewards.py's _ROW_CAP: a real bound rather than an
+# unbounded select. A day of snapshots for one wallet is (tokens x sweeps),
+# far under this.
+_ROW_CAP = 10000
+
+
+def _day_bounds(day: date) -> tuple[str, str]:
+    """The half-open UTC [start, end) ISO bounds of one reward day, so a
+    midnight snapshot belongs to exactly one day."""
+    start = datetime(day.year, day.month, day.day, tzinfo=UTC)
+    return start.isoformat(), (start + timedelta(days=1)).isoformat()
+
+
+def _day_str(day: date | str) -> str:
+    return day if isinstance(day, str) else day.isoformat()
+
+
+def list_enabled_tokens() -> list[dict[str, Any]]:
+    """Every enabled row of the token registry. Empty list on any lookup
+    error -- and empty is also the normal state until ops seeds the
+    registry, which the migration deliberately does not do."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_TOKENS_TABLE)
+            .select("*")
+            .eq("is_enabled", True)
+            .order("chain_id", desc=False)
+            .limit(_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"holdings_tokens lookup failed: {e}")
+        return []
+
+
+def record_snapshot(
+    wallet_address: str,
+    token_id: int,
+    raw_amount: int,
+    usd_value: Decimal,
+    taken_at: datetime,
+) -> dict[str, Any] | None:
+    """Insert one observed balance. Every row of a single sweep must share
+    one `taken_at` -- that shared timestamp is what identifies a batch to
+    get_min_usd_for_date(), so the caller generates it once per sweep and
+    passes the same value for every token.
+
+    raw_amount (numeric(78,0), uint256-safe) and usd_value (numeric(38,18))
+    are sent as strings so a big int or a Decimal never round-trips through
+    a float. Returns the created row, or None on any failure.
+    """
+    payload = {
+        "wallet_address": wallet_address.lower(),
+        "token_id": token_id,
+        "raw_amount": str(raw_amount),
+        "usd_value": str(usd_value),
+        "taken_at": taken_at.isoformat(),
+    }
+    try:
+        client = get_supabase_client()
+        result = client.table(_SNAPSHOTS_TABLE).insert(payload).execute()
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(
+            f"wallet_holdings_snapshots insert failed for {wallet_address}/token {token_id}: {e}"
+        )
+        return None
+
+
+def get_min_usd_for_date(wallet_address: str, day: date) -> Decimal | None:
+    """The wallet's LOWEST total USD holdings across that UTC day.
+
+    Rows sharing a `taken_at` are one sweep, so this sums per sweep first
+    and then takes the minimum across sweeps -- a wallet is paid on what it
+    actually held at its thinnest point that day, never on a flash-funded
+    peak and never on the sum of every row in the day.
+
+    Returns None when the day has no snapshots at all (nothing was
+    observed, so there is no basis to pay on). A wallet that genuinely held
+    nothing returns Decimal(0), which is a real basis and must not be
+    confused with None.
+    """
+    start, end = _day_bounds(day)
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_SNAPSHOTS_TABLE)
+            .select("taken_at,usd_value")
+            .eq("wallet_address", wallet_address.lower())
+            .gte("taken_at", start)
+            .lt("taken_at", end)
+            .limit(_ROW_CAP)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        logger.warning(
+            f"wallet_holdings_snapshots lookup failed for {wallet_address}/{day.isoformat()}: {e}"
+        )
+        return None
+
+    if not rows:
+        return None
+
+    batch_totals: dict[str, Decimal] = {}
+    for row in rows:
+        batch = str(row.get("taken_at"))
+        try:
+            value = Decimal(str(row.get("usd_value", "0")))
+        except (InvalidOperation, ValueError):
+            logger.warning(
+                f"wallet_holdings_snapshots has unparseable usd_value "
+                f"{row.get('usd_value')!r} for {wallet_address}/{day.isoformat()}"
+            )
+            return None
+        batch_totals[batch] = batch_totals.get(batch, Decimal(0)) + value
+
+    return min(batch_totals.values())
+
+
+def list_wallets_with_snapshots_for_date(day: date) -> list[str]:
+    """Every distinct wallet address with at least one snapshot on that UTC
+    day, lowercased and sorted -- the daily job's work list. Empty list on
+    any lookup error."""
+    start, end = _day_bounds(day)
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_SNAPSHOTS_TABLE)
+            .select("wallet_address")
+            .gte("taken_at", start)
+            .lt("taken_at", end)
+            .limit(_ROW_CAP)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        logger.warning(f"wallet_holdings_snapshots wallet list failed for {day.isoformat()}: {e}")
+        return []
+
+    return sorted({str(row["wallet_address"]).lower() for row in rows if row.get("wallet_address")})
+
+
+def get_active_holdings_rates() -> list[dict[str, Any]]:
+    """Active rate tiers, ascending by min_usd. Empty list on any lookup
+    error (or in the pathological case that none are active, which the
+    migration's mandatory min_usd = 0 tier is there to prevent)."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_RATES_TABLE)
+            .select("*")
+            .eq("is_active", True)
+            .order("min_usd", desc=False)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"holdings_reward_rates lookup failed: {e}")
+        return []
+
+
+def select_holdings_rate(rates: list[dict[str, Any]], usd_value: Decimal) -> dict[str, Any] | None:
+    """The tier with the largest min_usd <= usd_value, or None when no tier
+    covers the value (only reachable with a rates table misconfigured
+    without its mandatory min_usd = 0 row).
+
+    Same rule as src/services/staking_rewards.py::_select_rate, kept here
+    beside the rate table so the tier boundary is defined and tested in one
+    place rather than re-derived by each caller.
+    """
+    eligible = [r for r in rates if Decimal(str(r["min_usd"])) <= usd_value]
+    if not eligible:
+        return None
+    return max(eligible, key=lambda r: Decimal(str(r["min_usd"])))
+
+
+def get_holdings_accrual(wallet_address: str, reward_date: date) -> dict[str, Any] | None:
+    """The accrual row for one (wallet_address, reward_date), or None if it
+    doesn't exist yet (or on error). The caller uses this to decide whether
+    this day has already been decided for this wallet -- the core of the
+    job's idempotency."""
+    day = _day_str(reward_date)
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_ACCRUALS_TABLE)
+            .select("*")
+            .eq("wallet_address", wallet_address.lower())
+            .eq("reward_date", day)
+            .execute()
+        )
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"holdings_reward_accruals lookup failed for {wallet_address}/{day}: {e}")
+        return None
+
+
+def create_holdings_accrual(
+    wallet_address: str,
+    reward_date: date,
+    usd_basis: Decimal,
+    credits: Decimal,
+) -> dict[str, Any] | None:
+    """Insert the day's accrual as 'pending', before any credit is granted.
+
+    The status is not a parameter on purpose: a row must exist as pending
+    first, so that a crash between "decided" and "paid" leaves a visible,
+    retryable row rather than a silent loss or a second payment. Marking it
+    paid is mark_holdings_accrual_paid()'s job.
+
+    Returns the created row, or None on any failure -- including the
+    (wallet_address, reward_date) UNIQUE conflict. Callers call
+    get_holdings_accrual() first and only reach this when no row exists, so
+    a conflict here means a concurrent run raced it; re-read via
+    get_holdings_accrual() rather than treating None as a hard failure.
+    """
+    day = _day_str(reward_date)
+    payload = {
+        "wallet_address": wallet_address.lower(),
+        "reward_date": day,
+        "usd_basis": str(usd_basis),
+        "credits": str(credits),
+        "status": "pending",
+        "ledger_request_id": None,
+    }
+    try:
+        client = get_supabase_client()
+        result = client.table(_ACCRUALS_TABLE).insert(payload).execute()
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"holdings_reward_accruals insert failed for {wallet_address}/{day}: {e}")
+        return None
+
+
+def mark_holdings_accrual_paid(accrual_id: int, ledger_request_id: str) -> dict[str, Any] | None:
+    """Flip a pending accrual to 'paid', recording the credit ledger's
+    request_id. That id is the second, independent idempotency guard (the
+    partial unique index on credit_transactions.request_id), so it is
+    stored even though the accrual's own unique index already bounds the
+    row to one per wallet-day. Returns the updated row, or None on any
+    failure."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_ACCRUALS_TABLE)
+            .update(
+                {
+                    "status": "paid",
+                    "ledger_request_id": ledger_request_id,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            )
+            .eq("id", accrual_id)
+            .execute()
+        )
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"holdings_reward_accruals mark_paid failed for id={accrual_id}: {e}")
+        return None
+
+
+def list_pending_holdings_accruals(wallet_address: str) -> list[dict[str, Any]]:
+    """Every still-pending accrual for one wallet, oldest reward_date first
+    (they are paid in order once the wallet is payable). Empty list on any
+    lookup error."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_ACCRUALS_TABLE)
+            .select("*")
+            .eq("wallet_address", wallet_address.lower())
+            .eq("status", "pending")
+            .order("reward_date", desc=False)
+            .limit(_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"holdings_reward_accruals pending lookup failed for {wallet_address}: {e}")
+        return []
