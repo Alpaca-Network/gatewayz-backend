@@ -1,7 +1,7 @@
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from src.db.activity import get_user_usage_since
 from src.db.api_keys import (
@@ -26,6 +26,11 @@ from src.services.auth_rate_limiting import (
     AuthRateLimitType,
     check_auth_rate_limit,
 )
+from src.services.usage_signing import ALG as USAGE_ALG
+from src.services.usage_signing import SigningUnavailable
+from src.services.usage_signing import key_id as usage_key_id
+from src.services.usage_signing import public_key_b64 as usage_public_key_b64
+from src.services.usage_signing import sign as sign_usage
 from src.services.user_lookup_cache import get_user
 from src.utils.security_validators import sanitize_for_logging
 
@@ -546,3 +551,87 @@ async def get_usage_by_tag_endpoint(
         # zero -- the same three-state discipline the partner plan asks for.
         "measured": bool(rows),
     }
+
+
+@router.get("/v1/usage/export", tags=["authentication"])
+async def export_signed_usage(
+    api_key: str = Depends(get_api_key),
+    tag: str | None = None,
+    since: str | None = None,
+):
+    """A signed usage rollup a third party can verify offline.
+
+    The response BODY is the exact byte string that was signed; the signature,
+    algorithm and key id travel in headers. Returning the signature inside a
+    JSON wrapper would invite a consumer to re-serialize the payload before
+    checking it, at which point the signature verifies nothing -- the failure is
+    silent and the crypto is irrelevant.
+
+    Verify with the key at GET /v1/usage/export/key:
+
+        ed25519_verify(public_key, base64_decode(x-gatewayz-signature), body)
+    """
+    user = get_user(api_key)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    since_iso = None
+    if since is not None:
+        try:
+            since_iso = _parse_since(since)
+        except (ValueError, OverflowError, OSError):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Invalid `since` value — use ISO-8601 "
+                    "(e.g. 2026-08-27T00:00:00Z), epoch seconds, or epoch ms"
+                ),
+            )
+
+    rows = get_usage_by_tag(user["id"], tag=tag, since_iso=since_iso)
+    if rows is None:
+        raise HTTPException(status_code=503, detail="Usage rollup unavailable")
+
+    payload = {
+        "usage_export": "1",
+        "issuer": "gatewayz.ai",
+        "subject": f"user/{user['id']}",
+        "tag": tag,
+        "since": since_iso,
+        "generated": datetime.now(UTC).isoformat(),
+        "measured": bool(rows),
+        "data": rows,
+    }
+
+    try:
+        body, envelope = sign_usage(payload)
+    except SigningUnavailable as e:
+        # Never an unsigned export dressed as a signed one: the consumer's
+        # verification step would silently become a no-op.
+        raise HTTPException(status_code=503, detail=f"Signing unavailable: {e}")
+
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "x-gatewayz-signature": envelope["signature"],
+            "x-gatewayz-key-id": envelope["key_id"],
+            "x-gatewayz-alg": envelope["alg"],
+            "access-control-expose-headers": (
+                "x-gatewayz-signature, x-gatewayz-key-id, x-gatewayz-alg"
+            ),
+        },
+    )
+
+
+@router.get("/v1/usage/export/key", tags=["authentication"])
+async def usage_export_public_key():
+    """The verifying key for /v1/usage/export. Public by design, no auth.
+
+    A signed feed whose key needs a credential to fetch cannot be verified by
+    the third party the signature exists for.
+    """
+    try:
+        return {"alg": USAGE_ALG, "key_id": usage_key_id(), "public_key": usage_public_key_b64()}
+    except SigningUnavailable as e:
+        raise HTTPException(status_code=503, detail=f"Signing unavailable: {e}")
