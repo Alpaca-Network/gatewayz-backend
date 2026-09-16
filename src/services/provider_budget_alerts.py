@@ -51,7 +51,10 @@ logger = logging.getLogger(__name__)
 FLUSH_INTERVAL_SECONDS = 60.0
 
 # Default recency window for the /admin/status block. Rows are never deleted; this is a
-# read-time filter that decides what still counts as "current".
+# read-time filter that decides what still counts as "current". It is also handed to the
+# writer, which uses it as the incident boundary -- so "no longer reported" and "a later
+# failure is a new incident rather than a continuation" are the same threshold by
+# construction rather than by two constants agreeing.
 DEFAULT_WINDOW_HOURS = 24
 
 # Marker set on an exception once it has been recorded, so a single upstream failure that
@@ -104,7 +107,14 @@ def _flush(provider: str, reason: str, sample_model: str | None, count: int) -> 
 
     try:
         record_budget_event(
-            provider=provider, reason=reason, sample_model=sample_model, increment=count
+            provider=provider,
+            reason=reason,
+            sample_model=sample_model,
+            increment=count,
+            # Same window /admin/status reads with: a row that has dropped out of the
+            # report has stopped being a current incident, so the next occurrence starts
+            # a new one instead of inheriting a months-old first_seen.
+            stale_after_hours=DEFAULT_WINDOW_HOURS,
         )
         logger.warning(
             "Provider budget exhausted: provider=%s reason=%s model=%s occurrences=%d "

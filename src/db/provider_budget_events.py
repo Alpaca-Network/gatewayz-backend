@@ -64,8 +64,15 @@ def record_budget_event(
     reason: str,
     sample_model: str | None = None,
     increment: int = 1,
+    stale_after_hours: int = 24,
 ) -> None:
     """Upsert one (provider, reason) row, adding ``increment`` occurrences.
+
+    ``stale_after_hours`` is the reader's recency window. A row untouched for longer than
+    that has stopped being reported, so the next occurrence starts a new incident:
+    ``first_seen_at`` and ``occurrences`` reset rather than carrying a months-old outage
+    into today's. Within the window both are preserved and accumulated, so a process
+    restart cannot make a running outage look like it just began.
 
     Raises on failure. The caller (``provider_budget_alerts._flush``) runs this off the
     request path and is responsible for swallowing and re-queuing.
@@ -79,6 +86,7 @@ def record_budget_event(
                 "p_reason": reason,
                 "p_model": sample_model,
                 "p_increment": int(increment),
+                "p_stale_after_hours": int(stale_after_hours),
             },
         ).execute()
 

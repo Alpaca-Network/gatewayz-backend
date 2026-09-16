@@ -79,7 +79,7 @@ class TestWrite:
     def test_the_upsert_rpc_receives_every_parameter_it_declares(self):
         calls: dict = {}
         with _with_client(calls):
-            record_budget_event("anthropic", "credit_balance_low", "claude-sonnet-5", 7)
+            record_budget_event("anthropic", "credit_balance_low", "claude-sonnet-5", 7, 24)
 
         name, params = calls["rpc"]
         assert name == "record_provider_budget_event"
@@ -91,7 +91,21 @@ class TestWrite:
             # app-side read-modify-write would also lose counts across Railway instances,
             # which is why this is a single atomic RPC.
             "p_increment": 7,
+            # The reader's window, so the incident boundary in SQL and "what still counts
+            # as current" in Python are one threshold rather than two that agree today.
+            "p_stale_after_hours": 24,
         }
+
+    def test_the_incident_boundary_is_the_readers_window(self):
+        # If these diverged, a row could drop out of /admin/status while the writer still
+        # treated the next failure as a continuation -- reporting an outage as older than
+        # the surface has been willing to show it.
+        import src.services.provider_budget_alerts as alerts
+
+        calls: dict = {}
+        with _with_client(calls):
+            alerts._flush("anthropic", "credit_balance_low", "claude-sonnet-5", 1)
+        assert calls["rpc"][1]["p_stale_after_hours"] == alerts.DEFAULT_WINDOW_HOURS
 
     def test_the_rpc_signature_in_the_migration_matches_what_we_send(self):
         sql = MIGRATION.read_text()
@@ -100,6 +114,40 @@ class TestWrite:
         with _with_client(calls):
             record_budget_event("anthropic", "credit_balance_low", "m", 1)
         assert set(calls["rpc"][1]) == declared
+
+
+class TestIncidentBoundary:
+    """first_seen_at must survive a restart and must not survive a separate outage.
+
+    Both directions are reporting bugs. Resetting on restart makes a long outage look
+    like it just started; never resetting makes a fresh outage inherit a months-old start
+    date, because this table's rows are never deleted. The SQL is the only place either
+    is decided, so it is asserted here against the migration text -- the behaviour itself
+    was exercised against a local Postgres 16 (see the commit message).
+    """
+
+    def _upsert_clause(self):
+        sql = MIGRATION.read_text()
+        return sql.split("ON CONFLICT ON CONSTRAINT", 1)[1].split("$$;", 1)[0]
+
+    def test_first_seen_is_conditional_not_unconditionally_overwritten(self):
+        clause = self._upsert_clause()
+        assert "first_seen_at = CASE" in clause.replace("\n", " ").replace("  ", " ") or (
+            "first_seen_at = CASE" in " ".join(clause.split())
+        )
+        # The guard is the staleness comparison, not a bare NOW().
+        assert "make_interval(hours => GREATEST(p_stale_after_hours, 1))" in clause
+
+    def test_occurrences_reset_with_the_incident_not_across_it(self):
+        clause = " ".join(self._upsert_clause().split())
+        # Both fields branch on the same staleness test; counting a new outage on top of
+        # an old total would misreport severity the same way first_seen misreports age.
+        assert clause.count("make_interval(hours => GREATEST(p_stale_after_hours, 1))") == 2
+
+    def test_last_seen_is_always_now(self):
+        # last_seen has no incident semantics -- it is "when did we last see this", and a
+        # conditional there would break the recency window the reader filters on.
+        assert "last_seen_at  = NOW()" in self._upsert_clause()
 
     def test_a_failed_write_propagates_so_the_caller_can_requeue(self):
         calls: dict = {}

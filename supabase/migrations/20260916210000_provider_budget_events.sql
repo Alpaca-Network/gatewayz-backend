@@ -47,6 +47,8 @@ COMMENT ON COLUMN public.provider_budget_events.reason IS
     'CHECK would both couple every new reason to a migration and turn a classifier bug '
     'into a swallowed constraint violation in a fire-and-forget writer -- i.e. silently '
     'lose the very alert this table exists to raise.';
+COMMENT ON COLUMN public.provider_budget_events.first_seen_at IS
+    'Start of the CURRENT incident, not the first time this pair was ever seen. Kept across restarts, reset when the row has been stale longer than the reader''s window (see record_provider_budget_event).';
 COMMENT ON COLUMN public.provider_budget_events.sample_model IS
     'One model id from our own catalog that hit this condition, to give the operator '
     'something concrete to retry. Never upstream error text.';
@@ -55,11 +57,23 @@ COMMENT ON COLUMN public.provider_budget_events.sample_model IS
 -- and a read-modify-write from the app would lose counts across concurrent instances.
 -- p_increment carries the number of occurrences the caller coalesced in-process since
 -- its last flush, so throttling the write does not undercount.
+--
+-- first_seen_at answers "how long has this been going on", so it must survive a restart
+-- (an alert that resets its own start time misreports the age of an outage) *and* must
+-- not carry over from a previous, separate outage. Both directions matter: this row is
+-- never deleted, so without the staleness reset an account that ran dry in September and
+-- again in November would report the November incident as three months old.
+--
+-- p_stale_after_hours is the caller's read window (DEFAULT_WINDOW_HOURS in
+-- src/services/provider_budget_alerts.py). Passing it rather than hardcoding 24 here
+-- keeps one definition of "current": if a row has dropped out of the window /admin/status
+-- reads, it has stopped being reported, so the next occurrence is a new incident.
 CREATE OR REPLACE FUNCTION public.record_provider_budget_event(
-    p_provider  TEXT,
-    p_reason    TEXT,
-    p_model     TEXT DEFAULT NULL,
-    p_increment BIGINT DEFAULT 1
+    p_provider          TEXT,
+    p_reason            TEXT,
+    p_model             TEXT DEFAULT NULL,
+    p_increment         BIGINT DEFAULT 1,
+    p_stale_after_hours INT DEFAULT 24
 ) RETURNS void
 LANGUAGE sql
 SET search_path = public, pg_temp
@@ -67,9 +81,22 @@ AS $$
     INSERT INTO public.provider_budget_events (provider, reason, sample_model, occurrences)
     VALUES (p_provider, p_reason, p_model, GREATEST(p_increment, 1))
     ON CONFLICT ON CONSTRAINT provider_budget_events_unique_per_reason DO UPDATE
-        SET last_seen_at = NOW(),
-            occurrences  = public.provider_budget_events.occurrences + GREATEST(p_increment, 1),
-            sample_model = COALESCE(EXCLUDED.sample_model, public.provider_budget_events.sample_model);
+        SET last_seen_at  = NOW(),
+            -- Continuing incident: keep the original start. Stale row: start a new one.
+            first_seen_at = CASE
+                WHEN public.provider_budget_events.last_seen_at
+                     < NOW() - make_interval(hours => GREATEST(p_stale_after_hours, 1))
+                THEN NOW()
+                ELSE public.provider_budget_events.first_seen_at
+            END,
+            -- Occurrences reset with the incident, for the same reason.
+            occurrences   = CASE
+                WHEN public.provider_budget_events.last_seen_at
+                     < NOW() - make_interval(hours => GREATEST(p_stale_after_hours, 1))
+                THEN GREATEST(p_increment, 1)
+                ELSE public.provider_budget_events.occurrences + GREATEST(p_increment, 1)
+            END,
+            sample_model  = COALESCE(EXCLUDED.sample_model, public.provider_budget_events.sample_model);
 $$;
 
 -- The app reaches Supabase only as service_role. anon/authenticated are revoked
@@ -81,9 +108,9 @@ REVOKE ALL ON public.provider_budget_events FROM anon, authenticated;
 GRANT ALL ON public.provider_budget_events TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.provider_budget_events_id_seq TO service_role;
 
-REVOKE ALL ON FUNCTION public.record_provider_budget_event(TEXT, TEXT, TEXT, BIGINT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.record_provider_budget_event(TEXT, TEXT, TEXT, BIGINT) FROM anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.record_provider_budget_event(TEXT, TEXT, TEXT, BIGINT) TO service_role;
+REVOKE ALL ON FUNCTION public.record_provider_budget_event(TEXT, TEXT, TEXT, BIGINT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.record_provider_budget_event(TEXT, TEXT, TEXT, BIGINT, INT) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.record_provider_budget_event(TEXT, TEXT, TEXT, BIGINT, INT) TO service_role;
 
 -- PostgREST caches the schema; without this a fresh table/function 404s until the next
 -- cache refresh (PGRST202/PGRST205).
