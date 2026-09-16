@@ -456,6 +456,9 @@ def create_app() -> FastAPI:
             "Admin Staff Management",
         ),  # Phase A2 -- superadmin-gated staff CRUD + invites
         ("admin_audit", "Admin Audit Log"),  # Phase A3 -- GET /admin/audit
+        # Exposes the pre-existing src/db/downtime_incidents.py data layer that
+        # had no routes; the panel's Downtime page was 404ing against it.
+        ("admin_downtime", "Admin Downtime Incidents"),
         ("live_model_test", "Live Model Test"),  # Admin live inference sweep
         # ("admin_pricing_analytics", "Admin Pricing Analytics"),  # REMOVED - Phase 2 deprecation
         ("api_key_monitoring", "API Key Tracking Monitoring"),  # API key tracking quality metrics
