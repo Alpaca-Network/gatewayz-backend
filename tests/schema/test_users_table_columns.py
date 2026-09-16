@@ -123,13 +123,47 @@ def _chain_root(node: ast.AST) -> ast.AST | None:
     return None
 
 
+# Column lists are not always literals at the call site. A module that hoists its
+# spec into a constant -- `_LIST_COLUMNS = "id, email"` then `.select(_LIST_COLUMNS)`
+# -- reaches this scanner as an ast.Name and used to sail straight past, which
+# meant the queries most worth guarding (the long, shared, carefully-maintained
+# ones) were exactly the queries not guarded. Mutation-tested: planting a phantom
+# column behind a constant went undetected before this.
+_STRING_CONSTANTS: dict[str, str] = {}
+
+
+def _collect_string_constants(tree: ast.Module) -> dict[str, str]:
+    """Module- and class-level `NAME = "..."` assignments."""
+    found: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        value = node.value
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            if isinstance(target, ast.Name):
+                found[target.id] = value.value
+    return found
+
+
+def _spec_of(arg: ast.expr) -> str | None:
+    """The literal select spec behind an argument, resolving constants."""
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        return arg.value
+    if isinstance(arg, ast.Name):
+        return _STRING_CONSTANTS.get(arg.id)
+    return None
+
+
 def _columns_from_select(call: ast.Call) -> list[str]:
     """Column names out of `.select("a, b", "c", count="exact")`."""
     columns: list[str] = []
     for arg in call.args:
-        if not isinstance(arg, ast.Constant) or not isinstance(arg.value, str):
+        spec = _spec_of(arg)
+        if spec is None:
             continue
-        spec = arg.value
         depth = 0
         current = ""
         parts: list[str] = []
@@ -257,6 +291,8 @@ def _offenders() -> list[str]:
     problems: list[str] = []
     for path in sorted(SRC.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        global _STRING_CONSTANTS
+        _STRING_CONSTANTS = _collect_string_constants(tree)
         rel = path.relative_to(SRC).as_posix()
 
         scopes: list[list[ast.stmt]] = [tree.body]
@@ -312,3 +348,34 @@ def test_scanner_accepts_embedded_resources_and_valid_columns(tmp_path, monkeypa
     monkeypatch.setattr(module, "SRC", fake_src)
 
     assert module._offenders() == []
+
+
+def test_scanner_resolves_a_select_list_held_in_a_constant():
+    """A hoisted column list must be scanned, not skipped.
+
+    Found by mutation-testing this guard on 2026-09-16: planting a phantom
+    column in a literal `.select("...")` was caught, but planting the same
+    column behind `_COLS = "..."` / `.select(_COLS)` was not. That is the
+    worst possible shape to miss -- a column list gets hoisted into a
+    constant precisely when it is long, shared and carefully maintained,
+    which is to say when it is most worth guarding.
+    """
+    global _STRING_CONSTANTS
+
+    # The call must sit at module scope: _walk_scope deliberately does not
+    # descend into nested function scopes, and _scan_scope is driven per-scope
+    # by the real scanner.
+    source = (
+        '_COLS = "id, email, phantom_column"\n'
+        'result = client.table("users").select(_COLS).execute()\n'
+    )
+    tree = ast.parse(source)
+    _STRING_CONSTANTS = _collect_string_constants(tree)
+
+    assert _STRING_CONSTANTS == {"_COLS": "id, email, phantom_column"}
+
+    found = [col for _line, col in _scan_scope(tree.body)]
+    assert "phantom_column" in found, f"constant-held select list was not scanned: {found}"
+    assert "email" in found, "resolving the constant must not lose the valid columns"
+
+    _STRING_CONSTANTS = {}

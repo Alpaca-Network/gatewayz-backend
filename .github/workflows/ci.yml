@@ -152,6 +152,17 @@ jobs:
             paths: "tests/security/ tests/utils/"
           - category: conceptual
             paths: "tests/conceptual_model/ tests/unit/"
+          # tests/schema/ (singular) holds the static guards that scan src/ for
+          # queries naming columns the database does not have -- the defect class
+          # behind seven production failures in Sep 2026. Note the neighbouring
+          # "tests/schemas/" (plural, pydantic models) under `billing`: the two
+          # directories differ by one character, and that is exactly why these
+          # guards sat outside the matrix and never ran in CI until 2026-09-16.
+          # They are pure AST/regex scans over source -- no network, no database --
+          # so they must NOT live under tests/db/, which self-skips when Supabase
+          # is unreachable and would make a skipped guard read as coverage.
+          - category: schema-guards
+            paths: "tests/schema/"
 
     steps:
       - name: Checkout code
