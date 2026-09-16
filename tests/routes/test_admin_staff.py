@@ -88,7 +88,6 @@ class TestGetStaff:
         assert body["success"] is True
         assert body["data"]["staff"] == rows
 
-
     def test_db_failure_returns_503_not_an_empty_roster(self, admin_override):
         """A broken query must not be rendered as "there is no staff"."""
         with patch(

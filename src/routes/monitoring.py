@@ -1143,17 +1143,13 @@ async def get_models_with_requests(
                 },
             }
 
-        models_query = (
-            client.table("models")
-            .select("""
+        models_query = client.table("models").select("""
             id,
             model_name,
             provider_model_id,
             provider_id,
             providers!inner(id, name, slug)
-            """)
-            .in_("id", candidate_model_ids)
-        )
+            """).in_("id", candidate_model_ids)
 
         # Apply provider filter if specified
         if provider_id is not None:

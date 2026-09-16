@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field, model_validator
 
 from src.schemas.common import PlanType, SubscriptionStatus
 
-
 # Almost every column on the `plans` table is nullable in Postgres, and rows
 # predating a column's introduction hold SQL NULL. A pydantic default only
 # applies when a key is absent -- an explicit None still fails validation -- so
