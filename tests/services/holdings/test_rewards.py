@@ -47,6 +47,12 @@ class FakeHoldingsDB:
         self.linked: dict[str, dict] = {}
         self.credit_calls: list[dict] = []
         self.fail_next_credit_calls = 0
+        # What each account spent on inference in the lookback window. The
+        # default is deliberately far above any reward a test can generate, so
+        # a test that does not care about the usage match is not silently
+        # bounded by it -- only tests that set a spend exercise that ceiling.
+        self.usage_spend: dict[int, Decimal] = {}
+        self.default_usage_spend = Decimal("1000000")
 
     # -- src.db.holdings ------------------------------------------------------
     def get_active_holdings_rates(self):
@@ -118,6 +124,26 @@ class FakeHoldingsDB:
             raise RuntimeError("ledger write failed")
         self.credit_calls.append(kwargs)
 
+    def sum_holdings_credits_since(self, wallet_addresses, since_date):
+        addresses = {a.lower() for a in wallet_addresses}
+        floor = _day_str(since_date)
+        return sum(
+            (
+                Decimal(r["credits"])
+                for r in self.accruals.values()
+                if r["wallet_address"] in addresses
+                and r["reward_date"] >= floor
+                and r["status"] in ("pending", "paid")
+            ),
+            Decimal(0),
+        )
+
+    def get_usage_cost_for_window(self, user_id, since):
+        return self.usage_spend.get(user_id, self.default_usage_spend)
+
+    def spent(self, user_id, usd):
+        self.usage_spend[user_id] = Decimal(str(usd))
+
     def link(self, address, user_id):
         self.linked[address.lower()] = {"wallet_address": address.lower(), "user_id": user_id}
 
@@ -150,6 +176,11 @@ def db(monkeypatch):
     monkeypatch.setattr(
         rewards.Config, "HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS", 10000.0, raising=False
     )
+    monkeypatch.setattr(rewards.Config, "HOLDINGS_USAGE_MATCH_ENABLED", True, raising=False)
+    monkeypatch.setattr(
+        rewards.Config, "HOLDINGS_USAGE_MATCH_MULTIPLIER", Decimal("1.0"), raising=False
+    )
+    monkeypatch.setattr(rewards.Config, "HOLDINGS_USAGE_LOOKBACK_DAYS", 7, raising=False)
     for name in (
         "get_active_holdings_rates",
         "list_wallets_with_sweeps_for_date",
@@ -162,6 +193,8 @@ def db(monkeypatch):
         "get_wallet",
         "get_wallets_for_user",
         "add_credits_to_user",
+        "get_usage_cost_for_window",
+        "sum_holdings_credits_since",
     ):
         monkeypatch.setattr(rewards, name, getattr(fake, name))
     return fake
@@ -425,6 +458,17 @@ class TestPayoutAndIdempotency:
 
 
 class TestUnlinkedWallets:
+    """The pay-on-link path, which only exists while the usage match is off.
+
+    With the match on there is no usage to match an account-less wallet
+    against, so it accrues nothing at all -- see
+    TestUsageMatch.test_an_unlinked_wallet_accrues_nothing.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_usage_match(self, db, monkeypatch):
+        monkeypatch.setattr(rewards.Config, "HOLDINGS_USAGE_MATCH_ENABLED", False, raising=False)
+
     def test_unlinked_wallet_accrues_pending_and_is_not_paid(self, db):
         db.observe(W1, 1000)
         result = rewards.run_holdings_rewards_once(DAY)
@@ -611,9 +655,128 @@ class TestSkipReasonBreakdown:
             "no_rate_tier": 0,
             "zero_credits": 0,
             "budget_exhausted": 1,
+            "unlinked": 0,
+            "no_usage": 0,
         }
         assert result["skipped_total"] == 3
 
     def test_disabled_is_its_own_outcome_not_a_skip_count(self, db, monkeypatch):
         monkeypatch.setattr(rewards.Config, "HOLDINGS_REWARDS_ENABLED", False, raising=False)
         assert rewards.run_holdings_rewards_once(DAY) == {"skipped": "disabled"}
+
+
+class TestUsageMatch:
+    """Holding alone earns nothing: what a wallet can earn is bounded by what
+    its account actually spent on inference over the lookback window.
+
+    The programme buys customers, not balances. A whale who holds and never
+    runs a request is not a customer, and paying them converts nothing.
+    """
+
+    def test_an_account_that_never_ran_inference_earns_nothing(self, db):
+        db.observe(W1, 5000)  # would earn 10 credits on holdings alone
+        db.link(W1, 7)
+        db.spent(7, 0)
+        result = rewards.run_holdings_rewards_once(DAY)
+        assert result["skipped"]["no_usage"] == 1
+        assert result["paid"] == 0
+        assert db.accruals == {}
+        assert db.credit_calls == []
+
+    def test_earnings_are_clipped_to_what_the_account_spent(self, db):
+        db.observe(W1, 5000)  # holdings alone -> 10 credits
+        db.link(W1, 7)
+        db.spent(7, "2.50")
+        result = rewards.run_holdings_rewards_once(DAY)
+        assert db.accruals[(W1, DAY_STR)]["credits"] == "2.500000"
+        assert result["usage_capped"] == 1
+        assert result["paid"] == 1
+
+    def test_a_heavy_user_is_paid_in_full(self, db):
+        db.observe(W1, 5000)
+        db.link(W1, 7)
+        db.spent(7, "500")
+        result = rewards.run_holdings_rewards_once(DAY)
+        assert db.accruals[(W1, DAY_STR)]["credits"] == "10.000000"
+        assert result["usage_capped"] == 0
+
+    def test_the_multiplier_scales_the_allowance(self, db, monkeypatch):
+        monkeypatch.setattr(
+            rewards.Config, "HOLDINGS_USAGE_MATCH_MULTIPLIER", Decimal("2.0"), raising=False
+        )
+        db.observe(W1, 5000)
+        db.link(W1, 7)
+        db.spent(7, "3")
+        rewards.run_holdings_rewards_once(DAY)
+        assert db.accruals[(W1, DAY_STR)]["credits"] == "6.000000"
+
+    def test_one_weeks_spend_cannot_be_claimed_once_per_day(self, db):
+        """The allowance is a budget the window consumes, not a nightly reset.
+
+        Applied per day, $4 of spend would authorise $4 of credits on Monday
+        AND $4 again on Tuesday -- the same spend paid for twice. The second
+        day sees the first day's grant already counted against it.
+        """
+        monday = date(2026, 9, 13)
+        db.spent(7, "4")
+        db.link(W1, 7)
+
+        db.observe(W1, 5000, day=monday)
+        rewards.run_holdings_rewards_once(monday)
+        assert db.accruals[(W1, monday.isoformat())]["credits"] == "4.000000"
+
+        db.observe(W1, 5000, day=DAY)
+        result = rewards.run_holdings_rewards_once(DAY)
+        assert result["skipped"]["no_usage"] == 1
+        assert (W1, DAY_STR) not in db.accruals
+
+    def test_two_wallets_on_one_account_share_the_allowance(self, db):
+        """Splitting a balance across wallets must not multiply the allowance,
+        the same way it does not multiply the per-account daily cap."""
+        db.spent(7, "6")
+        for wallet in (W1, W2):
+            db.observe(wallet, 5000)
+            db.link(wallet, 7)
+        rewards.run_holdings_rewards_once(DAY)
+        granted = sum(Decimal(r["credits"]) for r in db.accruals.values())
+        assert granted == Decimal("6.000000")
+
+    def test_an_unlinked_wallet_accrues_nothing(self, db):
+        """Not even pending. A pending row would be paid in full the moment
+        the wallet links, which is how a holder collects a whole window of
+        days off one dollar of spend."""
+        db.observe(W1, 5000)
+        result = rewards.run_holdings_rewards_once(DAY)
+        assert result["skipped"]["unlinked"] == 1
+        assert db.accruals == {}
+
+    def test_a_usage_lookup_failure_pays_nothing_rather_than_everything(self, db, monkeypatch):
+        def boom(_user_id, _since):
+            raise RuntimeError("usage_records unreachable")
+
+        # The db layer swallows this and reports zero spend; the point of the
+        # test is that "we could not tell" must not become an open cheque.
+        monkeypatch.setattr(rewards, "get_usage_cost_for_window", lambda u, s: Decimal(0))
+        db.observe(W1, 5000)
+        db.link(W1, 7)
+        result = rewards.run_holdings_rewards_once(DAY)
+        assert result["skipped"]["no_usage"] == 1
+        assert db.credit_calls == []
+
+    def test_the_match_can_be_turned_off(self, db, monkeypatch):
+        monkeypatch.setattr(rewards.Config, "HOLDINGS_USAGE_MATCH_ENABLED", False, raising=False)
+        db.observe(W1, 5000)
+        db.link(W1, 7)
+        db.spent(7, 0)
+        result = rewards.run_holdings_rewards_once(DAY)
+        assert result["paid"] == 1
+        assert db.accruals[(W1, DAY_STR)]["credits"] == "10.000000"
+
+    def test_the_per_account_cap_still_applies_under_a_large_allowance(self, db):
+        """The usage match is an extra ceiling, not a replacement for the
+        others: a big spender is still held to the daily cap."""
+        db.observe(W1, 100000)  # holdings alone -> 200 credits, cap is 50
+        db.link(W1, 7)
+        db.spent(7, "10000")
+        rewards.run_holdings_rewards_once(DAY)
+        assert db.accruals[(W1, DAY_STR)]["credits"] == "50.000000"
