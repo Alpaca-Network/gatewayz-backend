@@ -52,8 +52,21 @@ async def get_plans():
                 logger.error(f"Error processing plan {plan.get('id', 'unknown')}: {plan_error}")
                 continue
 
-        # Sort plans by type (Free, Dev, Team, Customize); unknown types sort last.
-        plan_order = {"free": 0, "dev": 1, "team": 2, "customize": 3}
+        # Cosmetic tier ordering. The vocabulary here is the one that actually
+        # exists in `plans.plan_type` -- derived from plans.name by
+        # 20260915164500_backfill_plans_plan_type.sql and pinned by that column's
+        # COMMENT -- not the old free/dev/team/customize enum, whose values never
+        # appeared in the table. Unknown types sort last; Python's sort is stable,
+        # so they keep the order the database returned them in.
+        plan_order = {
+            "free": 0,
+            "trial": 1,
+            "starter": 2,
+            "professional": 3,
+            "business": 4,
+            "enterprise": 5,
+            "admin": 6,
+        }
         plan_responses.sort(key=lambda p: plan_order.get(p.plan_type, 999))
 
         logger.info(f"Returning {len(plan_responses)} plan responses")
