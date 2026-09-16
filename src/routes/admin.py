@@ -20,18 +20,18 @@ from src.db.users import (
     get_user,
 )
 from src.enhanced_notification_service import enhanced_notification_service
-from src.schemas import (
-    AddCreditsRequest,
-    SetRateLimitRequest,
-    UserRegistrationRequest,
-    UserRegistrationResponse,
-)
 
 # PostgREST silently truncates any select above db-max-rows (1000), so this
 # ceiling is shared rather than redefined: a larger one would promise rows
 # the database will never return, and the caller cannot tell a full page
 # from a truncated one.
 from src.routes.monitoring import CHAT_REQUESTS_MAX_LIMIT
+from src.schemas import (
+    AddCreditsRequest,
+    SetRateLimitRequest,
+    UserRegistrationRequest,
+    UserRegistrationResponse,
+)
 from src.security.deps import require_admin
 
 # Cache management functions migrated to model_catalog_cache
