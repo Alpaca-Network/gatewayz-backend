@@ -209,7 +209,7 @@ def get_users_by_role(role: str, limit: int = 100) -> list[dict[str, Any]]:
 
         result = (
             client.table("users")
-            .select("id, username, email, role, role_metadata, created_at")
+            .select("id, username, email, role, created_at")
             .eq("role", role)
             .limit(limit)
             .execute()
