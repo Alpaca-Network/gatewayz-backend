@@ -286,3 +286,24 @@ def pytest_configure(config):
         "markers",
         "benchmark: marks tests as benchmark tests (deselect with '-m \"not benchmark\"')",
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_background_provider_budget_writes(monkeypatch):
+    """Keep the provider-budget recorder's background writer out of the test run.
+
+    src/services/provider_budget_alerts.py hands its durable write to a
+    ThreadPoolExecutor. Under test that thread would reach for the fake Supabase URL
+    this file sets, and ThreadPoolExecutor joins its workers at interpreter exit, so a
+    stuck HTTP call would hang teardown rather than fail a test. Stub the dispatch out
+    by default; the tests that care about what gets written patch `_submit` themselves
+    with a synchronous capture, and are unaffected by this.
+    """
+    import src.services.provider_budget_alerts as alerts
+
+    monkeypatch.setattr(alerts, "_submit", lambda fn, *args: None)
+    # The coalescing ledger is module-level state: without this, whether a given
+    # test sees a flush depends on which test ran before it.
+    alerts._reset_state_for_tests()
+    yield
+    alerts._reset_state_for_tests()

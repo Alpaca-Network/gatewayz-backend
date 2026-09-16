@@ -4,8 +4,9 @@
 ``src/routes/admin_wayz.py``) into the broader operational surface the
 admin panel needs: job health (reused, not copied, from admin_wayz's own
 block builders), external integration health
-(``src/services/integrations_health.py``), and secrets *presence* -- never
-values -- for a fixed allow-list of env vars. ``GET /admin/wayz/status``
+(``src/services/integrations_health.py``), secrets *presence* -- never
+values -- for a fixed allow-list of env vars, and provider budget
+exhaustion (``src/services/provider_budget_alerts.py``). ``GET /admin/wayz/status``
 keeps working unchanged; this route is additive.
 
 Same degradation contract as admin_wayz: every sub-block is computed
@@ -35,6 +36,7 @@ from src.routes.admin_wayz import (
 from src.security.deps import require_admin_or_env_key
 from src.services.integrations_health import check_all
 from src.services.privy_migration import migration_counts
+from src.services.provider_budget_alerts import provider_budget_status
 from src.services.secrets_registry import SECRET_NAMES, secret_ages
 
 logger = logging.getLogger(__name__)
@@ -69,6 +71,27 @@ def _build_migration_block() -> dict[str, Any]:
     }
 
 
+def _build_provider_budget_block() -> dict[str, Any]:
+    """Which of *our* provider accounts have run out of money, from
+    src/services/provider_budget_alerts.py.
+
+    The counterpart to PROVIDER_CAPACITY_MESSAGE. End users are told only that a
+    model is "temporarily unavailable due to a capacity limit on our side", which is
+    right -- our billing state is not theirs to see -- but until this block existed
+    nobody else was told anything either, so an unfunded Anthropic key that took all
+    11 of its models down read as transient and users retried forever.
+
+    This is an admin-only surface, so it carries more than "degraded": provider,
+    which budget condition, since when, how often, and one affected model. All of
+    those are fields the gateway owns. What it deliberately does NOT carry is any
+    slice of the upstream error text, which embeds key ids and dashboard URLs --
+    ``reason`` is a constant from PROVIDER_BUDGET_REASONS, not a quote. That is the
+    line: more specific than the user-facing message, without reopening the leak the
+    sanitizer closes.
+    """
+    return provider_budget_status()
+
+
 def _build_wayz_block(jobs_block: dict[str, Any]) -> dict[str, Any]:
     """The same payload as GET /admin/wayz/status, minus jobs (reported at
     the top level of this response instead, alongside integrations/secrets).
@@ -96,6 +119,7 @@ async def get_admin_status(
         "secrets": _safe_block(_build_secrets_block, "secrets"),
         "wayz": _safe_block(lambda: _build_wayz_block(jobs_block), "wayz"),
         "migration": _safe_block(_build_migration_block, "migration"),
+        "provider_budget": _safe_block(_build_provider_budget_block, "provider_budget"),
     }
 
     return {"success": True, "data": data}

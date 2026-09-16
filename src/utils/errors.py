@@ -10,6 +10,7 @@ Public surface (re-exported verbatim for importers):
   - ``APIExceptions`` (FastAPI HTTPException builders)
   - ``DetailedErrorFactory`` (provider-error -> client-status mapping)
   - ``PROVIDER_CAPACITY_MESSAGE``, ``is_provider_budget_error``,
+    ``classify_provider_budget_error``, ``PROVIDER_BUDGET_REASONS``,
     ``sanitize_provider_error_for_user`` (user-facing sanitization)
   - ``ErrorCode``/``ErrorCategory`` enums and their helper functions
 """
@@ -407,18 +408,50 @@ PROVIDER_CAPACITY_MESSAGE = (
     "Please try a different model or try again shortly."
 )
 
+# Closed vocabulary of operator-facing reasons for provider budget exhaustion.
+#
+# Why a closed set: the raw upstream text is the *only* thing that distinguishes these
+# conditions, and it embeds key ids and dashboard URLs (see sanitize_provider_error_for_user
+# below). Classifying into fixed constants lets an operator surface say which condition
+# occurred without ever storing or rendering a substring of the upstream message.
+#
+# "rate limited" is deliberately NOT a member. An upstream 429 is a throughput limit, not
+# an empty account; the error mappers route it through their own rate-limit branches, and
+# folding it in here would put a self-clearing condition on a surface whose entire purpose
+# is to flag the ones that need a human to spend money.
+PROVIDER_BUDGET_REASONS: tuple[str, ...] = (
+    "credit_balance_low",
+    "quota_exhausted",
+    "spend_limit_reached",
+    "payment_required",
+    "unknown",
+)
+
 # Patterns that indicate an upstream provider ran out of budget/credits rather than a
-# problem with the user's own request. Matched case-insensitively against the raw error.
-_PROVIDER_BUDGET_PATTERNS = (
-    "requires more credits",
-    "can only afford",
-    "adjust the key",
-    "weekly limit",
-    "insufficient_quota",
-    "payment required",
-    # Anthropic's unfunded-account error is an HTTP 400 (not 402) whose text is
-    # the only budget signal (issue #2236).
-    "credit balance is too low",
+# problem with the user's own request, grouped by the reason they map to. Matched
+# case-insensitively against the raw error, most specific group first: an unfunded
+# Anthropic account and a 402 can both say "payment", and "why" is what the operator
+# acts on, so the more specific cause wins.
+_PROVIDER_BUDGET_REASON_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "credit_balance_low",
+        (
+            "requires more credits",
+            "can only afford",
+            # Anthropic's unfunded-account error is an HTTP 400 (not 402) whose text is
+            # the only budget signal (issue #2236).
+            "credit balance is too low",
+        ),
+    ),
+    ("quota_exhausted", ("insufficient_quota",)),
+    ("spend_limit_reached", ("weekly limit", "adjust the key")),
+    ("payment_required", ("payment required",)),
+)
+
+# Flat view of the same table, so the detector and the classifier can never disagree
+# about what counts as a budget error.
+_PROVIDER_BUDGET_PATTERNS = tuple(
+    pattern for _reason, patterns in _PROVIDER_BUDGET_REASON_PATTERNS for pattern in patterns
 )
 
 _URL_RE = re.compile(r"https?://\S+")
@@ -427,14 +460,37 @@ _URL_RE = re.compile(r"https?://\S+")
 _HEX_SECRET_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
 
 
+def _is_402(lowered: str) -> bool:
+    """True if the (already lowercased) error text carries an explicit upstream 402."""
+    return "error code: 402" in lowered or '"code": 402' in lowered or "'code': 402" in lowered
+
+
 def is_provider_budget_error(raw_error: str | None) -> bool:
     """True if the raw provider error indicates the provider account/key is out of budget."""
+    return classify_provider_budget_error(raw_error) is not None
+
+
+def classify_provider_budget_error(raw_error: str | None) -> str | None:
+    """Classify a raw provider error into a PROVIDER_BUDGET_REASONS member, or None.
+
+    None means "this is not a budget error" -- the inverse of is_provider_budget_error(),
+    which is defined in terms of this function so the two can never drift.
+
+    The return value is always one of the module-level constants, never a slice of
+    ``raw_error``. That is the whole point: callers can record *which* budget condition a
+    provider hit without persisting upstream text that embeds key ids and dashboard URLs.
+    """
     if not raw_error:
-        return False
+        return None
     lowered = str(raw_error).lower()
-    if "error code: 402" in lowered or '"code": 402' in lowered or "'code': 402" in lowered:
-        return True
-    return any(pattern in lowered for pattern in _PROVIDER_BUDGET_PATTERNS)
+    for reason, patterns in _PROVIDER_BUDGET_REASON_PATTERNS:
+        if any(pattern in lowered for pattern in patterns):
+            return reason
+    # A bare upstream 402 with no recognizable text is still a budget error; "payment
+    # required" is exactly what the status code means.
+    if _is_402(lowered):
+        return "payment_required"
+    return None
 
 
 def sanitize_provider_error_for_user(raw_error: str | None, max_length: int = 200) -> str:
