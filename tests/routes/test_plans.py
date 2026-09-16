@@ -126,16 +126,39 @@ class TestPlansNullColumns:
         by_id = {p["id"]: p["plan_type"] for p in resp.json()}
         assert by_id == {7: "admin", 1: "free"}
 
-    def test_get_plans_sorts_unknown_plan_type_last(self, client):
+    def test_get_plans_sorts_by_production_plan_type_vocabulary(self, client):
+        """The sort table must be the vocabulary the `plans` table actually holds.
+
+        Production plan_type values are free, trial, starter, professional,
+        business, enterprise, admin (backfilled from plans.name by
+        20260915164500). The route used to sort on free/dev/team/customize -- the
+        old PlanType enum -- of which only "free" ever appeared in the table, so
+        six of seven rows tied on the fallback key and the ordering was
+        effectively "Free first, then whatever order the database returned".
+        """
         rows = [
             self._row(id=7, name="Admin", plan_type="admin"),
+            self._row(id=4, name="Professional", plan_type="professional"),
+            self._row(id=1, name="Free", plan_type=None),
+            self._row(id=3, name="Starter", plan_type="starter"),
+            self._row(id=2, name="Free Trial", plan_type="trial"),
+        ]
+        with patch("src.routes.plans.get_all_plans", return_value=rows):
+            resp = client.get("/plans")
+
+        assert resp.status_code == 200
+        assert [p["id"] for p in resp.json()] == [1, 2, 3, 4, 7]
+
+    def test_get_plans_sorts_unknown_plan_type_last(self, client):
+        rows = [
+            self._row(id=99, name="Mystery", plan_type="not_a_known_tier"),
             self._row(id=1, name="Free", plan_type=None),
         ]
         with patch("src.routes.plans.get_all_plans", return_value=rows):
             resp = client.get("/plans")
 
-        # "free" is in the sort table, "admin" is not, so Free comes first.
-        assert [p["id"] for p in resp.json()] == [1, 7]
+        # "free" is in the sort table, "not_a_known_tier" is not.
+        assert [p["id"] for p in resp.json()] == [1, 99]
 
     def test_get_plan_by_id_with_null_plan_type_returns_200(self, client):
         with patch("src.routes.plans.get_plan_by_id", return_value=self._row()):

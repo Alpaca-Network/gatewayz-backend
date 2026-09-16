@@ -29,7 +29,7 @@ from src.schemas.api_keys import (
 from src.schemas.auth import PrivyAuthRequest, PrivyAuthResponse, PrivyLinkedAccount, PrivyUserData
 
 # Common enums
-from src.schemas.common import AuthMethod, PaymentMethod, PlanType, SubscriptionStatus
+from src.schemas.common import AuthMethod, PaymentMethod, SubscriptionStatus
 
 # Payment models (includes both generic payment and Stripe-specific models)
 from src.schemas.payments import (
@@ -62,19 +62,17 @@ from src.schemas.payments import (
     StripeWebhookEventType,
 )
 from src.schemas.payments import (
-    SubscriptionPlan as PaymentSubscriptionPlan,  # Stripe-specific models; Rename to avoid conflict
+    SubscriptionPlan as PaymentSubscriptionPlan,  # Stripe-specific; kept aliased for callers
 )
 from src.schemas.payments import SubscriptionResponse, WebhookProcessingResult
 
 # Plan models
-from src.schemas.plans import SubscriptionPlan  # This is the correct one for trial service
 from src.schemas.plans import (
     AssignPlanRequest,
     PlanEntitlementsResponse,
     PlanResponse,
     PlanUsageResponse,
     SubscriptionHistory,
-    SubscriptionPlansResponse,
     UserPlanResponse,
 )
 
@@ -122,7 +120,6 @@ __all__ = [
     "AuthMethod",
     "PaymentMethod",
     "SubscriptionStatus",
-    "PlanType",
     # Auth
     "PrivyAuthRequest",
     "PrivyAuthResponse",
@@ -154,7 +151,6 @@ __all__ = [
     "PaymentSummary",
     # Plans
     "PlanResponse",
-    "SubscriptionPlan",
     "UserPlanResponse",
     # Admin
     "UsageMetrics",

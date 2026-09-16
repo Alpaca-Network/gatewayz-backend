@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
 
-from src.schemas.common import PlanType, SubscriptionStatus
+from src.schemas.common import SubscriptionStatus
 
 # Almost every column on the `plans` table is nullable in Postgres, and rows
 # predating a column's introduction hold SQL NULL. A pydantic default only
@@ -63,26 +63,13 @@ class PlanResponse(BaseModel):
         return coerced
 
 
-class SubscriptionPlan(BaseModel):
-    """Detailed subscription plan model with all fields"""
-
-    id: int | None = None
-    plan_name: str
-    plan_type: PlanType
-    description: str = ""
-    monthly_price: float = 0.0
-    yearly_price: float | None = None
-    daily_request_limit: int = 1000
-    monthly_request_limit: int = 1000
-    daily_token_limit: int = 100000
-    monthly_token_limit: int = 100000
-    max_concurrent_requests: int = 5
-    price_per_token: float | None = None
-    features: list[str] = Field(default_factory=list)
-    is_active: bool = True
-    is_pay_as_you_go: bool = False
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+# NOTE: `SubscriptionPlan` and `SubscriptionPlansResponse` used to live here.
+# They were the response models for GET /subscription/plans, which has returned
+# HTTP 410 since #2180 moved billing to credits-only, and they had no other
+# caller anywhere in the tree. They carried the only reference to the
+# `PlanType` enum, whose vocabulary (free/dev/team/customize) never matched the
+# production `plans.plan_type` column; both were deleted together rather than
+# keeping a second, contradictory plan vocabulary alive in dead code.
 
 
 class SubscriptionHistory(BaseModel):
@@ -97,14 +84,6 @@ class SubscriptionHistory(BaseModel):
     price_paid: float = 0.0
     payment_method: str | None = None
     created_at: datetime | None = None
-
-
-class SubscriptionPlansResponse(BaseModel):
-    """Response for available subscription plans"""
-
-    success: bool
-    plans: list[SubscriptionPlan]
-    message: str
 
 
 class UserPlanResponse(BaseModel):
