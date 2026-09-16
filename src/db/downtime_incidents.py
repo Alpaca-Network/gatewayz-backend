@@ -37,6 +37,30 @@ def _maybe_log_missing_table_hint(error: Exception) -> None:
         _missing_table_warning_logged = True
 
 
+class DowntimeIncidentsUnavailable(RuntimeError):
+    """A downtime_incidents read failed (missing table, bad query, outage).
+
+    Read paths raise this instead of returning ``[]``. A broken query and
+    "there have been no incidents" render identically at the UI otherwise --
+    the failure mode that hid an empty staff roster for weeks (see
+    ``src/db/staff.py`` ``list_staff()`` and its 503 in ``admin_staff.py``).
+    """
+
+
+def _read_failure(action: str, error: Exception) -> DowntimeIncidentsUnavailable:
+    """Log a read failure once and build the exception the caller should raise."""
+    _maybe_log_missing_table_hint(error)
+    logger.error("Error %s: %s", action, error, exc_info=True)
+    return DowntimeIncidentsUnavailable(f"Failed {action}")
+
+
+# Mirrors the CHECK constraints in
+# supabase/migrations/20260212000000_create_downtime_incidents_table.sql.
+# Verified against the live prod schema on 2026-09-16.
+INCIDENT_STATUSES = ("ongoing", "resolved", "investigating")
+INCIDENT_SEVERITIES = ("low", "medium", "high", "critical")
+
+
 def create_incident(
     started_at: datetime,
     health_endpoint: str = "/health",
@@ -201,9 +225,9 @@ def get_incident(incident_id: str | UUID) -> dict[str, Any] | None:
         return None
 
     except Exception as e:
-        _maybe_log_missing_table_hint(e)
-        logger.error(f"Error getting downtime incident: {e}", exc_info=True)
-        return None
+        # None means "no such incident". A failed read raises, so the caller
+        # can answer 503 instead of a 404 that claims the incident is gone.
+        raise _read_failure(f"getting downtime incident {incident_id}", e) from e
 
 
 def get_ongoing_incidents() -> list[dict[str, Any]]:
@@ -229,9 +253,7 @@ def get_ongoing_incidents() -> list[dict[str, Any]]:
         return result.data if result.data else []
 
     except Exception as e:
-        _maybe_log_missing_table_hint(e)
-        logger.error(f"Error getting ongoing incidents: {e}", exc_info=True)
-        return []
+        raise _read_failure("getting ongoing incidents", e) from e
 
 
 def get_recent_incidents(
@@ -271,9 +293,102 @@ def get_recent_incidents(
         return result.data if result.data else []
 
     except Exception as e:
-        _maybe_log_missing_table_hint(e)
-        logger.error(f"Error getting recent incidents: {e}", exc_info=True)
-        return []
+        raise _read_failure("getting recent incidents", e) from e
+
+
+# Every column on downtime_incidents except the two bulk payloads
+# (logs_captured, response_body). Verified against the live prod schema on
+# 2026-09-16 -- selecting a column that is not in this list is the phantom-column
+# bug class guarded by tests/schema/.
+_LIST_COLUMNS = (
+    "id,started_at,detected_at,ended_at,duration_seconds,health_endpoint,"
+    "error_message,http_status_code,status,severity,logs_file_path,log_count,"
+    "environment,resolved_by,notes,notified_at,created_at,updated_at"
+)
+
+
+def _apply_filters(query, status, severity, environment):
+    """Apply the shared status/severity/environment filters to a query builder."""
+    if status:
+        query = query.eq("status", status)
+    if severity:
+        query = query.eq("severity", severity)
+    if environment:
+        query = query.eq("environment", environment)
+    return query
+
+
+def count_incidents(
+    status: str | None = None,
+    severity: str | None = None,
+    environment: str | None = None,
+) -> int:
+    """
+    Count incidents matching the given filters.
+
+    Uses a HEAD request with count=exact, so Postgres does the counting and no
+    rows cross the wire. This matters beyond speed: PostgREST caps responses at
+    1000 rows, so counting client-side by measuring a result set silently caps
+    at 1000 too.
+
+    Raises:
+        DowntimeIncidentsUnavailable: if the count could not be read.
+    """
+    try:
+
+        def _count(client):
+            query = client.table("downtime_incidents").select("id", count="exact", head=True)
+            return _apply_filters(query, status, severity, environment).execute()
+
+        result = execute_with_retry(_count, max_retries=2, retry_delay=0.2)
+        return result.count or 0
+
+    except Exception as e:
+        raise _read_failure("counting downtime incidents", e) from e
+
+
+def list_incidents(
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+    severity: str | None = None,
+    environment: str | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """
+    Get one page of incidents, newest first, plus the total matching the filters.
+
+    Args:
+        limit: Page size
+        offset: Rows to skip
+        status: Filter by status (ongoing, resolved, investigating)
+        severity: Filter by severity (low, medium, high, critical)
+        environment: Filter by environment
+
+    Returns:
+        (page_of_incidents, total_matching_filters)
+
+    Raises:
+        DowntimeIncidentsUnavailable: if the page or the count could not be read.
+    """
+    total = count_incidents(status=status, severity=severity, environment=environment)
+
+    # PostgREST answers an out-of-bounds range with 416, which would surface as
+    # an outage rather than "you paged past the end". Ask the count first.
+    if offset >= total:
+        return [], total
+
+    try:
+
+        def _page(client):
+            query = client.table("downtime_incidents").select(_LIST_COLUMNS)
+            query = _apply_filters(query, status, severity, environment)
+            return query.order("started_at", desc=True).range(offset, offset + limit - 1).execute()
+
+        result = execute_with_retry(_page, max_retries=2, retry_delay=0.2)
+        return (result.data or []), total
+
+    except Exception as e:
+        raise _read_failure("listing downtime incidents", e) from e
 
 
 def get_incidents_by_date_range(start_date: datetime, end_date: datetime) -> list[dict[str, Any]]:
@@ -304,9 +419,7 @@ def get_incidents_by_date_range(start_date: datetime, end_date: datetime) -> lis
         return result.data if result.data else []
 
     except Exception as e:
-        _maybe_log_missing_table_hint(e)
-        logger.error(f"Error getting incidents by date range: {e}", exc_info=True)
-        return []
+        raise _read_failure("getting incidents by date range", e) from e
 
 
 def resolve_incident(
@@ -341,46 +454,21 @@ def get_incident_statistics(days: int = 30) -> dict[str, Any]:
 
     Returns:
         Dictionary with incident statistics
+
+    Raises:
+        DowntimeIncidentsUnavailable: if the incidents could not be read. It
+            deliberately does not fall back to an all-zero payload -- zeroed
+            stats are indistinguishable from a healthy month.
     """
-    try:
-        cutoff = datetime.now(UTC).timestamp() - (days * 24 * 60 * 60)
-        cutoff_dt = datetime.fromtimestamp(cutoff, tz=UTC)
+    if days < 1:
+        raise ValueError("days must be >= 1")
 
-        incidents = get_incidents_by_date_range(cutoff_dt, datetime.now(UTC))
+    cutoff = datetime.now(UTC).timestamp() - (days * 24 * 60 * 60)
+    cutoff_dt = datetime.fromtimestamp(cutoff, tz=UTC)
 
-        if not incidents:
-            return {
-                "total_incidents": 0,
-                "total_downtime_seconds": 0,
-                "average_duration_seconds": 0,
-                "by_severity": {},
-                "by_status": {},
-            }
+    incidents = get_incidents_by_date_range(cutoff_dt, datetime.now(UTC))
 
-        total_downtime = sum(
-            inc.get("duration_seconds", 0) for inc in incidents if inc.get("duration_seconds")
-        )
-
-        severity_counts = {}
-        status_counts = {}
-
-        for inc in incidents:
-            sev = inc.get("severity", "unknown")
-            severity_counts[sev] = severity_counts.get(sev, 0) + 1
-
-            stat = inc.get("status", "unknown")
-            status_counts[stat] = status_counts.get(stat, 0) + 1
-
-        return {
-            "total_incidents": len(incidents),
-            "total_downtime_seconds": total_downtime,
-            "average_duration_seconds": (total_downtime // len(incidents) if incidents else 0),
-            "by_severity": severity_counts,
-            "by_status": status_counts,
-        }
-
-    except Exception as e:
-        logger.error(f"Error getting incident statistics: {e}", exc_info=True)
+    if not incidents:
         return {
             "total_incidents": 0,
             "total_downtime_seconds": 0,
@@ -388,6 +476,28 @@ def get_incident_statistics(days: int = 30) -> dict[str, Any]:
             "by_severity": {},
             "by_status": {},
         }
+
+    total_downtime = sum(
+        inc.get("duration_seconds", 0) for inc in incidents if inc.get("duration_seconds")
+    )
+
+    severity_counts: dict[str, int] = {}
+    status_counts: dict[str, int] = {}
+
+    for inc in incidents:
+        sev = inc.get("severity") or "unknown"
+        severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+        stat = inc.get("status") or "unknown"
+        status_counts[stat] = status_counts.get(stat, 0) + 1
+
+    return {
+        "total_incidents": len(incidents),
+        "total_downtime_seconds": total_downtime,
+        "average_duration_seconds": total_downtime // len(incidents),
+        "by_severity": severity_counts,
+        "by_status": status_counts,
+    }
 
 
 def cleanup_old_incidents(days: int = 90, keep_critical: bool = True) -> int:
