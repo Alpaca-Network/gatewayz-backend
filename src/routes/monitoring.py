@@ -53,8 +53,14 @@ router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
 
 # --- chat_completion_requests query bounds ---------------------------------
 # chat_completion_requests is the highest-volume table in the schema (~80k live
-# rows; anything older than 30 days is deleted by the TTL job added in
-# 20260525000000_add_ttl_cleanup_jobs.sql). Every read below is bounded so a
+# rows; anything older than 90 days is deleted by cleanup_chat_completion_requests().
+# NOTE: 20260525000000_add_ttl_cleanup_jobs.sql set that TTL to 30 days, but
+# 20260525010000_fix_ttl_cleanup_jobs.sql raised it to 90 -- "TTL of 30d destroys
+# lifetime aggregates" -- so 90 is the retention that actually applies. Keep this
+# window equal to the TTL: a shorter one silently hides rows the database still
+# has, which is the same "a subset rendered as the whole" bug these bounds exist
+# to fix. Prod currently holds rows back to 2026-06-18, i.e. ~90 days.
+# Every read below is bounded so a
 # handler can never ask PostgREST for the whole table:
 #   * an unbounded select is silently truncated at PostgREST's db-max-rows
 #     (1000), so aggregating "all rows" in Python produced wrong numbers while
@@ -66,7 +72,7 @@ router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
 # Aggregation belongs in the database - the RPCs in
 # 20260915183000_monitoring_chat_requests_perf.sql do the GROUP BY server-side
 # and the Python fallbacks below exist only to degrade gracefully.
-CHAT_REQUESTS_WINDOW_DAYS = 30  # matches the row TTL, so this drops no live data
+CHAT_REQUESTS_WINDOW_DAYS = 90  # == the 90d row TTL, so this drops no retained data
 CHAT_REQUESTS_MAX_LIMIT = 1000  # PostgREST db-max-rows; asking for more is a lie
 CHAT_REQUESTS_FALLBACK_SCAN_LIMIT = 1000
 CHAT_REQUESTS_FALLBACK_MAX_MODELS = 100

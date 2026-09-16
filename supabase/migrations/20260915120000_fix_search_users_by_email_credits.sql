@@ -68,7 +68,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
--- The function is only ever called with the service-role key from the backend;
--- keep the original grants so behaviour is unchanged.
-GRANT EXECUTE ON FUNCTION search_users_by_email(TEXT, INTEGER, INTEGER) TO authenticated;
-GRANT EXECUTE ON FUNCTION search_users_by_email(TEXT, INTEGER, INTEGER) TO anon;
+-- Grants: service_role only.
+--
+-- The original function granted EXECUTE to `authenticated` and `anon`. That
+-- predates the May-2026 emergency lockdown (RLS + revoked anon/authenticated
+-- grants on `users` and friends, after the anon key was found to leak plaintext
+-- API keys, emails and Stripe IDs -- see tests/security/test_rls_anon_lockdown.py).
+-- This function reads `users` and returns email + balances, so re-granting it to
+-- anon would hand that lockdown a function-shaped way around itself the moment
+-- anyone adds SECURITY DEFINER. It has exactly one caller
+-- (src/routes/admin.py, service-role key), so the grants are dropped rather than
+-- restored. DROP FUNCTION above already removed the old ones; these REVOKEs are
+-- belt-and-braces in case the function is recreated by an older migration replay.
+REVOKE ALL ON FUNCTION search_users_by_email(TEXT, INTEGER, INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION search_users_by_email(TEXT, INTEGER, INTEGER) FROM anon;
+REVOKE ALL ON FUNCTION search_users_by_email(TEXT, INTEGER, INTEGER) FROM authenticated;
+GRANT EXECUTE ON FUNCTION search_users_by_email(TEXT, INTEGER, INTEGER) TO service_role;
