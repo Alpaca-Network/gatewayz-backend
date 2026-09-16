@@ -1,4 +1,14 @@
-"""Tests for src/db/downtime_incidents.py (read paths behind the admin API)."""
+"""Tests for src/db/downtime_incidents.py (read paths behind the admin API).
+
+These are fully mocked, but they live under tests/db/ and so are skipped by
+tests/conftest.py's autouse `skip_if_no_database` whenever Supabase is
+unreachable -- which is most local runs and any CI job without the secret. Do
+not read a green line here as coverage without checking they ran.
+
+The column-existence guard that used to live here now sits in
+tests/schema/test_downtime_incidents_columns.py, which has no database
+dependency and therefore actually executes.
+"""
 
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
@@ -15,34 +25,6 @@ from src.db.downtime_incidents import (
     list_incidents,
 )
 
-# Every column on the live prod downtime_incidents table, pulled from the
-# PostgREST schema on 2026-09-16. Selecting anything outside this set is the
-# phantom-column bug class that tests/schema/ exists to catch.
-PROD_COLUMNS = {
-    "id",
-    "started_at",
-    "detected_at",
-    "ended_at",
-    "duration_seconds",
-    "health_endpoint",
-    "error_message",
-    "http_status_code",
-    "response_body",
-    "status",
-    "severity",
-    "logs_captured",
-    "logs_file_path",
-    "log_count",
-    "environment",
-    "server_info",
-    "metrics_snapshot",
-    "notified_at",
-    "resolved_by",
-    "notes",
-    "created_at",
-    "updated_at",
-}
-
 
 def _client_returning(data=None, count=None):
     """A Supabase client mock whose every builder call chains back to itself,
@@ -58,35 +40,6 @@ def _client_returning(data=None, count=None):
     builder.execute.return_value = result
     client.table.return_value = builder
     return client, builder
-
-
-class TestSelectedColumnsExist:
-    def test_list_incidents_selects_only_real_columns(self):
-        """A dropped or misspelled column makes PostgREST fail the whole query
-        with 42703. Pin the select list against the live schema."""
-        client, builder = _client_returning(data=[], count=3)
-
-        with patch("src.config.supabase_config.get_supabase_client", return_value=client):
-            list_incidents(limit=10, offset=0)
-
-        select_args = [call.args[0] for call in builder.select.call_args_list if call.args]
-        assert select_args, "list_incidents issued no select"
-        requested = {
-            column.strip() for arg in select_args for column in arg.split(",") if column.strip()
-        }
-        assert requested - {"*"} <= PROD_COLUMNS
-
-    def test_list_excludes_bulk_payload_columns(self):
-        """logs_captured/response_body are fetched per-incident, never for a
-        50-row page -- that payload blows the panel's proxy timeout."""
-        client, builder = _client_returning(data=[], count=3)
-
-        with patch("src.config.supabase_config.get_supabase_client", return_value=client):
-            list_incidents(limit=10, offset=0)
-
-        page_select = builder.select.call_args_list[-1].args[0]
-        assert "logs_captured" not in page_select
-        assert "response_body" not in page_select
 
 
 class TestListIncidents:
