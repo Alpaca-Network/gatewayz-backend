@@ -1,8 +1,28 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.schemas.common import PlanType, SubscriptionStatus
+
+
+# Almost every column on the `plans` table is nullable in Postgres, and rows
+# predating a column's introduction hold SQL NULL. A pydantic default only
+# applies when a key is absent -- an explicit None still fails validation -- so
+# a NULL column would 500 the public `/plans` endpoints. Coerce NULL to the
+# column's database default at the boundary instead of widening the public
+# response contract to `| None`, which would push the problem onto every client.
+_PLAN_RESPONSE_NULL_DEFAULTS: dict[str, object] = {
+    "description": "",
+    "plan_type": "free",
+    "daily_request_limit": 1000,
+    "monthly_request_limit": 30000,
+    "daily_token_limit": 100000,
+    "monthly_token_limit": 3000000,
+    "price_per_month": 0.0,
+    "is_pay_as_you_go": False,
+    "max_concurrent_requests": 5,
+    "is_active": True,
+}
 
 
 class PlanResponse(BaseModel):
@@ -21,6 +41,27 @@ class PlanResponse(BaseModel):
     max_concurrent_requests: int = 5
     features: list[str]
     is_active: bool
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_nullable_columns(cls, data: object) -> object:
+        """Normalize a raw `plans` row so NULL columns cannot 500 the endpoint."""
+        if not isinstance(data, dict):
+            return data
+
+        coerced = dict(data)
+        for field, default in _PLAN_RESPONSE_NULL_DEFAULTS.items():
+            if coerced.get(field) is None:
+                coerced[field] = default
+
+        # `features` is jsonb: historically a list, but some rows hold an object.
+        features = coerced.get("features")
+        if isinstance(features, dict):
+            coerced["features"] = list(features.keys())
+        elif not isinstance(features, list):
+            coerced["features"] = []
+
+        return coerced
 
 
 class SubscriptionPlan(BaseModel):
