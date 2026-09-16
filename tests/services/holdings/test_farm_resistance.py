@@ -187,6 +187,10 @@ def store(monkeypatch):
     )
     monkeypatch.setattr(rewards.Config, "HOLDINGS_SNAPSHOTS_PER_DAY", 4, raising=False)
     monkeypatch.setattr(rewards.Config, "HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", 2, raising=False)
+    # The usage match is a separate ceiling, tested in test_rewards.py. It is
+    # off here so that what this file asserts about the basis is the basis and
+    # not a spend limit quietly clipping the same number.
+    monkeypatch.setattr(rewards.Config, "HOLDINGS_USAGE_MATCH_ENABLED", False, raising=False)
     for name, attr in (
         ("get_sweep_totals_for_date", s.get_sweep_totals_for_date),
         ("list_wallets_with_sweeps_for_date", s.list_wallets_with_sweeps_for_date),

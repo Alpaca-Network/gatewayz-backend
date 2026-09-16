@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -27,6 +28,25 @@ def _get_env_var(name: str, default: str | None = None, *, strip: bool = True) -
         value = value.strip()
 
     return value or default
+
+
+def _decimal_env(name: str, default: str) -> Decimal:
+    """A Decimal setting that falls back to its documented default rather
+    than raising at import. A typo in a payout multiplier should not take the
+    whole service down, and it must not silently become zero either."""
+    raw = _get_env_var(name, default)
+    try:
+        return Decimal(str(raw))
+    except (ArithmeticError, TypeError, ValueError):
+        return Decimal(default)
+
+
+def _int_env(name: str, default: int) -> int:
+    """An int setting with the same fail-to-default contract as _decimal_env."""
+    try:
+        return int(str(_get_env_var(name, str(default))))
+    except (TypeError, ValueError):
+        return default
 
 
 def _derive_loki_query_url(push_url: str | None) -> str:
@@ -242,6 +262,22 @@ class Config:
     HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY = int(
         _get_env_var("HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", "2")
     )
+    # Holdings rewards are capped by what the account actually spent on
+    # inference: the programme exists to convert token holders into customers,
+    # so holding alone earns nothing. Multiplier 1.0 means "earn at most what
+    # you spent"; the lookback smooths lumpy usage, since nobody runs
+    # inference every single day. Set HOLDINGS_USAGE_MATCH_ENABLED=false to
+    # pay purely for holdings, which buys a wallet balance rather than a user.
+    HOLDINGS_USAGE_MATCH_ENABLED = _get_env_var("HOLDINGS_USAGE_MATCH_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # Parsed defensively: a typo in either of these must not take the whole
+    # app down at import, and the safe fallback for a payout multiplier is the
+    # documented default rather than a crash or an accidental zero.
+    HOLDINGS_USAGE_MATCH_MULTIPLIER = _decimal_env("HOLDINGS_USAGE_MATCH_MULTIPLIER", "1.0")
+    HOLDINGS_USAGE_LOOKBACK_DAYS = _int_env("HOLDINGS_USAGE_LOOKBACK_DAYS", 7)
     # Per-account daily ceiling, and a global daily budget across all accounts.
     # Both are placeholders until the boss sets the real numbers.
     HOLDINGS_DAILY_CAP_CREDITS = float(_get_env_var("HOLDINGS_DAILY_CAP_CREDITS", "50.0"))

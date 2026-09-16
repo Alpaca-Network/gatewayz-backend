@@ -27,7 +27,19 @@ degenerates into "that one moment". So a day with fewer than
 Underpaying nobody is acceptable here; paying on a single farmable reading
 is not.
 
-Two ceilings apply, in this order:
+**Holding alone earns nothing.** The programme exists to turn token holders
+into customers, so what a wallet can earn is bounded by what its account
+actually spent on inference over the last
+`HOLDINGS_USAGE_LOOKBACK_DAYS` days, times
+`HOLDINGS_USAGE_MATCH_MULTIPLIER`. Unlike a staking programme, a holder's
+capital does no work for us; paying purely for a balance buys a screenshot,
+not a user. That allowance is a budget the window CONSUMES -- holdings
+credits already granted inside the window are subtracted -- so one week's
+spend cannot be claimed once per day for a week. An account with no spend,
+and a wallet with no account, earn nothing and accrue nothing. Set
+`HOLDINGS_USAGE_MATCH_ENABLED=false` to pay on holdings alone.
+
+Three ceilings apply, in this order:
 
 * `HOLDINGS_DAILY_CAP_CREDITS`, **per account** -- every wallet an account
   has linked shares one daily ceiling, so splitting a balance across
@@ -67,11 +79,13 @@ from src.db.holdings import (
     get_active_holdings_rates,
     get_holdings_accrual,
     get_sweep_totals_for_date,
+    get_usage_cost_for_window,
     list_pending_holdings_accruals,
     list_pending_holdings_accruals_since,
     list_wallets_with_sweeps_for_date,
     mark_holdings_accrual_paid,
     select_holdings_rate,
+    sum_holdings_credits_since,
 )
 from src.db.user_wallets import get_wallet, get_wallets_for_user
 from src.db.users import add_credits_to_user
@@ -175,6 +189,39 @@ def _account_headroom(user_id: int, reward_date_str: str, this_wallet: str) -> D
     return _daily_cap() - spent
 
 
+def _usage_headroom(user_id: int, since: datetime, spend_cache: dict[int, Decimal]) -> Decimal:
+    """Credits this account may still earn from holdings, given what it
+    actually spent on inference over the lookback window.
+
+    The allowance is ``spend x HOLDINGS_USAGE_MATCH_MULTIPLIER``, MINUS the
+    holdings credits the account has already been granted inside that same
+    window. It is a budget the window consumes, not a ceiling that resets
+    every night: applied per day it would let one $70 of spend authorise $70
+    of credits on each of the next seven days, which is the same spend
+    claimed seven times over.
+
+    Spend is cached per account for the length of a run -- a run reads it
+    once per account however many wallets that account has linked -- while
+    the already-granted side is re-read per wallet, because an earlier wallet
+    of the same account may have been granted credits moments ago in this
+    very run.
+    """
+    spend = spend_cache.get(user_id)
+    if spend is None:
+        spend = get_usage_cost_for_window(user_id, since)
+        spend_cache[user_id] = spend
+    allowance = _quantize(spend * _decimal(Config.HOLDINGS_USAGE_MATCH_MULTIPLIER))
+    if allowance <= 0:
+        return Decimal(0)
+    addresses = [
+        str(w.get("wallet_address") or "").lower()
+        for w in get_wallets_for_user(user_id)
+        if w.get("wallet_address")
+    ]
+    already = sum_holdings_credits_since(addresses, since.date())
+    return allowance - already
+
+
 def _resolve_user_id(wallet_address: str) -> int | None:
     """The account a wallet belongs to, or None when it is not linked (or
     the link row says the wallet is no longer active)."""
@@ -266,9 +313,14 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
     counts = {"paid": 0, "pending": 0, "already": 0, "errors": 0}
     # Each reason is counted separately and never folded together: when a
     # run pays less than expected, WHICH reason grew is the diagnosis.
+    usage_since = datetime.now(UTC) - timedelta(days=int(Config.HOLDINGS_USAGE_LOOKBACK_DAYS))
+    usage_capped = 0
+    spend_cache: dict[int, Decimal] = {}
     skipped = {
         "no_snapshots": 0,
         "too_few_batches": 0,
+        "unlinked": 0,
+        "no_usage": 0,
         "no_rate_tier": 0,
         "zero_credits": 0,
         "budget_exhausted": 0,
@@ -324,8 +376,32 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
 
             credits = _credits_for(basis, rate)
             was_capped = False
+            was_usage_capped = False
 
             user_id = _resolve_user_id(address)
+
+            # Usage match: holding alone earns nothing. The programme exists to
+            # turn token holders into customers, so what a wallet can earn is
+            # bounded by what its account actually spent on inference. Paying
+            # purely for a balance buys a screenshot, not a user -- and unlike
+            # a staking programme, a holder's capital does no work for us.
+            if Config.HOLDINGS_USAGE_MATCH_ENABLED:
+                if user_id is None:
+                    # No account means no usage to match against. An unlinked
+                    # wallet accrues nothing here rather than accruing pending:
+                    # a pending row would be paid in full the moment the wallet
+                    # links, which is how a holder collects a window's worth of
+                    # days off a single dollar of spend.
+                    skipped["unlinked"] += 1
+                    continue
+                allowance = _usage_headroom(user_id, usage_since, spend_cache)
+                if allowance <= 0:
+                    skipped["no_usage"] += 1
+                    continue
+                if credits > allowance:
+                    credits = _quantize(allowance)
+                    was_usage_capped = True
+
             ceiling = _account_headroom(user_id, reward_date_str, address) if user_id else cap
             if credits > ceiling:
                 credits = _quantize(max(ceiling, Decimal(0)))
@@ -366,6 +442,8 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
                     continue
             else:
                 committed += credits
+                if was_usage_capped:
+                    usage_capped += 1
                 if was_capped:
                     capped += 1
 
@@ -395,6 +473,7 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
         # Duplicated out of `skipped` because the budget is the one ceiling
         # an operator watches directly, and it is the number the scheduler
         # logs on every run.
+        "usage_capped": usage_capped,
         "budget_skipped": skipped["budget_exhausted"],
         "budget_exhausted": budget_exhausted,
         "required_batches": required_batches,
