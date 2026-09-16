@@ -28,22 +28,30 @@ def _hash_token(raw_token: str) -> str:
 
 
 def list_staff() -> list[dict[str, Any]]:
-    """All users with role in ('admin', 'superadmin')."""
+    """All users with role in ('admin', 'superadmin').
+
+    Raises on a database failure rather than returning an empty list: an
+    empty roster and a broken query are indistinguishable to the caller, and
+    swallowing the error is what hid a `last_login` (an `admin_users` column,
+    never a `users` one) in this select -- PostgREST answered 42703 and the
+    admin panel showed "no staff" for weeks while prod had three staff rows.
+    """
     try:
         client = get_supabase_client()
         result = (
             client.table("users")
-            .select("id, email, username, role, is_active, last_login, created_at, privy_user_id")
+            .select("id, email, username, role, is_active, created_at, privy_user_id")
             .in_("role", list(STAFF_ROLES))
             .execute()
         )
-        rows = result.data if result.data else []
-        for row in rows:
-            row["has_privy_link"] = bool(row.pop("privy_user_id", None))
-        return rows
-    except Exception as e:
-        logger.error("list_staff failed: %s", e)
-        return []
+    except Exception:
+        logger.error("list_staff query failed", exc_info=True)
+        raise
+
+    rows = result.data if result.data else []
+    for row in rows:
+        row["has_privy_link"] = bool(row.pop("privy_user_id", None))
+    return rows
 
 
 def count_active_superadmins() -> int:

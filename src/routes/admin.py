@@ -44,6 +44,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _with_synthesized_credits(user: dict) -> dict:
+    """Add the aggregate `credits` field the admin panel expects.
+
+    `users.credits` was dropped from the schema (migration
+    20260417000000_drop_legacy_credits_column.sql); the balance now lives in
+    `subscription_allowance` + `purchased_credits`. Selecting `credits`
+    directly makes PostgREST fail the whole query with 42703, so we select
+    the components and recombine them here. Same formula as /admin/balance.
+    """
+    user["credits"] = float(user.get("subscription_allowance", 0) or 0) + float(
+        user.get("purchased_credits", 0) or 0
+    )
+    return user
+
+
 @router.post("/create", response_model=UserRegistrationResponse, tags=["authentication"])
 async def create_api_key(request: UserRegistrationRequest):
     """Create an API key for the user after dashboard login"""
@@ -881,6 +896,7 @@ async def get_all_users_info(
         client = get_db()
 
         # OPTIMIZATION: Use PostgreSQL RPC function for email search to avoid PostgREST edge function issues
+        rpc_rows = None
         if email and not api_key and is_active is None:
             # Use optimized RPC function for simple email-only searches
             logger.info(f"Using RPC function for email search: {email}")
@@ -889,46 +905,49 @@ async def get_all_users_info(
                     "search_users_by_email",
                     {"search_term": email, "result_limit": limit, "result_offset": offset},
                 ).execute()
-
-                users_data = result.data if result.data else []
-
-                # Extract total count from first row (all rows have same total_count)
-                total_users = users_data[0]["total_count"] if users_data else 0
-
-                # Clean up total_count from user objects
-                users = []
-                for user in users_data:
-                    user_clean = {k: v for k, v in user.items() if k != "total_count"}
-                    users.append(user_clean)
-
-                # Calculate has_more for pagination
-                has_more = (offset + limit) < total_users
-
-                return {
-                    "status": "success",
-                    "total_users": total_users,
-                    "has_more": has_more,
-                    "pagination": {
-                        "limit": limit,
-                        "offset": offset,
-                        "current_page": (offset // limit) + 1,
-                        "total_pages": (total_users + limit - 1) // limit if total_users > 0 else 0,
-                    },
-                    "filters_applied": {
-                        "email": email,
-                        "api_key": api_key,
-                        "is_active": is_active,
-                    },
-                    "users": users,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
+                rpc_rows = result.data if result.data else []
             except Exception as rpc_err:
-                logger.error(f"RPC function failed for email search: {rpc_err}", exc_info=True)
-                # Don't fallback for email-only searches - the standard query crashes on Cloudflare
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Email search failed: {str(rpc_err)}. Please check if the search_users_by_email function exists in Supabase.",
-                ) from rpc_err
+                # A missing or stale function (e.g. one still selecting the
+                # dropped users.credits column) used to 500 the whole endpoint.
+                # Log loudly and fall through to the standard ilike query so
+                # the Users page keeps working while the function is repaired.
+                logger.error(
+                    f"RPC search_users_by_email failed, falling back to standard query: {rpc_err}",
+                    exc_info=True,
+                )
+                rpc_rows = None
+
+        if rpc_rows is not None:
+            # Extract total count from first row (all rows have same total_count)
+            total_users = rpc_rows[0]["total_count"] if rpc_rows else 0
+
+            # Clean up total_count from user objects
+            users = []
+            for user in rpc_rows:
+                user_clean = {k: v for k, v in user.items() if k != "total_count"}
+                users.append(_with_synthesized_credits(user_clean))
+
+            # Calculate has_more for pagination
+            has_more = (offset + limit) < total_users
+
+            return {
+                "status": "success",
+                "total_users": total_users,
+                "has_more": has_more,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "current_page": (offset // limit) + 1,
+                    "total_pages": (total_users + limit - 1) // limit if total_users > 0 else 0,
+                },
+                "filters_applied": {
+                    "email": email,
+                    "api_key": api_key,
+                    "is_active": is_active,
+                },
+                "users": users,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
 
         # Standard query method (for complex filters or RPC fallback)
         # Build count query first (without pagination, just filters)
@@ -964,14 +983,16 @@ async def get_all_users_info(
         if api_key:
             # Query with JOIN for API key search
             data_query = client.table("users").select(
-                "id, username, email, credits, is_active, role, registration_date, "
+                "id, username, email, subscription_allowance, purchased_credits, "
+                "is_active, role, registration_date, "
                 "auth_method, subscription_status, trial_expires_at, created_at, updated_at, "
                 "api_keys_new!inner(api_key)"
             )
         else:
             # Query without JOIN for better performance when not searching by API key
             data_query = client.table("users").select(
-                "id, username, email, credits, is_active, role, registration_date, "
+                "id, username, email, subscription_allowance, purchased_credits, "
+                "is_active, role, registration_date, "
                 "auth_method, subscription_status, trial_expires_at, created_at, updated_at"
             )
 
@@ -1004,7 +1025,7 @@ async def get_all_users_info(
         for user in users_data:
             # Remove the api_keys_new join data from response
             user_clean = {k: v for k, v in user.items() if k != "api_keys_new"}
-            users.append(user_clean)
+            users.append(_with_synthesized_credits(user_clean))
 
         # Calculate has_more for pagination
         has_more = (offset + limit) < total_users

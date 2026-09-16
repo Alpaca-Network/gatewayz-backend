@@ -88,6 +88,17 @@ class TestGetStaff:
         assert body["success"] is True
         assert body["data"]["staff"] == rows
 
+    def test_db_failure_returns_503_not_an_empty_roster(self, admin_override):
+        """A broken query must not be rendered as "there is no staff"."""
+        with patch(
+            "src.routes.admin_staff.list_staff", side_effect=RuntimeError("42703 last_login")
+        ):
+            response = client.get("/admin/staff")
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "staff_roster_unavailable"
+        assert "last_login" not in response.text, "internal error text must not leak"
+
 
 class TestInviteStaff:
     def test_existing_user_gets_role_set_directly(self, superadmin_override):

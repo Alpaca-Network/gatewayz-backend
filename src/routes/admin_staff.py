@@ -71,7 +71,23 @@ def _guard_not_last_superadmin(target_user: dict[str, Any], new_role: str) -> No
 @router.get("/admin/staff", tags=["admin", "staff"])
 async def get_staff(_admin_user: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
     """List every user with role in (admin, superadmin). Any admin can view."""
-    return {"success": True, "data": {"staff": list_staff()}}
+    try:
+        staff = list_staff()
+    except Exception as e:
+        # Surface the failure instead of rendering an empty roster, which
+        # reads as "there is no staff" and hides the outage.
+        logger.error("GET /admin/staff failed: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": "Staff roster is temporarily unavailable.",
+                    "type": "service_unavailable",
+                    "code": "staff_roster_unavailable",
+                }
+            },
+        ) from e
+    return {"success": True, "data": {"staff": staff}}
 
 
 @router.post("/admin/staff/invite", tags=["admin", "staff"])
