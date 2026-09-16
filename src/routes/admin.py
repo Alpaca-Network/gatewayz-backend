@@ -20,6 +20,12 @@ from src.db.users import (
     get_user,
 )
 from src.enhanced_notification_service import enhanced_notification_service
+
+# PostgREST silently truncates any select above db-max-rows (1000), so this
+# ceiling is shared rather than redefined: a larger one would promise rows
+# the database will never return, and the caller cannot tell a full page
+# from a truncated one.
+from src.routes.monitoring import CHAT_REQUESTS_MAX_LIMIT
 from src.schemas import (
     AddCreditsRequest,
     SetRateLimitRequest,
@@ -2090,7 +2096,12 @@ async def get_chat_completion_requests_admin(
     model_name: str | None = Query(None, description="Filter by model name (contains)"),
     start_date: str | None = Query(None, description="Filter by start date (ISO format)"),
     end_date: str | None = Query(None, description="Filter by end date (ISO format)"),
-    limit: int = Query(100, ge=1, le=100000, description="Maximum records to return"),
+    limit: int = Query(
+        100,
+        ge=1,
+        le=CHAT_REQUESTS_MAX_LIMIT,
+        description="Maximum records to return (PostgREST truncates above this)",
+    ),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     admin_user: dict = Depends(require_admin),
 ):
@@ -2106,7 +2117,7 @@ async def get_chat_completion_requests_admin(
         client = get_db()
 
         query = client.table("chat_completion_requests").select(
-            "*, models!inner(id, model_id, model_name, provider_model_id, provider_id, providers!inner(id, name, slug))"
+            "*, models!inner(id, model_name, provider_model_id, provider_id, providers!inner(id, name, slug))"
         )
 
         if model_id is not None:
@@ -2125,7 +2136,7 @@ async def get_chat_completion_requests_admin(
 
         # Get total count with all filters applied
         count_query = client.table("chat_completion_requests").select(
-            "id, models!inner(id, model_id, model_name, provider_model_id, provider_id, providers!inner(id, name, slug))",
+            "id, models!inner(id, model_name, provider_model_id, provider_id, providers!inner(id, name, slug))",
             count="exact",
             head=True,
         )
@@ -2328,7 +2339,7 @@ async def get_chat_requests_plot_data_admin(
 
         # Get last 10 full requests
         recent_query = client.table("chat_completion_requests").select(
-            "id, request_id, model_id, input_tokens, output_tokens, processing_time_ms, status, error_message, created_at, models!inner(id, model_id, model_name, provider_model_id, providers!inner(id, name, slug))"
+            "id, request_id, model_id, input_tokens, output_tokens, processing_time_ms, status, error_message, created_at, models!inner(id, model_name, provider_model_id, providers!inner(id, name, slug))"
         )
 
         if model_id is not None:
