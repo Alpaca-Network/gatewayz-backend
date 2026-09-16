@@ -65,12 +65,40 @@ The Gatewayz Health Monitoring System provides comprehensive, scalable monitorin
 5. **Alerting** triggers notifications for critical issues
 6. **API** serves current status to frontend/status page
 
+## Probe Budget
+
+Every probe is a **real billable inference request**. The scheduler is therefore
+bounded, and failure only ever *lengthens* an interval:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `HEALTH_PROBE_MIN_INTERVAL_SECONDS` | `1800` | Floor under every tier interval below. |
+| `HEALTH_PROBE_MAX_PER_MODEL_PER_HOUR` | `4` | Hard in-process cap, independent of `next_check_at`. |
+| `HEALTH_PROBE_BACKOFF_BASE_SECONDS` | `900` | First backoff after a bad probe; doubles per strike. |
+| `HEALTH_PROBE_BACKOFF_MAX_SECONDS` | `21600` | Ceiling (6h). Kept well under the status page's 24h measurement window. |
+| `HEALTH_PROBE_JITTER_FRACTION` | `0.25` | Positive jitter so models behind one quota don't retry in lockstep. |
+| `HEALTH_PROBE_PROVIDER_COOLDOWN_SECONDS` | `900` | A 429 pauses **every** model on that provider — the quota is shared. |
+| `HEALTH_PROBE_PRUNE_ORPHANS` | `true` | Disable tracking rows that match no catalog model. |
+
+**A 429 or an auth failure is not a model failure.** Those outcomes measure the
+prober's access, so they are recorded as UNMEASURED
+(`UNMEASURED_STATUSES` in `src/services/monitoring/intelligent_health_monitor.py`):
+they never increment `error_count`, never move the circuit breaker, never open an
+incident, and never reach the public status page as degraded/offline. They appear
+in `GET /v1/status` as `rate_limited_models` / `unauthorized_models` and in
+`last_status` verbatim. Timeouts, 5xx and 404s remain real failures.
+
+Before this was true, a 429 counted as a failure *and* triggered a
+"check failing models more often" rule — a feedback loop that reached 439,162
+probes with a 95% recorded error rate and published a fabricated `major_outage`.
+
 ## Monitoring Tiers
 
-The system uses intelligent tiering to efficiently monitor 10,000+ models:
+The system uses intelligent tiering to efficiently monitor 10,000+ models.
+Every interval below is clamped upward by `HEALTH_PROBE_MIN_INTERVAL_SECONDS`.
 
 ### Tier 1: Critical (Top 5% by usage)
-- **Check Interval**: Every 5 minutes
+- **Check Interval**: Every 5 minutes (floored to 30 minutes by the probe budget)
 - **Criteria**: Models with highest 24h usage
 - **Priority**: Highest
 - **Use Case**: Production-critical models (GPT-4, Claude, etc.)
