@@ -95,7 +95,14 @@ class TestResponseShape:
         body = response.json()
         assert body["success"] is True
         data = body["data"]
-        for key in ("generated_at", "jobs", "integrations", "secrets", "wayz"):
+        for key in (
+            "generated_at",
+            "jobs",
+            "integrations",
+            "secrets",
+            "wayz",
+            "provider_budget",
+        ):
             assert key in data
 
     def test_wayz_block_matches_admin_wayz_shape_minus_jobs(self):
@@ -243,3 +250,98 @@ class TestSubBlockDegradation:
         wayz = response.json()["data"]["wayz"]
         assert wayz["staking"] == {"error": "RuntimeError"}
         assert "error" not in wayz["config"]
+
+
+class TestProviderBudgetBlock:
+    """The operator half of provider credit exhaustion.
+
+    End users keep getting PROVIDER_CAPACITY_MESSAGE and nothing more -- that masking is
+    correct. This block is the signal that did not exist on 2026-09-16, when an unfunded
+    Anthropic key took all 11 of its models down and the only reason anyone found out was
+    an unrelated tool happening to use the same key.
+    """
+
+    KEY_ID = "f001429593544cd92610592c96fee5e341f53e759e3f07aa5089c82159c5ed03"
+
+    ROW = {
+        "provider": "anthropic",
+        "reason": "credit_balance_low",
+        "first_seen_at": "2026-09-16T09:00:00+00:00",
+        "last_seen_at": "2026-09-16T11:30:00+00:00",
+        "occurrences": 12,
+        "sample_model": "claude-sonnet-5",
+    }
+
+    def setup_method(self, _method):
+        _override_admin()
+        _reset_integrations_cache()
+        _reset_secrets_registry_fallback()
+
+    def teardown_method(self, _method):
+        _clear_override()
+        _reset_integrations_cache()
+        _reset_secrets_registry_fallback()
+
+    def _get(self, rows):
+        with patch("src.db.provider_budget_events.list_recent_budget_events", return_value=rows):
+            response = client.get("/admin/status")
+        assert response.status_code == 200
+        return response.json()["data"]["provider_budget"]
+
+    def test_a_funded_gateway_reads_ok_with_an_empty_list(self):
+        block = self._get([])
+        assert block == {"status": "ok", "window_hours": 24, "exhausted": []}
+
+    def test_an_exhausted_provider_reads_degraded_with_the_full_entry(self):
+        block = self._get([self.ROW])
+        assert block["status"] == "degraded"
+        assert block["exhausted"] == [
+            {
+                "provider": "anthropic",
+                "reason": "credit_balance_low",
+                "first_seen": "2026-09-16T09:00:00+00:00",
+                "last_seen": "2026-09-16T11:30:00+00:00",
+                "occurrences": 12,
+                "sample_model": "claude-sonnet-5",
+            }
+        ]
+
+    def test_the_block_is_specific_enough_to_act_on(self):
+        # "degraded" on its own would repeat the original sin at a different altitude:
+        # an operator would know something is wrong and not what to do about it. Each of
+        # these answers a question the person paying the bill actually has.
+        entry = self._get([self.ROW])["exhausted"][0]
+        assert entry["provider"] == "anthropic"  # whose account
+        assert entry["reason"] == "credit_balance_low"  # why, from a closed vocabulary
+        assert entry["occurrences"] == 12  # how bad
+        assert entry["first_seen"] and entry["last_seen"]  # since when, still happening
+        assert entry["sample_model"] == "claude-sonnet-5"  # what to retry to confirm
+
+    def test_no_upstream_error_text_reaches_the_response(self):
+        # The admin surface may carry more detail than the user-facing message, but not a
+        # different *kind* of detail: every field above is one the gateway owns. Upstream
+        # budget errors embed a dashboard URL containing the key id, and a stored value
+        # that somehow did would be normalized away on read.
+        block = self._get(
+            [{**self.ROW, "reason": f"credits low, see https://openrouter.ai/keys/{self.KEY_ID}"}]
+        )
+        body = json.dumps(block)
+        assert self.KEY_ID not in body
+        assert "openrouter.ai" not in body
+        assert "http" not in body
+        assert block["exhausted"][0]["reason"] == "unknown"
+
+    def test_a_broken_read_degrades_to_an_error_not_to_ok(self):
+        # The failure mode this repo keeps hitting: a broken query that renders as a calm,
+        # healthy-looking page. "No provider is out of credit" must not be what you see
+        # when the query that would tell you is broken.
+        with patch.object(
+            admin_status, "provider_budget_status", side_effect=RuntimeError("supabase down")
+        ):
+            response = client.get("/admin/status")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["provider_budget"] == {"error": "RuntimeError"}
+        assert data["provider_budget"].get("status") != "ok"
+        # ...and it takes nothing else down with it.
+        assert "error" not in data["secrets"]

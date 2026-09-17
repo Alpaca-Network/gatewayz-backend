@@ -539,7 +539,9 @@ class ChatInferenceHandler:
             # rate-limited models look "broken" in the model selector.
             from src.services.provider_failover import map_provider_error
 
-            mapped = map_provider_error(provider_name, model_id, e)
+            # byok= keeps a user's own exhausted key out of the operator budget
+            # record, for the same reason the capacity message is skipped below.
+            mapped = map_provider_error(provider_name, model_id, e, byok=bool(byok_token))
             if mapped.status_code == 429:
                 retry_after = None
                 if mapped.headers and "Retry-After" in mapped.headers:
@@ -589,6 +591,25 @@ class ChatInferenceHandler:
                     )
                 except Exception:
                     logger.warning("Failed to capture provider-budget alert", exc_info=True)
+
+                # Durable, operator-facing record of the same condition. Sentry alerts
+                # whoever is watching Sentry; this one is readable at GET /admin/status
+                # and survives the deploy that would clear an in-memory signal.
+                #
+                # Not redundant with the 402-keyed record inside map_provider_error():
+                # this branch also fires on is_provider_budget_error(str(e)), which
+                # catches the budget errors the mapper classifies as something else --
+                # an httpx.HTTPStatusError lands in its generic `400 <= status < 500`
+                # arm and comes back a 400. Where both fire, the recorder latches on the
+                # exception so one failure still counts once.
+                try:
+                    from src.services.provider_budget_alerts import (
+                        record_provider_budget_error,
+                    )
+
+                    record_provider_budget_error(provider_name, model_id, str(e), exc=e)
+                except Exception:
+                    logger.warning("Failed to record provider budget event", exc_info=True)
 
                 error_response = DetailedErrorFactory.provider_error(
                     provider=provider_name,
