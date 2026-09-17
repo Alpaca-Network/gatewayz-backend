@@ -444,13 +444,20 @@ async def stream_generator(
             sanitize_provider_error_for_user,
         )
 
-        # Check for rate limit errors
-        if "rate limit" in error_str or "429" in error_str or "too many" in error_str:
-            error_message = "Rate limit exceeded. Please wait a moment and try again."
-            error_type = "rate_limit_error"
+        # Budget exhaustion is checked FIRST, ahead of the rate-limit heuristic below.
+        # is_provider_budget_error() matches specific phrases; the rate-limit check is a
+        # bare substring scan over the whole raw error, key ids included -- and an
+        # OpenRouter budget error carries a 64-char hex key id, so roughly one key in
+        # sixty-five contains the literal "429" somewhere. Those requests were being
+        # reported to the user as a rate limit and, worse, were never counted as budget
+        # exhaustion at all: exactly the invisibility this feature exists to remove,
+        # reintroduced by a digit in a credential. Order matters, precise beats fuzzy.
+        # (A genuine 429 never matches the budget phrases -- see
+        # tests/services/test_provider_budget_alerts.py.)
+        #
         # Provider account/key out of budget (e.g. OpenRouter weekly key limit -> 402).
         # Gateway-side capacity issue, not the user's: friendly message + alert the team.
-        elif is_provider_budget_error(error_str):
+        if is_provider_budget_error(error_str):
             error_message = PROVIDER_CAPACITY_MESSAGE
             error_type = "capacity_error"
             try:
@@ -466,6 +473,22 @@ async def stream_generator(
                 )
             except Exception:
                 logger.warning("Failed to capture provider-budget alert (stream)", exc_info=True)
+
+            # Durable operator record alongside the Sentry alert -- readable at
+            # GET /admin/status and, unlike in-process state, still there after the
+            # deploy that a restart would otherwise present as "resolved".
+            # Streaming has no BYOK path (the user's own key never reaches here), so
+            # there is no carve-out to apply, unlike ChatHandler's non-stream branch.
+            try:
+                from src.services.provider_budget_alerts import record_provider_budget_error
+
+                record_provider_budget_error(provider, model, str(e), exc=e)
+            except Exception:
+                logger.warning("Failed to record provider budget event (stream)", exc_info=True)
+        # Check for rate limit errors
+        elif "rate limit" in error_str or "429" in error_str or "too many" in error_str:
+            error_message = "Rate limit exceeded. Please wait a moment and try again."
+            error_type = "rate_limit_error"
         # Check for authentication errors
         elif "401" in error_str or "unauthorized" in error_str or "authentication" in error_str:
             error_message = "Authentication failed. Please check your API key or sign in again."

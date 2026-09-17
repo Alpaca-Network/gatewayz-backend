@@ -448,6 +448,7 @@ def map_provider_error(
     provider: str,
     model: str,
     exc: Exception,
+    byok: bool = False,
 ) -> HTTPException:
     """
     Map upstream exceptions to HTTPException responses.
@@ -456,8 +457,25 @@ def map_provider_error(
     URLs, or key ids); the raw error is logged server-side and captured to
     Sentry for retryable/upstream failures so the team is alerted instead of
     end users seeing internals.
+
+    ``byok``: the request ran on the *user's* provider key. Their empty balance is
+    not a gateway outage, so it is kept out of the operator budget record (same
+    carve-out ChatHandler already applies to the user-facing message).
     """
     http_exc = _map_provider_error_impl(provider, model, exc)
+
+    # Operator signal for provider budget exhaustion. 402 is emitted by exactly one
+    # branch of _map_provider_error_impl -- the `parsed_status == 402 or
+    # is_provider_budget_error(msg)` branch below -- so this mirrors that detection
+    # without giving the mapper a side-effect. The user still gets only the sanitized
+    # "capacity limit" text; this is the other half, the one an operator can act on.
+    if http_exc.status_code == 402 and not isinstance(exc, HTTPException) and not byok:
+        try:
+            from src.services.provider_budget_alerts import record_provider_budget_error
+
+            record_provider_budget_error(provider, model, str(exc), exc=exc)
+        except Exception:  # noqa: BLE001 - monitoring must never break error mapping
+            logger.debug("Failed to record provider budget event", exc_info=True)
 
     # Alert telemetry for upstream failures. HTTPExceptions are deliberately
     # skipped by AutoSentryMiddleware, so without this capture provider

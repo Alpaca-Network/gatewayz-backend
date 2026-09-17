@@ -154,15 +154,24 @@ async def test_real_measured_outage_is_still_reported(wire):
 
 @pytest.mark.asyncio
 async def test_counts_are_consistent_and_gateways_scoped_to_measured(wire):
+    # CHANGED 2026-09-15: openai/b used to carry last_status="rate_limited" and
+    # was asserted as degraded. A 429 measures the PROBER's quota, not the
+    # model, and counting it as degradation is what published a fabricated
+    # major_outage (see tests/routes/test_status_page_unmeasured.py). The test's
+    # actual subject — count consistency and gateway scoping — is unchanged;
+    # openai/b now carries a real failure so "degraded" still has an occupant,
+    # and a separate throttled model pins that it lands in unmonitored.
     models = [
         _model("openai/a"),
         _model("openai/b"),
+        _model("openai/throttled"),
         _model("xai/c"),
         _model("moonshot/d"),  # never probed
     ]
     rows = [
         _row("openai/a"),
-        _row("openai/b", status="rate_limited"),
+        _row("openai/b", status="error"),
+        _row("openai/throttled", status="rate_limited"),
         _row("xai/c", status="error", circuit_breaker_state="open"),
         # an older duplicate for the same model must not override the latest check
         {**_row("openai/a", status="error", age=timedelta(hours=3)), "provider": "legacy"},
@@ -176,6 +185,7 @@ async def test_counts_are_consistent_and_gateways_scoped_to_measured(wire):
     )
     assert data["monitored_models"] + data["unmonitored_models"] == data["total_models"]
     assert (data["healthy_models"], data["degraded_models"], data["offline_models"]) == (1, 1, 1)
+    assert data["rate_limited_models"] == 1
     assert data["total_gateways"] == 3
     assert data["monitored_gateways"] == 2
     assert data["healthy_gateways"] == 1

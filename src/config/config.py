@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -27,6 +28,25 @@ def _get_env_var(name: str, default: str | None = None, *, strip: bool = True) -
         value = value.strip()
 
     return value or default
+
+
+def _decimal_env(name: str, default: str) -> Decimal:
+    """A Decimal setting that falls back to its documented default rather
+    than raising at import. A typo in a payout multiplier should not take the
+    whole service down, and it must not silently become zero either."""
+    raw = _get_env_var(name, default)
+    try:
+        return Decimal(str(raw))
+    except (ArithmeticError, TypeError, ValueError):
+        return Decimal(default)
+
+
+def _int_env(name: str, default: int) -> int:
+    """An int setting with the same fail-to-default contract as _decimal_env."""
+    try:
+        return int(str(_get_env_var(name, str(default))))
+    except (TypeError, ValueError):
+        return default
 
 
 def _derive_loki_query_url(push_url: str | None) -> str:
@@ -242,6 +262,22 @@ class Config:
     HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY = int(
         _get_env_var("HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", "2")
     )
+    # Holdings rewards are capped by what the account actually spent on
+    # inference: the programme exists to convert token holders into customers,
+    # so holding alone earns nothing. Multiplier 1.0 means "earn at most what
+    # you spent"; the lookback smooths lumpy usage, since nobody runs
+    # inference every single day. Set HOLDINGS_USAGE_MATCH_ENABLED=false to
+    # pay purely for holdings, which buys a wallet balance rather than a user.
+    HOLDINGS_USAGE_MATCH_ENABLED = _get_env_var("HOLDINGS_USAGE_MATCH_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # Parsed defensively: a typo in either of these must not take the whole
+    # app down at import, and the safe fallback for a payout multiplier is the
+    # documented default rather than a crash or an accidental zero.
+    HOLDINGS_USAGE_MATCH_MULTIPLIER = _decimal_env("HOLDINGS_USAGE_MATCH_MULTIPLIER", "1.0")
+    HOLDINGS_USAGE_LOOKBACK_DAYS = _int_env("HOLDINGS_USAGE_LOOKBACK_DAYS", 7)
     # Per-account daily ceiling, and a global daily budget across all accounts.
     # Both are placeholders until the boss sets the real numbers.
     HOLDINGS_DAILY_CAP_CREDITS = float(_get_env_var("HOLDINGS_DAILY_CAP_CREDITS", "50.0"))
@@ -834,6 +870,62 @@ class Config:
         "true",
         "yes",
     }
+
+    # ---- Probe budget ------------------------------------------------------
+    # The monitor used to *accelerate* on failure (min(interval, 300s) after two
+    # consecutive failures). Because a 429 counted as a failure, every throttled
+    # model dropped to a 5-minute probe, which produced more 429s — a positive
+    # feedback loop that reached 439,162 probes / 419,542 "errors" and published
+    # a fabricated major_outage. Probing is now BOUNDED, never accelerated.
+    #
+    # Floor applied to every tier interval. 1800s (30 min) gives each model at
+    # most 48 probes/day, well inside the 24h window the status page measures.
+    HEALTH_PROBE_MIN_INTERVAL_SECONDS: int = int(
+        os.environ.get("HEALTH_PROBE_MIN_INTERVAL_SECONDS", "1800")
+    )
+
+    # Hard cap on probes per model per rolling hour, enforced in-process before
+    # a request is issued. A backstop for any scheduling bug: even if
+    # next_check_at were reset to the past on every pass, a model cannot be
+    # probed more than this many times an hour.
+    HEALTH_PROBE_MAX_PER_MODEL_PER_HOUR: int = int(
+        os.environ.get("HEALTH_PROBE_MAX_PER_MODEL_PER_HOUR", "4")
+    )
+
+    # Exponential backoff applied after a throttled or failed probe. Doubles per
+    # consecutive strike, capped at HEALTH_PROBE_BACKOFF_MAX_SECONDS.
+    HEALTH_PROBE_BACKOFF_BASE_SECONDS: int = int(
+        os.environ.get("HEALTH_PROBE_BACKOFF_BASE_SECONDS", "900")
+    )
+
+    # Backoff ceiling. MUST stay well under the status page's 24h measurement
+    # window (src/routes/status_page.py MEASUREMENT_MAX_AGE) or a backed-off
+    # model silently ages out of "monitored" and the page loses coverage.
+    # 6h + jitter <= 7.5h => at least 3 probes per 24h window at maximum backoff.
+    HEALTH_PROBE_BACKOFF_MAX_SECONDS: int = int(
+        os.environ.get("HEALTH_PROBE_BACKOFF_MAX_SECONDS", "21600")
+    )
+
+    # Fractional jitter added to every computed interval (0.25 = up to +25%).
+    # Without it every model on a provider retries in lockstep after a shared
+    # throttling window and re-triggers the same 429 burst.
+    HEALTH_PROBE_JITTER_FRACTION: float = float(
+        os.environ.get("HEALTH_PROBE_JITTER_FRACTION", "0.25")
+    )
+
+    # When a provider throttles us, hold off EVERY model on that provider, not
+    # just the one that got the 429 — the quota is shared. In-process only; a
+    # restart re-learns it from the next 429.
+    HEALTH_PROBE_PROVIDER_COOLDOWN_SECONDS: int = int(
+        os.environ.get("HEALTH_PROBE_PROVIDER_COOLDOWN_SECONDS", "900")
+    )
+
+    # Mark model_health_tracking rows that match no catalog model as
+    # is_enabled=false, so they stop being selected for probing at the query
+    # level. 30 rows were reporting "Model not found" on every pass.
+    HEALTH_PROBE_PRUNE_ORPHANS: bool = os.environ.get(
+        "HEALTH_PROBE_PRUNE_ORPHANS", "true"
+    ).lower() in {"1", "true", "yes"}
 
     # How often to sync models from provider APIs (in minutes)
     # Recommended: 15-30 minutes for balance between freshness and API rate limits

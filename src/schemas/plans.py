@@ -1,8 +1,27 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, model_validator
 
-from src.schemas.common import PlanType, SubscriptionStatus
+from src.schemas.common import SubscriptionStatus
+
+# Almost every column on the `plans` table is nullable in Postgres, and rows
+# predating a column's introduction hold SQL NULL. A pydantic default only
+# applies when a key is absent -- an explicit None still fails validation -- so
+# a NULL column would 500 the public `/plans` endpoints. Coerce NULL to the
+# column's database default at the boundary instead of widening the public
+# response contract to `| None`, which would push the problem onto every client.
+_PLAN_RESPONSE_NULL_DEFAULTS: dict[str, object] = {
+    "description": "",
+    "plan_type": "free",
+    "daily_request_limit": 1000,
+    "monthly_request_limit": 30000,
+    "daily_token_limit": 100000,
+    "monthly_token_limit": 3000000,
+    "price_per_month": 0.0,
+    "is_pay_as_you_go": False,
+    "max_concurrent_requests": 5,
+    "is_active": True,
+}
 
 
 class PlanResponse(BaseModel):
@@ -22,27 +41,35 @@ class PlanResponse(BaseModel):
     features: list[str]
     is_active: bool
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_nullable_columns(cls, data: object) -> object:
+        """Normalize a raw `plans` row so NULL columns cannot 500 the endpoint."""
+        if not isinstance(data, dict):
+            return data
 
-class SubscriptionPlan(BaseModel):
-    """Detailed subscription plan model with all fields"""
+        coerced = dict(data)
+        for field, default in _PLAN_RESPONSE_NULL_DEFAULTS.items():
+            if coerced.get(field) is None:
+                coerced[field] = default
 
-    id: int | None = None
-    plan_name: str
-    plan_type: PlanType
-    description: str = ""
-    monthly_price: float = 0.0
-    yearly_price: float | None = None
-    daily_request_limit: int = 1000
-    monthly_request_limit: int = 1000
-    daily_token_limit: int = 100000
-    monthly_token_limit: int = 100000
-    max_concurrent_requests: int = 5
-    price_per_token: float | None = None
-    features: list[str] = Field(default_factory=list)
-    is_active: bool = True
-    is_pay_as_you_go: bool = False
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+        # `features` is jsonb: historically a list, but some rows hold an object.
+        features = coerced.get("features")
+        if isinstance(features, dict):
+            coerced["features"] = list(features.keys())
+        elif not isinstance(features, list):
+            coerced["features"] = []
+
+        return coerced
+
+
+# NOTE: `SubscriptionPlan` and `SubscriptionPlansResponse` used to live here.
+# They were the response models for GET /subscription/plans, which has returned
+# HTTP 410 since #2180 moved billing to credits-only, and they had no other
+# caller anywhere in the tree. They carried the only reference to the
+# `PlanType` enum, whose vocabulary (free/dev/team/customize) never matched the
+# production `plans.plan_type` column; both were deleted together rather than
+# keeping a second, contradictory plan vocabulary alive in dead code.
 
 
 class SubscriptionHistory(BaseModel):
@@ -57,14 +84,6 @@ class SubscriptionHistory(BaseModel):
     price_paid: float = 0.0
     payment_method: str | None = None
     created_at: datetime | None = None
-
-
-class SubscriptionPlansResponse(BaseModel):
-    """Response for available subscription plans"""
-
-    success: bool
-    plans: list[SubscriptionPlan]
-    message: str
 
 
 class UserPlanResponse(BaseModel):

@@ -202,6 +202,91 @@ def _append_community_models(models: list, gateway_value: str) -> list:
     return models + [m for m in community_models if m.get("id") not in existing_ids]
 
 
+# ============================================================================
+# SERVING TIER
+# Which kind of infrastructure serves a catalog row: a contracted upstream
+# provider, or the community GPU network (operator-run nodes, beta). Every
+# served row carries `serving_tier`, and `?tier=` filters on it.
+# ============================================================================
+
+SERVING_TIER_PROVIDER = "provider"
+SERVING_TIER_COMMUNITY = "community"
+SERVING_TIER_ALL = "all"
+
+VALID_SERVING_TIERS = (SERVING_TIER_ALL, SERVING_TIER_PROVIDER, SERVING_TIER_COMMUNITY)
+
+DESC_TIER = (
+    "Serving tier filter: 'provider' (models served by contracted upstream providers), "
+    "'community' (models served by community GPU nodes, beta), or 'all' (default, both). "
+    "Every returned model carries a 'serving_tier' field with the same vocabulary. "
+    "Pin '?tier=provider' for a set that is unaffected by the community network."
+)
+
+
+def _serving_tier_of(m: dict) -> str:
+    """The tier a catalog row belongs to.
+
+    Community rows are produced by ``src.services.gpu.catalog`` and are
+    already stamped; the id prefix and ``source_gateway`` are checked too so
+    a row that reached the response some other way still classifies
+    correctly. Everything else is provider-served.
+    """
+    tier = m.get("serving_tier")
+    if tier in (SERVING_TIER_PROVIDER, SERVING_TIER_COMMUNITY):
+        return tier
+    if m.get("source_gateway") == SERVING_TIER_COMMUNITY:
+        return SERVING_TIER_COMMUNITY
+    if str(m.get("id") or "").startswith("community/"):
+        return SERVING_TIER_COMMUNITY
+    return SERVING_TIER_PROVIDER
+
+
+def _annotate_serving_tier(models: list) -> list:
+    """Stamp ``serving_tier`` on every row, in place.
+
+    Purely additive: a provider row gains ``"serving_tier": "provider"`` and
+    nothing else changes. Applied to the freshly-built response AND to
+    cache hits, so an entry written before this field existed still serves a
+    labelled payload instead of a silently unlabelled one.
+    """
+    for m in models:
+        if isinstance(m, dict):
+            try:
+                m["serving_tier"] = _serving_tier_of(m)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(f"serving_tier annotation failed for row {m.get('id')!r}: {e}")
+    return models
+
+
+def _filter_by_tier(models: list, tier: str) -> list:
+    """Keep only rows in ``tier``. ``"all"`` is a pass-through."""
+    if tier == SERVING_TIER_ALL:
+        return models
+    return [m for m in models if isinstance(m, dict) and _serving_tier_of(m) == tier]
+
+
+def _validate_tier(tier: str | None) -> str:
+    """Normalize/validate ``?tier=``; 400 on anything else.
+
+    Fails closed with the same shape as ``validate_gateway``: an unknown
+    filter value must never quietly widen the result set.
+
+    Non-string input means an in-process caller invoked ``get_models`` directly
+    and the parameter still holds its FastAPI ``Query`` default object (several
+    call sites and tests do this). That is "not specified", i.e. ``all`` —
+    never a validation error, which would turn an internal call into a 400.
+    """
+    if tier is not None and not isinstance(tier, str):
+        return SERVING_TIER_ALL
+    value = (tier or SERVING_TIER_ALL).lower()
+    if value not in VALID_SERVING_TIERS:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Invalid tier '{tier}'. Must be one of: {', '.join(VALID_SERVING_TIERS)}"),
+        )
+    return value
+
+
 def _row_is_servable(m: dict) -> bool:
     """Whether the inference pricing gate would admit this catalog row.
 
@@ -282,12 +367,18 @@ def get_public_catalog_models() -> list[dict]:
     Other public surfaces (``GET /v1/status``) count models from here so that
     they can never disagree with the catalog about how many models exist.
     Synchronous: callers on the event loop should use ``asyncio.to_thread``.
+
+    Rows carry ``serving_tier`` ("provider" | "community") so a caller that
+    needs one tier can count it without re-deriving the rule.
     """
     models = get_cached_models("all") or []
     if not models:
         models = merge_models_by_slug(*((get_cached_models(s) or []) for s in get_provider_slugs()))
     models = _append_community_models(models, "all")
-    return [m for m in _apply_health_gating(models) if isinstance(m, dict)]
+    gated = [m for m in _apply_health_gating(models) if isinstance(m, dict)]
+    # Copy before stamping: rows can come straight from the process-wide
+    # catalog cache, which must never be mutated as a serving side effect.
+    return _annotate_serving_tier([dict(m) for m in gated])
 
 
 @router.get("/routers", tags=["routers"])
@@ -769,11 +860,39 @@ async def get_models(
             "When true, each model appears once with an array of providers offering it."
         ),
     ),
+    tier: str | None = Query(SERVING_TIER_ALL, description=DESC_TIER),
 ):
-    """Get all metric data of available models with optional filtering, pagination, and provider logos"""
+    """Get all metric data of available models with optional filtering, pagination, and provider logos.
+
+    **Serving tiers.** Every model in ``data[]`` carries ``serving_tier``:
+
+    - ``"provider"`` — served by a contracted upstream provider (OpenAI,
+      Anthropic, xAI, Moonshot, Meta, …). Priced per token; ``pricing`` is
+      populated.
+    - ``"community"`` — served by the community GPU network: open-weight
+      models running on operator-run nodes, in beta, verified by sampled
+      replay (``docs/gpu/VERIFICATION_AND_PAYOUTS.md``). These rows carry
+      ``pricing: null`` with ``pricing_status: "unpriced"`` (never ``0`` —
+      an unpriced model must not read as a free one), an
+      ``available_node_count`` of the active nodes declaring the model right
+      now, and ``servable`` reflecting whether the inference pricing gate
+      would admit them today.
+
+    ``?tier=provider`` returns only the provider-served catalog and is the
+    value to pin if your integration must be unaffected by the community
+    network; ``?tier=community`` returns only community models; the default
+    ``all`` returns both. ``total`` always counts the filtered set.
+
+    Community models are **opt-in at request time too**: a caller reaches one
+    only by naming the ``community/<model>`` id explicitly, with an API key.
+    They are never a failover or auto-routing target and no requested model
+    is ever substituted for one (``src/handlers/provider_registry.py``,
+    ``src/security/inference_gates.py::enforce_community_auth_gate``).
+    """
 
     try:
         validate_gateway(gateway)
+        tier_value = _validate_tier(tier)
         provider = normalize_developer_segment(provider)
         logger.debug(
             f"/models endpoint called with gateway parameter: {repr(gateway)}, unique_models={unique_models}"
@@ -793,12 +912,17 @@ async def get_models(
         )
 
         # Build cache params from all request parameters
+        # `tier` MUST be part of the cache key: two requests that differ only
+        # by tier have different bodies, and sharing one entry between them
+        # would serve a community-inclusive payload to a `?tier=provider`
+        # caller (or hide community models from a `?tier=community` one).
         cache_params = {
             "limit": limit,
             "offset": offset,
             "provider": provider,
             "is_private": is_private,
             "unique_models": unique_models,
+            "tier": tier_value,
         }
 
         # Try to get from cache
@@ -806,9 +930,11 @@ async def get_models(
         if cached_response:
             logger.info(f"✅ Returning cached response for gateway={gateway_value}")
             # Defense-in-depth: re-apply health gating to cached data in case the
-            # entry was cached before a model was marked 'down' (inert otherwise).
-            gated_data = _annotate_servability(
-                _apply_health_gating(cached_response.get("data", []))
+            # entry was cached before a model was marked 'down' (inert otherwise),
+            # and re-stamp serving_tier so an entry written before that field
+            # existed still serves a labelled payload.
+            gated_data = _annotate_serving_tier(
+                _annotate_servability(_apply_health_gating(cached_response.get("data", [])))
             )
             if len(gated_data) != len(cached_response.get("data", [])):
                 cached_response = {**cached_response, "data": gated_data}
@@ -957,7 +1083,27 @@ async def get_models(
         # merged in before pagination/provider-grouping so totals, offsets, and
         # the `?provider=` filter below all treat community/<model> like any
         # other catalog row.
-        models = _append_community_models(models, gateway_value)
+        #
+        # `?tier=provider` skips the merge entirely rather than merging and
+        # then filtering: the projection reads the gpu_nodes table, and a
+        # caller that asked not to see community models should not pay for
+        # that lookup (nor be exposed to its failure mode) at all.
+        if tier_value != SERVING_TIER_PROVIDER:
+            models = _append_community_models(models, gateway_value)
+
+        # Apply `?tier=` BEFORE `total_models` and pagination below, so `total`,
+        # `has_more` and `next_offset` describe the filtered set rather than a
+        # superset the caller can never page into. Filtering is a pure read of
+        # each row (`_serving_tier_of`); the `serving_tier` field itself is
+        # stamped after pagination, on the enhanced copies, so the shared
+        # catalog-cache dicts are never mutated as a serving side effect.
+        if tier_value != SERVING_TIER_ALL:
+            _pre_tier_count = len(models)
+            models = _filter_by_tier(models, tier_value)
+            if len(models) != _pre_tier_count:
+                logger.info(
+                    f"Tier filter '{tier_value}': {_pre_tier_count} -> {len(models)} models"
+                )
 
         provider_groups: list[list[dict]] = []
 
@@ -1072,6 +1218,13 @@ async def get_models(
         # dicts. The annotated page is what gets cached below.
         enhanced_models = _annotate_servability(enhanced_models)
 
+        # Serving-tier label. Same placement and reasoning as servability: on
+        # the enhanced copies, after pagination, and the labelled page is what
+        # gets cached. Community rows arrive already stamped; this makes the
+        # field unconditional so a client can switch on it without treating
+        # "absent" as a third state.
+        enhanced_models = _annotate_serving_tier(enhanced_models)
+
         note = {
             "openrouter": "OpenRouter catalog",
             "featherless": "Featherless catalog",
@@ -1126,6 +1279,7 @@ async def get_models(
             "has_more": has_more,
             "next_offset": next_offset,
             "gateway": gateway_value,
+            "tier": tier_value,
             "note": note,
             "timestamp": datetime.now(UTC).isoformat(),
         }
@@ -2011,7 +2165,15 @@ async def get_all_models(
             "Example response: {id: 'gpt-4', providers: [{slug: 'openrouter', pricing: {...}}, ...]}"
         ),
     ),
+    tier: str | None = Query(SERVING_TIER_ALL, description=DESC_TIER),
 ):
+    """List the models this gateway serves (OpenAI-compatible ``/v1/models``).
+
+    See :func:`get_models` for the full contract. In short: every entry carries
+    a ``serving_tier`` of ``"provider"`` (contracted upstream provider) or
+    ``"community"`` (community GPU network, beta, unpriced), and ``?tier=``
+    filters on it — pin ``?tier=provider`` for the provider-only catalog.
+    """
     return await get_models(
         provider=provider,
         is_private=is_private,
@@ -2019,6 +2181,7 @@ async def get_all_models(
         offset=offset,
         gateway=gateway,
         unique_models=unique_models,
+        tier=tier,
     )
 
 

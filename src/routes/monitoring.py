@@ -34,7 +34,7 @@ it will be validated. If not provided, public access is allowed with rate limiti
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
@@ -50,6 +50,39 @@ from src.services.redis_metrics import get_redis_metrics
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
+
+# --- chat_completion_requests query bounds ---------------------------------
+# chat_completion_requests is the highest-volume table in the schema (~80k live
+# rows; anything older than 90 days is deleted by cleanup_chat_completion_requests().
+# NOTE: 20260525000000_add_ttl_cleanup_jobs.sql set that TTL to 30 days, but
+# 20260525010000_fix_ttl_cleanup_jobs.sql raised it to 90 -- "TTL of 30d destroys
+# lifetime aggregates" -- so 90 is the retention that actually applies. Keep this
+# window equal to the TTL: a shorter one silently hides rows the database still
+# has, which is the same "a subset rendered as the whole" bug these bounds exist
+# to fix. Prod currently holds rows back to 2026-06-18, i.e. ~90 days.
+# Every read below is bounded so a
+# handler can never ask PostgREST for the whole table:
+#   * an unbounded select is silently truncated at PostgREST's db-max-rows
+#     (1000), so aggregating "all rows" in Python produced wrong numbers while
+#     still paying for the scan;
+#   * a per-row fan-out over the models table (13k+ rows) turns one request
+#     into thousands of round trips and blows any upstream proxy timeout;
+#   * exact counts over the unfiltered table can hit the statement timeout
+#     (Postgres 57014) under load.
+# Aggregation belongs in the database - the RPCs in
+# 20260915183000_monitoring_chat_requests_perf.sql do the GROUP BY server-side
+# and the Python fallbacks below exist only to degrade gracefully.
+CHAT_REQUESTS_WINDOW_DAYS = 90  # == the 90d row TTL, so this drops no retained data
+CHAT_REQUESTS_MAX_LIMIT = 1000  # PostgREST db-max-rows; asking for more is a lie
+CHAT_REQUESTS_FALLBACK_SCAN_LIMIT = 1000
+CHAT_REQUESTS_FALLBACK_MAX_MODELS = 100
+CHAT_REQUESTS_PLOT_MAX_POINTS = 1000
+
+
+def _chat_requests_window_start(days: int = CHAT_REQUESTS_WINDOW_DAYS) -> str:
+    """ISO timestamp marking the oldest row a bounded chat-request scan may read."""
+    return (datetime.now(UTC) - timedelta(days=days)).isoformat()
+
 
 # Separate router for Sentry tunnel at root /monitoring path
 sentry_tunnel_router = APIRouter(tags=["sentry-tunnel"])
@@ -803,19 +836,20 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
         except Exception as rpc_error:
             logger.debug(f"RPC function not available, using fallback method: {rpc_error}")
 
-        # Fallback: Get distinct model_ids with their provider info (lightweight)
-        # We only fetch unique model_id + provider combinations, not all requests
-        distinct_result = client.table("chat_completion_requests").select("""
-            model_id,
-            models!inner(
-                provider_id,
-                providers!inner(
-                    id,
-                    name,
-                    slug
-                )
-            )
-            """).execute()
+        # Fallback: sample the most recent requests in the retention window to
+        # discover which providers are in play. This select used to be
+        # unbounded, which PostgREST silently truncated at db-max-rows anyway -
+        # so it paid for a whole-table request and then aggregated an arbitrary
+        # slice. Bounding it makes the cost predictable and the sampling honest.
+        window_start = _chat_requests_window_start()
+        distinct_result = (
+            client.table("chat_completion_requests")
+            .select("model_id, models!inner(provider_id, providers!inner(id, name, slug))")
+            .gte("created_at", window_start)
+            .order("created_at", desc=True)
+            .limit(CHAT_REQUESTS_FALLBACK_SCAN_LIMIT)
+            .execute()
+        )
 
         if not distinct_result.data:
             return {
@@ -825,6 +859,7 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
                     "total_providers": 0,
                     "timestamp": datetime.now(UTC).isoformat(),
                     "method": "fallback",
+                    "window_days": CHAT_REQUESTS_WINDOW_DAYS,
                 },
             }
 
@@ -859,11 +894,14 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
             # Query only models from this provider
             model_ids_list = list(stats["model_ids"])
 
-            # Count total requests for all models of this provider
+            # Count total requests for all models of this provider, bounded to
+            # the same window as the sample so the count matches what was sampled
+            # and the planner can use the created_at index.
             count_result = (
                 client.table("chat_completion_requests")
                 .select("id", count="exact", head=True)
                 .in_("model_id", model_ids_list)
+                .gte("created_at", window_start)
                 .execute()
             )
 
@@ -889,6 +927,8 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
                 "total_providers": len(providers_list),
                 "timestamp": datetime.now(UTC).isoformat(),
                 "method": "fallback_with_counts",
+                "window_days": CHAT_REQUESTS_WINDOW_DAYS,
+                "sampled": len(distinct_result.data) >= CHAT_REQUESTS_FALLBACK_SCAN_LIMIT,
             },
         }
 
@@ -921,19 +961,41 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
 
         client = get_db()
 
-        # Get all requests with model info
-        result = client.table("chat_completion_requests").select("""
-            model_id,
-            models!inner(
-                id,
-                model_name,
-                model_id,
-                providers!inner(
-                    name,
-                    slug
-                )
+        # Preferred path: let Postgres do the GROUP BY. Counting 80k rows in
+        # Python meant pulling 80k joined rows over HTTP, which PostgREST caps
+        # at db-max-rows - so the counts were both slow and wrong.
+        try:
+            rpc_result = client.rpc("get_model_request_counts").execute()
+            if rpc_result.data:
+                return {
+                    "success": True,
+                    "data": rpc_result.data,
+                    "metadata": {
+                        "total_models": len(rpc_result.data),
+                        "total_requests": sum(
+                            int(m.get("request_count") or 0) for m in rpc_result.data
+                        ),
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "method": "rpc",
+                    },
+                }
+        except Exception as rpc_error:
+            logger.debug(f"RPC function not available, using fallback method: {rpc_error}")
+
+        # Fallback: sample the most recent requests in the retention window.
+        # Note models has no "model_id" column - the vendor-facing identifier is
+        # provider_model_id, which is what "model_identifier" reports.
+        window_start = _chat_requests_window_start()
+        result = (
+            client.table("chat_completion_requests")
+            .select(
+                "model_id, models!inner(id, model_name, provider_model_id, providers!inner(name, slug))"
             )
-            """).execute()
+            .gte("created_at", window_start)
+            .order("created_at", desc=True)
+            .limit(CHAT_REQUESTS_FALLBACK_SCAN_LIMIT)
+            .execute()
+        )
 
         if not result.data:
             return {
@@ -943,6 +1005,8 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
                     "total_models": 0,
                     "total_requests": 0,
                     "timestamp": datetime.now(UTC).isoformat(),
+                    "method": "fallback",
+                    "window_days": CHAT_REQUESTS_WINDOW_DAYS,
                 },
             }
 
@@ -959,7 +1023,7 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
                 model_counts[model_id] = {
                     "model_id": model_id,
                     "model_name": model_info.get("model_name"),
-                    "model_identifier": model_info.get("model_id"),
+                    "model_identifier": model_info.get("provider_model_id"),
                     "provider_name": model_info.get("providers", {}).get("name"),
                     "provider_slug": model_info.get("providers", {}).get("slug"),
                     "request_count": 0,
@@ -978,6 +1042,9 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
                 "total_models": len(counts_list),
                 "total_requests": sum(m["request_count"] for m in counts_list),
                 "timestamp": datetime.now(UTC).isoformat(),
+                "method": "fallback_sampled",
+                "window_days": CHAT_REQUESTS_WINDOW_DAYS,
+                "sampled": len(result.data) >= CHAT_REQUESTS_FALLBACK_SCAN_LIMIT,
             },
         }
 
@@ -1042,16 +1109,53 @@ async def get_models_with_requests(
         except Exception as rpc_error:
             logger.debug(f"RPC function not available, using fallback method: {rpc_error}")
 
-        # Fallback: Optimized query using aggregations (no fetching all requests!)
-        # Step 1: Get all models with their provider info
+        # Fallback: only look at models that actually appear in recent requests.
+        # This used to start from the whole models table (13k+ rows) and issue a
+        # stats query per row - one HTTP round trip each, so a single call to
+        # this endpoint fanned out into thousands and never finished. Deriving
+        # the candidate set from a bounded scan of the requests themselves caps
+        # the fan-out at CHAT_REQUESTS_FALLBACK_MAX_MODELS.
+        window_start = _chat_requests_window_start()
+        sample_result = (
+            client.table("chat_completion_requests")
+            .select("model_id")
+            .gte("created_at", window_start)
+            .order("created_at", desc=True)
+            .limit(CHAT_REQUESTS_FALLBACK_SCAN_LIMIT)
+            .execute()
+        )
+
+        sample_counts: dict[int, int] = {}
+        for record in sample_result.data or []:
+            sampled_model_id = record.get("model_id")
+            if sampled_model_id is not None:
+                sample_counts[sampled_model_id] = sample_counts.get(sampled_model_id, 0) + 1
+
+        # Busiest models first, then truncate - if we have to drop models, drop
+        # the ones the dashboard cares about least.
+        candidate_model_ids = sorted(sample_counts, key=lambda m: sample_counts[m], reverse=True)[
+            :CHAT_REQUESTS_FALLBACK_MAX_MODELS
+        ]
+
+        if not candidate_model_ids:
+            return {
+                "success": True,
+                "data": [],
+                "metadata": {
+                    "total_models": 0,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "method": "fallback",
+                    "window_days": CHAT_REQUESTS_WINDOW_DAYS,
+                },
+            }
+
         models_query = client.table("models").select("""
             id,
-            model_id,
             model_name,
             provider_model_id,
             provider_id,
             providers!inner(id, name, slug)
-            """)
+            """).in_("id", candidate_model_ids)
 
         # Apply provider filter if specified
         if provider_id is not None:
@@ -1067,6 +1171,7 @@ async def get_models_with_requests(
                     "total_models": 0,
                     "timestamp": datetime.now(UTC).isoformat(),
                     "method": "fallback",
+                    "window_days": CHAT_REQUESTS_WINDOW_DAYS,
                 },
             }
 
@@ -1104,6 +1209,7 @@ async def get_models_with_requests(
                         client.table("chat_completion_requests")
                         .select("id", count="exact", head=True)
                         .eq("model_id", model_id)
+                        .gte("created_at", window_start)
                         .execute()
                     )
 
@@ -1130,7 +1236,9 @@ async def get_models_with_requests(
                 models_data.append(
                     {
                         "model_id": model_info["id"],
-                        "model_identifier": model_info["model_id"],
+                        # models has no "model_id" column; provider_model_id is
+                        # the vendor-facing identifier the dashboard displays.
+                        "model_identifier": model_info["provider_model_id"],
                         "model_name": model_info["model_name"],
                         "provider_model_id": model_info["provider_model_id"],
                         "provider": model_info["providers"],
@@ -1152,6 +1260,9 @@ async def get_models_with_requests(
                 "total_models": len(models_data),
                 "timestamp": datetime.now(UTC).isoformat(),
                 "method": "fallback_optimized",
+                "window_days": CHAT_REQUESTS_WINDOW_DAYS,
+                "sampled": len(sample_counts) > len(candidate_model_ids)
+                or len(sample_result.data or []) >= CHAT_REQUESTS_FALLBACK_SCAN_LIMIT,
             },
         }
 
@@ -1174,7 +1285,12 @@ async def get_chat_completion_requests(
     end_date: str | None = Query(
         None, description="Filter by end date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
     ),
-    limit: int = Query(100, ge=1, le=100000, description="Maximum number of records to return"),
+    limit: int = Query(
+        100,
+        ge=1,
+        le=CHAT_REQUESTS_MAX_LIMIT,
+        description="Maximum number of records to return",
+    ),
     offset: int = Query(0, ge=0, description="Number of records to skip (pagination)"),
     api_key: str | None = Depends(get_optional_api_key),
 ):
@@ -1190,7 +1306,8 @@ async def get_chat_completion_requests(
     - model_name: Filter by model name (partial match/contains)
     - start_date: Filter requests created after this date (ISO format)
     - end_date: Filter requests created before this date (ISO format)
-    - limit: Maximum number of records (default: 100, max: 100000)
+    - limit: Maximum number of records (default: 100, max: 1000 - PostgREST's
+      row ceiling; larger values were never actually returned)
     - offset: Pagination offset (default: 0)
 
     Returns:
@@ -1216,11 +1333,12 @@ async def get_chat_completion_requests(
         client = get_db()
 
         # Build the query with joins to get model and provider information
-        query = client.table("chat_completion_requests").select("""
+        # models has no "model_id" column - selecting it made PostgREST reject
+        # the whole request with 42703, which surfaced as a 500.
+        select_clause = """
             *,
             models!inner(
                 id,
-                model_id,
                 model_name,
                 provider_model_id,
                 provider_id,
@@ -1230,7 +1348,14 @@ async def get_chat_completion_requests(
                     slug
                 )
             )
-            """)
+            """
+        query = client.table("chat_completion_requests").select(select_clause)
+
+        # Bound the scan. Without an explicit lower bound the planner has to
+        # consider every row to satisfy ORDER BY created_at DESC; rows older
+        # than the TTL window do not exist, so this narrows the plan without
+        # dropping any data the caller could have seen.
+        effective_start_date = start_date or _chat_requests_window_start()
 
         # Apply filters
         if model_id is not None:
@@ -1246,8 +1371,7 @@ async def get_chat_completion_requests(
         if status is not None:
             query = query.eq("status", status)
 
-        if start_date is not None:
-            query = query.gte("created_at", start_date)
+        query = query.gte("created_at", effective_start_date)
 
         if end_date is not None:
             query = query.lte("created_at", end_date)
@@ -1258,18 +1382,27 @@ async def get_chat_completion_requests(
         # Execute query
         result = query.execute()
 
-        # Get total count for pagination metadata (without limit/offset)
+        # Total count for pagination metadata. This mirrors every filter the
+        # page query applies - including the ones that need the models join -
+        # so the caller's page count matches the rows it can actually reach.
+        # Previously provider_id and model_name were dropped here, which made
+        # the dashboard page past the end of a filtered result set.
         count_query = client.table("chat_completion_requests").select(
-            "id", count="exact", head=True
+            "id, models!inner(id)", count="exact", head=True
         )
 
         if model_id is not None:
             count_query = count_query.eq("model_id", model_id)
+        if provider_id is not None:
+            count_query = count_query.eq("models.provider_id", provider_id)
+        if model_name is not None:
+            count_query = count_query.ilike("models.model_name", f"%{model_name}%")
         if status is not None:
             count_query = count_query.eq("status", status)
+        count_query = count_query.gte("created_at", effective_start_date)
+        if end_date is not None:
+            count_query = count_query.lte("created_at", end_date)
 
-        # Note: Filtering by provider_id or model_name requires joins,
-        # so we'll use the result length as an approximation for now
         count_result = count_query.execute()
         total_count = count_result.count if count_result.count is not None else len(result.data)
 
@@ -1290,6 +1423,7 @@ async def get_chat_completion_requests(
                     "start_date": start_date,
                     "end_date": end_date,
                 },
+                "window_days": None if start_date else CHAT_REQUESTS_WINDOW_DAYS,
                 "timestamp": datetime.now(UTC).isoformat(),
             },
         }
@@ -1314,7 +1448,8 @@ async def get_chat_requests_plot_data(
 
     Returns:
     - recent_requests: Last 10 full requests for display
-    - plot_data: ALL requests but only tokens and latency (compressed arrays)
+    - plot_data: the most recent requests in the retention window (capped at
+      1000 points) with only tokens and latency (compressed arrays)
 
     This is highly optimized for frontend plotting:
     - Minimal data transfer (only what's needed for graphs)
@@ -1332,13 +1467,14 @@ async def get_chat_requests_plot_data(
 
         client = get_db()
 
-        # Build base query
-        base_filters = []
+        # Bound every scan to the retention window unless the caller asked for
+        # a narrower one. Rows older than the TTL do not exist, so this costs no
+        # data and keeps the planner on the created_at index.
+        effective_start_date = start_date or _chat_requests_window_start()
 
-        if model_id is not None:
-            base_filters.append(("model_id", "eq", model_id))
-
-        # Step 1: Get last 10 full requests for display
+        # Step 1: Get last 10 full requests for display.
+        # models has no "model_id" column - selecting it made PostgREST reject
+        # the request with 42703, which surfaced as a 500.
         recent_query = client.table("chat_completion_requests").select("""
             id,
             request_id,
@@ -1351,9 +1487,9 @@ async def get_chat_requests_plot_data(
             created_at,
             models!inner(
                 id,
-                model_id,
                 model_name,
                 provider_model_id,
+                provider_id,
                 providers!inner(
                     id,
                     name,
@@ -1367,12 +1503,12 @@ async def get_chat_requests_plot_data(
             recent_query = recent_query.eq("model_id", model_id)
 
         if provider_id is not None:
-            # Note: provider_id filter requires checking through models table
-            # We'll filter in Python after fetching
-            pass
+            # Push the provider filter into the join instead of discarding rows
+            # in Python afterwards - post-filtering a 10-row page routinely
+            # returned nothing at all.
+            recent_query = recent_query.eq("models.provider_id", provider_id)
 
-        if start_date is not None:
-            recent_query = recent_query.gte("created_at", start_date)
+        recent_query = recent_query.gte("created_at", effective_start_date)
 
         if end_date is not None:
             recent_query = recent_query.lte("created_at", end_date)
@@ -1382,20 +1518,15 @@ async def get_chat_requests_plot_data(
 
         recent_requests = recent_result.data or []
 
-        # Filter by provider_id if specified (post-fetch filtering)
-        if provider_id is not None:
-            recent_requests = [
-                r
-                for r in recent_requests
-                if r.get("models", {}).get("providers", {}).get("id") == provider_id
-            ]
-
         # Add total_tokens to each recent request
         for req in recent_requests:
             req["total_tokens"] = req.get("input_tokens", 0) + req.get("output_tokens", 0)
 
-        # Step 2: Get ALL requests but only tokens and latency for plotting
-        # This is much lighter - we only fetch 3 fields instead of all
+        # Step 2: Get the plot series - only tokens and latency.
+        # This asked for every matching row with no limit and ordered ascending,
+        # so PostgREST's db-max-rows quietly handed back the 1000 *oldest* rows
+        # and the chart claimed to show everything. Take the newest N instead
+        # and put them back in chronological order for the x-axis.
         plot_query = client.table("chat_completion_requests").select(
             "input_tokens,output_tokens,processing_time_ms,created_at"
         )
@@ -1404,17 +1535,16 @@ async def get_chat_requests_plot_data(
         if model_id is not None:
             plot_query = plot_query.eq("model_id", model_id)
 
-        if start_date is not None:
-            plot_query = plot_query.gte("created_at", start_date)
+        plot_query = plot_query.gte("created_at", effective_start_date)
 
         if end_date is not None:
             plot_query = plot_query.lte("created_at", end_date)
 
-        # Order by created_at for chronological plotting
-        plot_query = plot_query.order("created_at", desc=False)
+        plot_query = plot_query.order("created_at", desc=True).limit(CHAT_REQUESTS_PLOT_MAX_POINTS)
 
         plot_result = plot_query.execute()
-        all_requests = plot_result.data or []
+        all_requests = list(reversed(plot_result.data or []))
+        plot_truncated = len(all_requests) >= CHAT_REQUESTS_PLOT_MAX_POINTS
 
         # Step 3: Compress into arrays for efficient transfer and plotting
         # Instead of sending [{tokens: 100, latency: 50}, ...] we send [[100, 50], ...]
@@ -1448,6 +1578,9 @@ async def get_chat_requests_plot_data(
                 "timestamp": datetime.now(UTC).isoformat(),
                 "compression": "arrays",
                 "format_version": "1.0",
+                "window_days": None if start_date else CHAT_REQUESTS_WINDOW_DAYS,
+                "max_points": CHAT_REQUESTS_PLOT_MAX_POINTS,
+                "truncated": plot_truncated,
             },
         }
 

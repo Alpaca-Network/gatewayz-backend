@@ -41,49 +41,33 @@ async def get_plans():
             logger.warning("No plans found in database")
             return []
 
-        # Convert to PlanResponse format
-        plan_responses = []
+        # Convert to PlanResponse format. PlanResponse normalizes NULL columns
+        # (see src/schemas/plans.py), so a null-heavy row degrades to defaults
+        # rather than failing response serialization with a 500.
+        plan_responses: list[PlanResponse] = []
         for plan in plans:
             try:
-                # Handle features field - convert from dict to list if needed
-                features = plan.get("features", [])
-                if isinstance(features, dict):
-                    # Convert dict to a list of feature names
-                    features = list(features.keys())
-                elif not isinstance(features, list):
-                    features = []
-
-                plan_response = {
-                    "id": plan.get("id"),
-                    "name": plan.get("name"),
-                    "description": plan.get("description"),
-                    "plan_type": plan.get("plan_type", "free"),
-                    "daily_request_limit": plan.get("daily_request_limit"),
-                    "monthly_request_limit": plan.get("monthly_request_limit"),
-                    "daily_token_limit": plan.get("daily_token_limit"),
-                    "monthly_token_limit": plan.get("monthly_token_limit"),
-                    "price_per_month": float(plan.get("price_per_month", 0)),
-                    "yearly_price": (
-                        float(plan.get("yearly_price", 0)) if plan.get("yearly_price") else None
-                    ),
-                    "price_per_token": (
-                        float(plan.get("price_per_token", 0))
-                        if plan.get("price_per_token")
-                        else None
-                    ),
-                    "is_pay_as_you_go": plan.get("is_pay_as_you_go", False),
-                    "max_concurrent_requests": plan.get("max_concurrent_requests", 5),
-                    "features": features,
-                    "is_active": plan.get("is_active", True),
-                }
-                plan_responses.append(plan_response)
+                plan_responses.append(PlanResponse.model_validate(plan))
             except Exception as plan_error:
                 logger.error(f"Error processing plan {plan.get('id', 'unknown')}: {plan_error}")
                 continue
 
-        # Sort plans by type (Free, Dev, Team, Customize)
-        plan_order = {"free": 0, "dev": 1, "team": 2, "customize": 3}
-        plan_responses.sort(key=lambda x: plan_order.get(x.get("plan_type", "free"), 999))
+        # Cosmetic tier ordering. The vocabulary here is the one that actually
+        # exists in `plans.plan_type` -- derived from plans.name by
+        # 20260915164500_backfill_plans_plan_type.sql and pinned by that column's
+        # COMMENT -- not the old free/dev/team/customize enum, whose values never
+        # appeared in the table. Unknown types sort last; Python's sort is stable,
+        # so they keep the order the database returned them in.
+        plan_order = {
+            "free": 0,
+            "trial": 1,
+            "starter": 2,
+            "professional": 3,
+            "business": 4,
+            "enterprise": 5,
+            "admin": 6,
+        }
+        plan_responses.sort(key=lambda p: plan_order.get(p.plan_type, 999))
 
         logger.info(f"Returning {len(plan_responses)} plan responses")
         return plan_responses
@@ -100,7 +84,8 @@ async def get_plan(plan_id: int):
         plan = get_plan_by_id(plan_id)
         if not plan:
             raise HTTPException(status_code=404, detail="Plan not found")
-        return plan
+        # Same NULL-column normalization as GET /plans.
+        return PlanResponse.model_validate(plan)
 
     except HTTPException:
         raise

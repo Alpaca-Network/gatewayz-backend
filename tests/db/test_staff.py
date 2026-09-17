@@ -3,6 +3,8 @@
 import hashlib
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.db.staff import (
     accept_invite,
     count_active_superadmins,
@@ -29,12 +31,30 @@ class TestListStaff:
         assert "privy_user_id" not in rows[0]
         assert rows[1]["has_privy_link"] is False
 
-    def test_returns_empty_list_on_error(self):
+    def test_does_not_select_columns_missing_from_users(self):
+        """`last_login` lives on the legacy admin_users table, never on
+        users. Selecting it made PostgREST fail the whole query with 42703,
+        and the swallowed error rendered the roster empty for weeks."""
+        client = MagicMock()
+        select = client.table.return_value.select
+        select.return_value.in_.return_value.execute.return_value.data = []
+
+        with patch("src.db.staff.get_supabase_client", return_value=client):
+            list_staff()
+
+        columns = {c.strip() for c in select.call_args[0][0].split(",")}
+        assert "last_login" not in columns
+        assert {"id", "email", "role", "is_active", "privy_user_id"} <= columns
+
+    def test_raises_on_error_instead_of_returning_an_empty_roster(self):
+        """An empty list and a broken query must not look identical to the
+        caller -- that is what hid the last_login bug."""
         client = MagicMock()
         client.table.side_effect = RuntimeError("db down")
 
         with patch("src.db.staff.get_supabase_client", return_value=client):
-            assert list_staff() == []
+            with pytest.raises(RuntimeError, match="db down"):
+                list_staff()
 
 
 class TestCountActiveSuperadmins:

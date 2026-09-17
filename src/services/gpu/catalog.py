@@ -29,6 +29,18 @@ logger = logging.getLogger(__name__)
 SOURCE_GATEWAY = "community"
 PROVIDER_SLUG = "community"
 
+#: Value of the catalog-row ``serving_tier`` field for community-node models.
+#: The provider-served catalog uses ``SERVING_TIER_PROVIDER`` in
+#: ``src/routes/catalog.py``; these two strings are the whole public contract.
+SERVING_TIER = "community"
+
+#: ``pricing_status`` for a community row. Community models carry **no**
+#: pricing at all: ``pricing`` is ``None``, never ``{"prompt": 0, ...}``.
+#: A zero price would mean "free to serve", which is a different, billable
+#: claim -- an unpriced model that bills $0 is a known defect class here
+#: (see src/services/pricing/pricing.py's both-prices-zero rejection).
+PRICING_STATUS_UNPRICED = "unpriced"
+
 
 def community_catalog_models(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Union the declared ``models`` of every *active* node into catalog rows.
@@ -39,6 +51,18 @@ def community_catalog_models(nodes: list[dict[str, Any]]) -> list[dict[str, Any]
     model id wins its ``max_context`` (nodes may disagree; picking the first
     is deterministic and good enough for display -- routing itself always
     re-selects a live node per request via ``select_nodes_for_model``).
+
+    **Availability honesty.** Only ``active`` nodes contribute, so a model
+    whose every node has gone offline simply stops being listed rather than
+    lingering as an advertisement nobody can serve. ``available_node_count``
+    additionally says how many active nodes declare the model *right now*,
+    so a client can tell a one-node model from a well-covered one. The count
+    is a snapshot taken when this projection runs, not a promise.
+
+    **Pricing honesty.** ``pricing`` is ``None`` and ``pricing_status`` is
+    ``"unpriced"``. Community capacity is settled with node operators out of
+    band (``src/services/gpu/settlement.py``); there is no per-token price to
+    quote to a caller, and inventing ``0`` would assert one.
     """
     seen: dict[str, dict[str, Any]] = {}
     for node in nodes:
@@ -46,7 +70,11 @@ def community_catalog_models(nodes: list[dict[str, Any]]) -> list[dict[str, Any]
             continue
         for model in node.get("models") or []:
             model_id = model.get("id")
-            if not model_id or model_id in seen:
+            if not model_id:
+                continue
+            existing = seen.get(model_id)
+            if existing is not None:
+                existing["available_node_count"] += 1
                 continue
             seen[model_id] = {
                 "id": f"community/{model_id}",
@@ -54,6 +82,17 @@ def community_catalog_models(nodes: list[dict[str, Any]]) -> list[dict[str, Any]
                 "source_gateway": SOURCE_GATEWAY,
                 "provider_slug": PROVIDER_SLUG,
                 "context_length": model.get("max_context"),
+                # --- public labelling -------------------------------------
+                "serving_tier": SERVING_TIER,
+                # --- pricing: absent, and said so explicitly --------------
+                "pricing": None,
+                "pricing_status": PRICING_STATUS_UNPRICED,
+                # is_free is the flag that exempts a model from the credit
+                # check and admits it for anonymous callers. Unpriced is NOT
+                # free; state it rather than leaving it to a `.get()` default.
+                "is_free": False,
+                # --- availability ------------------------------------------
+                "available_node_count": 1,
             }
     return list(seen.values())
 

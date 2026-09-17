@@ -72,11 +72,24 @@ For each wallet observed on the reward date:
    total.
 3. credits = basis / 1000 x the matching tier's `credits_per_1k_usd_per_day`,
    rounded down at 6 dp.
-4. Cap at `HOLDINGS_DAILY_CAP_CREDITS`, **per account** — an account's other
+4. Cap at the account's **usage allowance** — what it actually spent on
+   inference over the last `HOLDINGS_USAGE_LOOKBACK_DAYS` days (default 7)
+   times `HOLDINGS_USAGE_MATCH_MULTIPLIER` (default 1.0), minus the holdings
+   credits it has already been granted inside that same window. Holding alone
+   earns nothing: the programme exists to turn holders into customers, and
+   unlike staking, a holder's capital does no work for us. The allowance is a
+   budget the window *consumes*, not a ceiling that resets nightly — applied
+   per day, one week's spend could be claimed once a day for a week. An
+   account with no spend is skipped as `no_usage`; a wallet with no account is
+   skipped as `unlinked`, because a pending row would be paid in full the
+   moment it links. Wallets clipped by this ceiling are counted in the run
+   summary as `usage_capped`. Set `HOLDINGS_USAGE_MATCH_ENABLED=false` to pay
+   on holdings alone.
+5. Cap at `HOLDINGS_DAILY_CAP_CREDITS`, **per account** — an account's other
    wallets' accruals for that day are subtracted first, so splitting a balance
    across wallets cannot multiply the ceiling. A wallet not yet linked to an
    account has none to charge against and is capped on its own.
-5. Cap at `HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS` across the run. Wallets are
+6. Cap at `HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS` across the run. Wallets are
    considered in an order seeded by a hash of (reward date, address): the same
    order every time that date is processed, so a re-run pays exactly the same
    wallets, but a different order tomorrow, so no wallet is permanently
@@ -87,15 +100,16 @@ For each wallet observed on the reward date:
    reported as `budget_skipped`. Each wallet is still evaluated on its own
    merits first, so one that would have been skipped anyway is counted under
    its own reason rather than inflating the budget count.
-6. Insert the accrual **pending**, then grant via `add_credits_to_user(...,
+7. Insert the accrual **pending**, then grant via `add_credits_to_user(...,
    transaction_type="holdings_reward",
    request_id="holdings_reward:{wallet}:{date}")`, then mark it paid.
 
 Idempotent twice over, exactly like staking rewards: `holdings_reward_accruals`
 is `UNIQUE (wallet_address, reward_date)` and is written before any credit is
 granted, and `credit_transactions.request_id` has its own partial unique index.
-A wallet that is not linked accrues pending and is paid on link; a bounded
-30-day sweep retries anything still pending from earlier days.
+With the usage match off, a wallet that is not linked accrues pending and is
+paid on link; a bounded 30-day sweep retries anything still pending from
+earlier days.
 
 A reward date with no observations at all raises
 `HoldingsSnapshotsMissingError`, recorded as a **failed** job run and returned
@@ -106,10 +120,13 @@ operator has to see rather than read as an empty but healthy payout.
 
 `summary["skipped"]` breaks every declined wallet out by reason and never sums
 them: `no_snapshots`, `too_few_batches`, `no_rate_tier`, `zero_credits`,
-`budget_exhausted`. When a run pays less than expected, which reason grew is
-the diagnosis. `skipped_total` is the sum, `budget_skipped` repeats the budget
-count because it is the ceiling operators watch directly, and a
-whole-run no-op reports `{"skipped": "disabled"}` instead of the dict.
+`unlinked`, `no_usage`, `budget_exhausted`. When a run pays less than expected,
+which reason grew is the diagnosis — a jump in `no_usage` means holders are not
+running inference, which is the programme working rather than failing.
+`skipped_total` is the sum, `budget_skipped` repeats the budget count because it
+is the ceiling operators watch directly, `usage_capped` counts wallets clipped
+to their spend, and a whole-run no-op reports `{"skipped": "disabled"}` instead
+of the dict.
 
 The sweep's own summary is broken out the same way: `too_new`, `unknown_age`,
 `incomplete_read`, `missing_price`, `sweep_write_failed`, `error`, alongside

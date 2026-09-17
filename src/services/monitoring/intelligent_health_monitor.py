@@ -19,13 +19,19 @@ Features:
 
 import asyncio
 import logging
+import random
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
 import httpx
+
+# NOTE: no __all__ here — src/services/intelligent_health_monitor.py is a
+# back-compat alias that does `import *`, which a restrictive __all__ would gut.
+from src.db.model_health import UNMEASURED_STATUS_VALUES, is_unmeasured_status  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +69,26 @@ class HealthCheckStatus(str, Enum):  # noqa: UP042
     RATE_LIMITED = "rate_limited"
     UNAUTHORIZED = "unauthorized"
     NOT_FOUND = "not_found"
+
+
+# Probe outcomes that measure the PROBER's access, not the model's health.
+#
+# A 429 says our key hit a shared quota; an auth failure says a provider key is
+# missing or wrong. Neither is evidence the model is broken, so neither may
+# count as an error, move the circuit breaker, open an incident or reach the
+# public status page as degraded/offline. They are recorded verbatim in
+# last_status so the condition stays visible and diagnosable — the status page
+# reports them as UNMEASURED and surfaces the counts separately.
+#
+# Deliberately NOT here: TIMEOUT, ERROR and NOT_FOUND. Those are real evidence
+# about the model, and keeping them as failures is what preserves genuine
+# outage detection.
+# The vocabulary itself lives in src/db/model_health.py, which owns the
+# model_health_tracking table and is the OTHER writer to these counters (the
+# 6-hourly sweep). One definition, both writers.
+UNMEASURED_STATUSES: frozenset[HealthCheckStatus] = frozenset(
+    s for s in HealthCheckStatus if s.value in UNMEASURED_STATUS_VALUES
+)
 
 
 class CircuitBreakerState(str, Enum):  # noqa: UP042
@@ -169,6 +195,48 @@ def _get_servable_model_ids() -> set[str]:
     return ids
 
 
+def uptime_from_history(rows: list[dict[str, Any]] | None) -> float:
+    """Uptime percentage over history rows, ignoring unmeasured probes.
+
+    Throttled and unauthorized probes are dropped from BOTH numerator and
+    denominator. Leaving them in the denominator is how a healthy model that
+    happened to share a busy provider quota reported 0.02% uptime while serving
+    customer traffic normally.
+
+    Returns 100.0 when nothing was measured — the same "no evidence of failure"
+    default the caller already used for an empty history.
+    """
+    measured = [r for r in (rows or []) if not is_unmeasured_status(r.get("status"))]
+    if not measured:
+        return 100.0
+    successes = sum(1 for r in measured if r.get("status") == HealthCheckStatus.SUCCESS.value)
+    return successes / len(measured) * 100
+
+
+def _is_in_catalog(row: dict[str, Any], catalog_ids: set[str]) -> bool:
+    """True when a ``model_health_tracking`` row names a model we still serve.
+
+    Tracking rows and catalog rows disagree about the gateway prefix: one side
+    stores "openai/gpt-4.1", the other "gpt-4.1". An exact-match-only filter let
+    every mismatched row through, and those rows are exactly the ones that
+    answer "Model not found" on every probe — 30 of them in production. Match
+    both spellings, the same way ``src/routes/status_page.py`` does when it maps
+    tracking rows onto catalog ids.
+    """
+    model = (row.get("model") or "").strip()
+    if not model:
+        return False
+    if model in catalog_ids:
+        return True
+    prefix = (row.get("gateway") or row.get("provider") or "").strip()
+    if prefix and f"{prefix}/{model}" in catalog_ids:
+        return True
+    # The reverse spelling: the row is prefixed, the catalog is bare.
+    if "/" in model and model.split("/", 1)[1] in catalog_ids:
+        return True
+    return False
+
+
 class IntelligentHealthMonitor:
     """
     Scalable health monitoring service for 10,000+ models
@@ -190,6 +258,24 @@ class IntelligentHealthMonitor:
         self._worker_id = None
         self._semaphore = asyncio.Semaphore(max_concurrent_checks)
         self._monitoring_tasks: list[asyncio.Task] = []
+
+        # ---- Probe budget state (in-process) -------------------------------
+        # next_check_at in the database is the durable schedule; these are the
+        # guardrails that make a scheduling bug cheap instead of catastrophic.
+        # Losing them on restart is safe: the worst case is one extra probe per
+        # model, after which they refill from live outcomes.
+        #
+        # provider slug -> monotonic deadline before which no model on that
+        # provider is probed. A 429 is a statement about a shared quota, so it
+        # has to pause the whole provider, not one model.
+        self._provider_cooldown_until: dict[str, float] = {}
+        # provider slug -> consecutive throttling strikes, for exponential growth.
+        self._provider_strikes: dict[str, int] = {}
+        # (provider, model) -> consecutive non-success strikes, for per-model backoff.
+        self._model_strikes: dict[tuple[str, str], int] = {}
+        # (provider, model) -> monotonic timestamps of recent probes, for the
+        # per-model hourly cap.
+        self._probe_times: dict[tuple[str, str], deque[float]] = {}
 
         # Configuration for each tier
         # HEALTH FIX #1094: Increased timeouts to reduce false timeout failures
@@ -313,6 +399,122 @@ class IntelligentHealthMonitor:
         async with self._semaphore:
             return await self._check_model_health(model)
 
+    # ------------------------------------------------------------------
+    # Probe budget
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _probe_budget() -> Any:
+        """The live Config object, read at call time so tests can monkeypatch it."""
+        from src.config.config import Config
+
+        return Config
+
+    def _jittered(self, seconds: float) -> float:
+        """Add up to HEALTH_PROBE_JITTER_FRACTION of positive jitter.
+
+        Only ever lengthens the interval. Without jitter every model behind one
+        provider quota comes back at the same instant and reproduces the burst
+        that got us throttled in the first place.
+        """
+        fraction = max(0.0, float(self._probe_budget().HEALTH_PROBE_JITTER_FRACTION))
+        return seconds * (1.0 + random.random() * fraction)  # noqa: S311 - scheduling, not crypto
+
+    def _backoff_seconds(self, strikes: int) -> float:
+        """Exponential backoff for ``strikes`` consecutive bad probes.
+
+        Capped by HEALTH_PROBE_BACKOFF_MAX_SECONDS, which is deliberately far
+        below the status page's 24h measurement window so a backed-off model
+        still produces several measurements per window.
+        """
+        cfg = self._probe_budget()
+        base = float(cfg.HEALTH_PROBE_BACKOFF_BASE_SECONDS)
+        ceiling = float(cfg.HEALTH_PROBE_BACKOFF_MAX_SECONDS)
+        if strikes <= 0:
+            return 0.0
+        # 2 ** 20 already dwarfs any sane ceiling; clamp the exponent so a long
+        # outage cannot overflow into an absurd float.
+        grown = base * (2 ** min(strikes - 1, 20))
+        return min(grown, ceiling)
+
+    def _provider_is_cooling_down(self, provider: str) -> bool:
+        """True while a provider-wide throttling cooldown is still in effect."""
+        until = self._provider_cooldown_until.get(provider or "")
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            self._provider_cooldown_until.pop(provider or "", None)
+            return False
+        return True
+
+    def _note_provider_throttled(self, provider: str) -> float:
+        """Record a 429 from ``provider`` and start/extend its cooldown.
+
+        Returns the cooldown length in seconds.
+        """
+        key = provider or ""
+        strikes = self._provider_strikes.get(key, 0) + 1
+        self._provider_strikes[key] = strikes
+        cfg = self._probe_budget()
+        cooldown = self._jittered(
+            min(
+                float(cfg.HEALTH_PROBE_PROVIDER_COOLDOWN_SECONDS) * (2 ** min(strikes - 1, 20)),
+                float(cfg.HEALTH_PROBE_BACKOFF_MAX_SECONDS),
+            )
+        )
+        self._provider_cooldown_until[key] = time.monotonic() + cooldown
+        return cooldown
+
+    def _note_provider_ok(self, provider: str) -> None:
+        """A successful probe clears the provider's throttling state."""
+        key = provider or ""
+        self._provider_strikes.pop(key, None)
+        self._provider_cooldown_until.pop(key, None)
+
+    def _hourly_budget_exhausted(self, provider: str, model: str) -> bool:
+        """True when this model already used its probes for the rolling hour."""
+        cap = int(self._probe_budget().HEALTH_PROBE_MAX_PER_MODEL_PER_HOUR)
+        if cap <= 0:
+            return False
+        stamps = self._probe_times.get((provider, model))
+        if not stamps:
+            return False
+        cutoff = time.monotonic() - 3600.0
+        while stamps and stamps[0] < cutoff:
+            stamps.popleft()
+        return len(stamps) >= cap
+
+    def _record_probe_issued(self, provider: str, model: str) -> None:
+        """Count a probe against the model's hourly budget."""
+        stamps = self._probe_times.setdefault((provider, model), deque())
+        stamps.append(time.monotonic())
+        cutoff = time.monotonic() - 3600.0
+        while stamps and stamps[0] < cutoff:
+            stamps.popleft()
+
+    def _next_check_interval(self, tier: MonitoringTier, result: HealthCheckResult) -> float:
+        """Seconds until this model's next probe.
+
+        The old rule was ``if failing: interval = min(interval, 300)`` — probe a
+        struggling model MORE often. Applied to 429s that is a feedback loop: it
+        pushed every throttled model to a 5-minute cadence, which produced more
+        429s. Failure now only ever LENGTHENS the interval.
+        """
+        cfg = self._probe_budget()
+        base = max(
+            float(self.tier_config[tier]["interval_seconds"]),
+            float(cfg.HEALTH_PROBE_MIN_INTERVAL_SECONDS),
+        )
+
+        key = (result.provider, result.model)
+        if result.status == HealthCheckStatus.SUCCESS:
+            self._model_strikes.pop(key, None)
+            return self._jittered(base)
+
+        strikes = self._model_strikes.get(key, 0) + 1
+        self._model_strikes[key] = strikes
+        return self._jittered(max(base, self._backoff_seconds(strikes)))
+
     async def _get_models_for_checking(self) -> list[dict[str, Any]]:
         """
         Get list of models that need health checking
@@ -360,12 +562,39 @@ class IntelligentHealthMonitor:
             servable = await asyncio.to_thread(_get_servable_model_ids)
             if servable:
                 before = len(models)
-                models = [m for m in models if (m.get("model") or "") in servable]
+                models = [m for m in models if _is_in_catalog(m, servable)]
                 if before != len(models):
                     logger.info(
                         "Health monitor skipped %d model(s) no longer in the served catalog",
                         before - len(models),
                     )
+
+            # Provider-wide throttling cooldown. A 429 is about a shared quota,
+            # so probing a sibling model on the same provider just spends
+            # another slice of the same exhausted budget.
+            before = len(models)
+            models = [
+                m for m in models if not self._provider_is_cooling_down(m.get("provider") or "")
+            ]
+            if before != len(models):
+                logger.info(
+                    "Health monitor deferred %d model(s) on rate-limited providers: %s",
+                    before - len(models),
+                    sorted(self._provider_cooldown_until),
+                )
+
+            # Per-model hourly cap — a backstop independent of next_check_at.
+            before = len(models)
+            models = [
+                m
+                for m in models
+                if not self._hourly_budget_exhausted(m.get("provider") or "", m.get("model") or "")
+            ]
+            if before != len(models):
+                logger.info(
+                    "Health monitor skipped %d model(s) over the hourly probe budget",
+                    before - len(models),
+                )
 
             if self.redis_coordination:
                 # Filter out models being checked by other workers
@@ -431,6 +660,11 @@ class IntelligentHealthMonitor:
         tier_settings = self.tier_config[tier]
         timeout = tier_settings["timeout_seconds"]
         max_tokens = tier_settings["max_tokens"]
+
+        # Count the probe against the hourly budget BEFORE issuing it. Counting
+        # on the way out would let a burst of concurrent probes all pass the cap
+        # check, which is how a "cap" quietly becomes a suggestion.
+        self._record_probe_issued(provider, model_id)
 
         start_time = time.time()
         status = HealthCheckStatus.ERROR
@@ -682,6 +916,35 @@ class IntelligentHealthMonitor:
             from src.config.supabase_config import supabase
 
             is_success = result.status == HealthCheckStatus.SUCCESS
+            # A throttled or unauthorized probe measured OUR access, not the
+            # model. It must not count as an error, must not move the circuit
+            # breaker, and must not open an incident. See UNMEASURED_STATUSES.
+            is_unmeasured = result.status in UNMEASURED_STATUSES
+
+            if result.status == HealthCheckStatus.RATE_LIMITED:
+                cooldown = self._note_provider_throttled(result.provider)
+                logger.info(
+                    "Health probe throttled by %s on %s — pausing that provider's probes "
+                    "for %.0fs. Recorded as unmeasured, not as a model failure.",
+                    result.provider,
+                    result.model,
+                    cooldown,
+                )
+            elif result.status == HealthCheckStatus.UNAUTHORIZED:
+                # Almost always a missing or wrong provider key on OUR side.
+                # Loud, distinct, and actionable — never a silent model outage.
+                logger.warning(
+                    "Health probe UNAUTHORIZED for %s/%s (gateway=%s, http=%s). This is a "
+                    "gateway credential problem, not a model outage — check the provider "
+                    "key for '%s'. Recorded as unmeasured.",
+                    result.provider,
+                    result.model,
+                    result.gateway,
+                    result.http_status_code,
+                    result.gateway or result.provider,
+                )
+            elif is_success:
+                self._note_provider_ok(result.provider)
 
             # TRANSIENT FAILURE FIX: Get current health data with improved retry logic
             current = None
@@ -743,25 +1006,38 @@ class IntelligentHealthMonitor:
 
             current_data = current.data if current.data else {}
 
-            # Calculate new values
+            # Calculate new values.
+            #
+            # call_count counts probes ISSUED (unmeasured ones included) so the
+            # real request volume stays visible. success_count + error_count are
+            # the MEASURED outcomes and deliberately no longer sum to
+            # call_count: the difference is exactly how often the prober could
+            # not get an answer. Counting 419,542 throttled probes as errors is
+            # what produced a 95% "error rate" for models serving live traffic.
             call_count = current_data.get("call_count", 0) + 1
             success_count = (
                 current_data.get("success_count", 0) + 1
                 if is_success
                 else current_data.get("success_count", 0)
             )
-            error_count = (
-                current_data.get("error_count", 0)
-                if is_success
-                else current_data.get("error_count", 0) + 1
-            )
+            if is_success or is_unmeasured:
+                error_count = current_data.get("error_count", 0)
+            else:
+                error_count = current_data.get("error_count", 0) + 1
 
-            consecutive_failures = (
-                0 if is_success else current_data.get("consecutive_failures", 0) + 1
-            )
-            consecutive_successes = (
-                current_data.get("consecutive_successes", 0) + 1 if is_success else 0
-            )
+            # An unmeasured probe leaves both streaks untouched. It is neither
+            # evidence of health nor of failure, so it can neither open the
+            # circuit breaker nor heal one that is already open.
+            if is_unmeasured:
+                consecutive_failures = current_data.get("consecutive_failures", 0) or 0
+                consecutive_successes = current_data.get("consecutive_successes", 0) or 0
+            else:
+                consecutive_failures = (
+                    0 if is_success else current_data.get("consecutive_failures", 0) + 1
+                )
+                consecutive_successes = (
+                    current_data.get("consecutive_successes", 0) + 1 if is_success else 0
+                )
 
             # Update average response time
             current_avg = current_data.get("average_response_time_ms", 0) or 0
@@ -770,20 +1046,26 @@ class IntelligentHealthMonitor:
             else:
                 new_avg = current_avg
 
-            # Calculate circuit breaker state
-            circuit_breaker_state = self._calculate_circuit_breaker_state(
-                current_data.get("circuit_breaker_state", "closed"),
-                consecutive_failures,
-                consecutive_successes,
-            )
+            # Calculate circuit breaker state. Unmeasured probes are inert: the
+            # state carries over verbatim rather than being recomputed, so a
+            # long throttling window cannot walk an OPEN breaker to HALF_OPEN
+            # (or trip a CLOSED one) on evidence about our quota.
+            if is_unmeasured:
+                circuit_breaker_state = CircuitBreakerState(
+                    current_data.get("circuit_breaker_state") or "closed"
+                )
+            else:
+                circuit_breaker_state = self._calculate_circuit_breaker_state(
+                    current_data.get("circuit_breaker_state", "closed"),
+                    consecutive_failures,
+                    consecutive_successes,
+                )
 
-            # Calculate next check time based on tier and current state
-            tier = MonitoringTier(current_data.get("monitoring_tier", "standard"))
-            interval = self.tier_config[tier]["interval_seconds"]
-
-            # If failing, check more frequently
-            if not is_success and consecutive_failures > 1:
-                interval = min(interval, 300)  # Max 5 minutes for failing models
+            # Calculate next check time. Failure only ever LENGTHENS the
+            # interval now — see _next_check_interval for why the old
+            # "check failing models more often" rule was a feedback loop.
+            tier = MonitoringTier(current_data.get("monitoring_tier") or "standard")
+            interval = self._next_check_interval(tier, result)
 
             next_check_at = datetime.now(UTC) + timedelta(seconds=interval)
 
@@ -815,9 +1097,12 @@ class IntelligentHealthMonitor:
                     if is_success
                     else current_data.get("last_success_at")
                 ),
+                # An unmeasured probe is not a failure, so it must not move
+                # last_failure_at — that timestamp is what an operator reads to
+                # answer "when did this model last actually break?".
                 "last_failure_at": (
                     result.checked_at.isoformat()
-                    if not is_success
+                    if not (is_success or is_unmeasured)
                     else current_data.get("last_failure_at")
                 ),
                 "next_check_at": next_check_at.isoformat(),
@@ -852,8 +1137,12 @@ class IntelligentHealthMonitor:
             }
             supabase.table("model_health_history").insert(history_data).execute()
 
-            # Handle incidents
-            if not is_success:
+            # Handle incidents. An unmeasured probe opens nothing and resolves
+            # nothing: paging on "our key hit a quota" is how a monitoring
+            # system trains its operators to ignore it.
+            if is_unmeasured:
+                pass
+            elif not is_success:
                 await self._create_or_update_incident(result, consecutive_failures)
             elif consecutive_successes >= 3:
                 await self._resolve_incidents(result)
@@ -1512,11 +1801,81 @@ class IntelligentHealthMonitor:
         except Exception as e:
             logger.error(f"Error checking health threshold: {e}")
 
+    async def prune_orphaned_tracking_rows(self, dry_run: bool = False) -> dict[str, Any]:
+        """Disable ``model_health_tracking`` rows that name no catalog model.
+
+        The table outlives the catalog and nothing prunes it: 123 tracked rows
+        against 66 served models, and 30 of them answered "Model not found" on
+        every probe — burning requests to manufacture failures for models we do
+        not sell. Rows are marked ``is_enabled = false`` rather than deleted, so
+        their history stays auditable and a model that returns to the catalog is
+        re-enabled by the normal tracking path.
+
+        Never raises. Returns a summary dict.
+        """
+        summary: dict[str, Any] = {"scanned": 0, "orphaned": 0, "disabled": 0, "dry_run": dry_run}
+        try:
+            catalog_ids = await asyncio.to_thread(_get_servable_model_ids)
+            if not catalog_ids:
+                # An empty scope means the lookup failed, not that we sell
+                # nothing. Disabling every row on that reading would silently
+                # stop all monitoring.
+                logger.warning("Orphan prune skipped: catalog scope unavailable")
+                summary["skipped_reason"] = "catalog_scope_unavailable"
+                return summary
+
+            from src.config.supabase_config import supabase
+
+            response = (
+                supabase.table("model_health_tracking")
+                .select("provider, model, gateway")
+                .eq("is_enabled", True)
+                .execute()
+            )
+            rows = response.data or []
+            summary["scanned"] = len(rows)
+
+            orphans = [r for r in rows if not _is_in_catalog(r, catalog_ids)]
+            summary["orphaned"] = len(orphans)
+            if not orphans:
+                return summary
+
+            logger.info(
+                "Orphan prune: %d of %d tracked rows match no catalog model (e.g. %s)",
+                len(orphans),
+                len(rows),
+                [r.get("model") for r in orphans[:5]],
+            )
+            if dry_run:
+                return summary
+
+            for row in orphans:
+                try:
+                    supabase.table("model_health_tracking").update({"is_enabled": False}).eq(
+                        "provider", row.get("provider")
+                    ).eq("model", row.get("model")).execute()
+                    summary["disabled"] += 1
+                except Exception as exc:
+                    logger.warning(
+                        "Orphan prune: failed to disable %s/%s: %s",
+                        row.get("provider"),
+                        row.get("model"),
+                        exc,
+                    )
+            logger.info("Orphan prune: disabled %d stale tracking row(s)", summary["disabled"])
+        except Exception as exc:
+            logger.error("Orphan prune failed: %s", exc, exc_info=True)
+            summary["error"] = str(exc)[:200]
+        return summary
+
     async def _tier_update_loop(self):
         """Periodically update model tiers based on usage patterns"""
         while self.monitoring_active:
             try:
                 await asyncio.sleep(3600)  # Every hour
+
+                if self._probe_budget().HEALTH_PROBE_PRUNE_ORPHANS:
+                    await self.prune_orphaned_tracking_rows()
 
                 from src.config.supabase_config import supabase
 
@@ -1604,20 +1963,9 @@ class IntelligentHealthMonitor:
                             .execute()
                         )
 
-                        if history_24h.data and len(history_24h.data) > 0:
-                            total_checks_24h = len(history_24h.data)
-                            success_checks_24h = len(
-                                [h for h in history_24h.data if h.get("status") == "success"]
-                            )
-                            uptime_24h = (
-                                (success_checks_24h / total_checks_24h * 100)
-                                if total_checks_24h > 0
-                                else 100.0
-                            )
-                        else:
-                            # No history data in 24h - use last_status as indicator
-                            # If no checks, assume healthy (new model)
-                            uptime_24h = 100.0
+                        # Unmeasured probes (429 / auth) are excluded from both
+                        # sides of the ratio — see uptime_from_history.
+                        uptime_24h = uptime_from_history(history_24h.data)
 
                         # Calculate 7d uptime from history
                         history_7d = (
@@ -1629,18 +1977,7 @@ class IntelligentHealthMonitor:
                             .execute()
                         )
 
-                        if history_7d.data and len(history_7d.data) > 0:
-                            total_checks_7d = len(history_7d.data)
-                            success_checks_7d = len(
-                                [h for h in history_7d.data if h.get("status") == "success"]
-                            )
-                            uptime_7d = (
-                                (success_checks_7d / total_checks_7d * 100)
-                                if total_checks_7d > 0
-                                else 100.0
-                            )
-                        else:
-                            uptime_7d = 100.0
+                        uptime_7d = uptime_from_history(history_7d.data)
 
                         # Calculate 30d uptime from history
                         history_30d = (
@@ -1652,18 +1989,7 @@ class IntelligentHealthMonitor:
                             .execute()
                         )
 
-                        if history_30d.data and len(history_30d.data) > 0:
-                            total_checks_30d = len(history_30d.data)
-                            success_checks_30d = len(
-                                [h for h in history_30d.data if h.get("status") == "success"]
-                            )
-                            uptime_30d = (
-                                (success_checks_30d / total_checks_30d * 100)
-                                if total_checks_30d > 0
-                                else 100.0
-                            )
-                        else:
-                            uptime_30d = 100.0
+                        uptime_30d = uptime_from_history(history_30d.data)
 
                         # Update the model_health_tracking table with calculated uptime
                         supabase.table("model_health_tracking").update(

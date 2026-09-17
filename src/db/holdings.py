@@ -677,3 +677,87 @@ def list_pending_holdings_accruals(wallet_address: str) -> list[dict[str, Any]]:
     except Exception as e:
         logger.warning(f"holdings_reward_accruals pending lookup failed for {wallet_address}: {e}")
         return []
+
+
+def get_usage_cost_for_window(user_id: int, since: datetime) -> Decimal:
+    """What this account actually spent on inference since ``since``.
+
+    Holdings rewards are capped by this (see
+    :mod:`src.services.holdings.rewards`): the programme exists to turn token
+    holders into customers, so a wallet that never runs inference earns
+    nothing no matter how much it holds. Paying purely for a balance buys a
+    screenshot, not a user.
+
+    Reads ``usage_records.cost``, the same rows the status and billing
+    reconciliation paths use. A lookup failure returns ``Decimal(0)``, which
+    means "no earnings this run" rather than an unbounded grant -- failing
+    closed is the right direction when the alternative is paying out on
+    unknown data.
+    """
+    try:
+        client = get_supabase_client()
+        total = Decimal(0)
+        offset = 0
+        while True:
+            rows = (
+                client.table("usage_records")
+                .select("cost")
+                .eq("user_id", user_id)
+                .gte("timestamp", since.isoformat())
+                .range(offset, offset + 999)
+                .execute()
+                .data
+                or []
+            )
+            for row in rows:
+                total += Decimal(str(row.get("cost") or 0))
+            if len(rows) < 1000:
+                break
+            offset += 1000
+        return total
+    except Exception as e:  # noqa: BLE001 - never break the payout run
+        logger.warning(
+            "holdings: usage lookup failed for user %s (%s) -- treating as no usage",
+            user_id,
+            type(e).__name__,
+        )
+        return Decimal(0)
+
+
+def sum_holdings_credits_since(wallet_addresses: list[str], since_date: date) -> Decimal:
+    """Holdings credits these wallets have already been granted (pending or
+    paid) on or after ``since_date``.
+
+    The usage allowance is a budget consumed over the lookback window, not a
+    fresh ceiling each day. Without this subtraction a single $70 of spend
+    would authorise $70 of credits on each of the next seven days -- the same
+    spend claimed seven times. Counting pending as spent is deliberate: a
+    pending accrual is credit already promised.
+
+    Returns ``Decimal(0)`` for an empty wallet list. A lookup failure raises,
+    because treating "unknown" as zero here would open the leak this closes.
+    """
+    addresses = [a.lower() for a in wallet_addresses if a]
+    if not addresses:
+        return Decimal(0)
+    client = get_supabase_client()
+    total = Decimal(0)
+    offset = 0
+    while True:
+        rows = (
+            client.table(_ACCRUALS_TABLE)
+            .select("credits")
+            .in_("wallet_address", addresses)
+            .gte("reward_date", _day_str(since_date))
+            .in_("status", ["pending", "paid"])
+            .range(offset, offset + 999)
+            .execute()
+            .data
+            or []
+        )
+        for row in rows:
+            total += Decimal(str(row.get("credits") or 0))
+        if len(rows) < 1000:
+            break
+        offset += 1000
+    return total
