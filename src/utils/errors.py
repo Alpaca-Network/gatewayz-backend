@@ -502,6 +502,23 @@ def sanitize_provider_error_for_user(raw_error: str | None, max_length: int = 20
     """
     if not raw_error:
         return ""
+
+    # Our own billing state is not the user's business. The 402 arm of
+    # map_provider_error already swaps budget errors for PROVIDER_CAPACITY_MESSAGE,
+    # but that arm is keyed on the mapped status; upstream failures that arrive as
+    # a different exception type land in arms that pass a *sanitized* message
+    # through instead. Sanitizing strips URLs and key hashes -- it does nothing to
+    # the phrase "credit balance is too low", so an unfunded account was
+    # announcing itself to customers through those paths.
+    #
+    # Masking here rather than at each of the 16 call sites covers every arm at
+    # once, and deliberately changes no status code: whether a budget failure
+    # should return 402 (and so trigger failover, since 402 is in
+    # FAILOVER_STATUS_CODES) is a routing decision, separate from not telling
+    # customers about our invoices.
+    if is_provider_budget_error(raw_error):
+        return PROVIDER_CAPACITY_MESSAGE
+
     cleaned = _URL_RE.sub("[link removed]", str(raw_error))
     cleaned = _HEX_SECRET_RE.sub("[redacted]", cleaned)
     cleaned = cleaned.replace("\n", " ").replace("\r", " ").strip()
