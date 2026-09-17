@@ -762,6 +762,25 @@ def pin_unservable_models(db_models: list[dict[str, Any]], unservable: set[str])
     return pinned, newly_delisted
 
 
+def _rate_per_sec(count: int, seconds: float) -> str:
+    """Throughput for a log line, or "n/a" when the duration is unusable.
+
+    These rates are cosmetic, but they were computed inline in logging
+    f-strings as `count / metrics[...]`, and the durations come from
+    `time.time() - start`. A phase fast enough to finish inside one clock tick
+    makes that zero, the f-string raises ZeroDivisionError, the caller catches
+    it, and a **successful** sync is reported as `success: False`.
+
+    That is the mechanism behind a test long written off as "a flaky delisting
+    test": timing-dependent rather than random, and it reproduces more readily
+    serially than under xdist, which is why it read as rare. A cosmetic log
+    line must not be able to fail an operation that already succeeded.
+    """
+    if not seconds or seconds <= 0:
+        return "n/a"
+    return f"{count / seconds:.0f}"
+
+
 def sync_provider_models(
     provider_slug: str, dry_run: bool = False, batch_mode: bool = False
 ) -> dict[str, Any]:
@@ -913,7 +932,7 @@ def sync_provider_models(
             f"[{provider_slug.upper()}] Fetch completed | "
             f"Models: {len(normalized_models)} | "
             f"Duration: {metrics['fetch_duration']:.2f}s | "
-            f"Rate: {len(normalized_models) / metrics['fetch_duration']:.0f} models/sec"
+            f"Rate: {_rate_per_sec(len(normalized_models), metrics['fetch_duration'])} models/sec"
         )
 
         # Transform to database schema
@@ -1005,7 +1024,7 @@ def sync_provider_models(
             f"Filtered (quality gate): {filtered} | "
             f"Delisted (unpriced/unroutable): {delisted} | "
             f"Duration: {metrics['transform_duration']:.2f}s | "
-            f"Rate: {len(db_models) / metrics['transform_duration']:.0f} models/sec"
+            f"Rate: {_rate_per_sec(len(db_models), metrics['transform_duration'])} models/sec"
         )
 
         # Sync to database (unless dry run)
@@ -1038,7 +1057,7 @@ def sync_provider_models(
                 f"[{provider_slug.upper()}] Database sync completed | "
                 f"Synced: {models_synced} | "
                 f"Duration: {metrics['db_sync_duration']:.2f}s | "
-                f"Rate: {models_synced / metrics['db_sync_duration']:.0f} models/sec"
+                f"Rate: {_rate_per_sec(models_synced, metrics['db_sync_duration'])} models/sec"
             )
 
             # Pricing is now synced directly during model sync via metadata.pricing_raw
