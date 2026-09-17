@@ -1,7 +1,7 @@
 """Coupon redemption write path (src/routes/coupons.py).
 
 Everything that grants the money happens inside ONE database call:
-``public.redeem_coupon()`` (supabase/migrations/20260917000000_add_redeem_coupon_rpc.sql).
+``public.redeem_coupon()`` (supabase/migrations/20260917010000_add_redeem_coupon_rpc.sql).
 This module is the thin, deliberately dumb wrapper around it.
 
 **There is no Python fallback, on purpose.** ``src/db/users.py``'s

@@ -38,7 +38,7 @@ MIGRATION = (
     pathlib.Path(__file__).resolve().parents[2]
     / "supabase"
     / "migrations"
-    / "20260917000000_add_redeem_coupon_rpc.sql"
+    / "20260917010000_add_redeem_coupon_rpc.sql"
 )
 
 

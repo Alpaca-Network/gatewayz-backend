@@ -12,7 +12,7 @@ missing half.
 Where the invariants live
 =========================
 All of them are enforced in Postgres, inside ``public.redeem_coupon()``
-(supabase/migrations/20260917000000_add_redeem_coupon_rpc.sql), under a
+(supabase/migrations/20260917010000_add_redeem_coupon_rpc.sql), under a
 ``SELECT ... FOR UPDATE`` on the coupon row. Nothing in this file decides
 whether a coupon may be redeemed -- it authenticates the caller, normalises
 the code, calls the RPC once, and translates the verdict. That split is the
