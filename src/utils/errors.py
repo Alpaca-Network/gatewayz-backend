@@ -9,6 +9,7 @@ mapping (encoding regressions #2144-#2147, #2160) are preserved exactly.
 Public surface (re-exported verbatim for importers):
   - ``APIExceptions`` (FastAPI HTTPException builders)
   - ``DetailedErrorFactory`` (provider-error -> client-status mapping)
+  - ``parse_upstream_status`` (labelled upstream HTTP status extraction)
   - ``PROVIDER_CAPACITY_MESSAGE``, ``is_provider_budget_error``,
     ``classify_provider_budget_error``, ``PROVIDER_BUDGET_REASONS``,
     ``sanitize_provider_error_for_user`` (user-facing sanitization)
@@ -458,6 +459,41 @@ _URL_RE = re.compile(r"https?://\S+")
 # Long hex tokens (32+ chars) are almost always secrets/key hashes (e.g. an OpenRouter
 # key id leaked in an error URL). Strip them from anything shown to end users.
 _HEX_SECRET_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+
+
+# Upstream HTTP statuses only ever arrive inside an error *string*, and the only safe way
+# to read one is to require the label that precedes it. A bare three-digit scan is not
+# safe: provider errors carry 64-character hex key ids, and a random hex id contains any
+# given digit triple about one time in sixty-five, so `"401" in error_str` fires on a
+# credential roughly 1.5% of the time -- per pattern. Every alternative below is a word
+# ("code", "status", "http"); none can occur inside a hex id, so a match means the
+# upstream actually labelled a status.
+#
+# Shapes covered, drawn from what this gateway actually receives:
+#   "Error code: 429 - {...}"      (OpenAI/Anthropic SDKs)
+#   "error_code=503", "status 502"  (assorted clients)
+#   '"code": 401', "'code': 402"    (raw JSON bodies)
+#   "HTTP 404"
+# Deliberately NOT covered: "Client error '401 Unauthorized' for url ..." (httpx), which
+# carries the word "unauthorized" and is classified by phrase instead.
+_UPSTREAM_STATUS_RE = re.compile(
+    r"\b(?:(?:error[\s_-]*)?code|status(?:[\s_-]*code)?|http(?:[\s_-]*status)?)"
+    r"[\"']?\s*[:=]?\s*[\"']?(\d{3})\b",
+    re.IGNORECASE,
+)
+
+
+def parse_upstream_status(raw_error: str | None) -> int | None:
+    """Return the upstream HTTP status an error explicitly labels, or None.
+
+    None means "this error does not state a status", not "no error". Callers must fall
+    back to alphabetic phrase matching rather than to a bare digit scan -- see
+    _UPSTREAM_STATUS_RE for why a digit scan reads credentials as status codes.
+    """
+    if not raw_error:
+        return None
+    match = _UPSTREAM_STATUS_RE.search(str(raw_error))
+    return int(match.group(1)) if match else None
 
 
 def _is_402(lowered: str) -> bool:
