@@ -125,16 +125,15 @@ in admin_coupons.create into a 23505 the route maps to 409 coupon_code_taken.';
 -- ============================================================================
 -- DETERMINISTIC LOOKUP IN redeem_coupon()
 -- ============================================================================
--- Handled in 20260917010000 itself rather than by replacing the function here.
--- That migration has not been applied anywhere yet, so editing it in place keeps
--- one definition of redeem_coupon() in the tree. Re-declaring the function in this
--- file to change two lines would have meant carrying a second 300-line copy --
--- and the copy would have shipped without the rationale comments that make the
--- original reviewable.
+-- Handled by 20260917015000, which deliberately sorts BEFORE this file.
 --
--- The change there: the coupon lookup gains `ORDER BY id LIMIT 1`. With the index
--- above at most one row can match, so it is a no-op today. It exists so the
--- function is not INDEPENDENTLY fragile -- see the note at that line.
+-- This migration can legitimately fail: the pre-flight above aborts it when a
+-- collision already exists. `supabase db push` commits one transaction per
+-- migration, so 20260917015000 has already COMMITTED by the time this one is
+-- attempted -- meaning the deterministic lookup survives this migration failing,
+-- which is precisely the case where it is the only remaining mitigation. Putting
+-- it in this file instead would have rolled it back along with the index, in the
+-- one scenario that needs it.
 
 -- ============================================================================
 -- DOWN MIGRATION (commented out - run manually to rollback)

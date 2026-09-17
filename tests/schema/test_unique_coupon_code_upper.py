@@ -35,6 +35,7 @@ import re
 MIGRATIONS = pathlib.Path(__file__).resolve().parents[2] / "supabase" / "migrations"
 MIGRATION = MIGRATIONS / "20260917020000_unique_coupon_code_upper.sql"
 REDEEM_MIGRATION = MIGRATIONS / "20260917010000_add_redeem_coupon_rpc.sql"
+REAPPLY_MIGRATION = MIGRATIONS / "20260917015000_redeem_coupon_deterministic_lookup.sql"
 
 
 def _sql() -> str:
@@ -144,23 +145,110 @@ class TestRedeemCouponLookupIsDeterministic:
     """Property 3: the RPC must not be independently fragile.
 
     With the unique index in place at most one row can match, so the ordering is
-    a no-op. It matters if the index is ever dropped or a collision arrives out
-    of band: an unordered lookup resolves to whatever the plan yields first, and
-    a VACUUM FULL flips it -- which is what turned one typed code into two
-    grants for the same user.
+    a no-op. It matters if the index is ever dropped, or -- the case that
+    actually happens -- if a collision already exists when the migration runs,
+    because then the index CANNOT be created and the ordering is the only thing
+    left between one typed code and two grants to the same user.
     """
 
+    def _redeem_body(self, path):
+        return path.read_text(encoding="utf-8").split("$$")[1]
+
     def test_lookup_orders_and_limits(self):
-        body = REDEEM_MIGRATION.read_text(encoding="utf-8").split("$$")[1]
         assert re.search(
             r"SELECT\s+\*\s+INTO\s+v_coupon\s+FROM\s+public\.coupons\s+"
             r"WHERE\s+UPPER\(code\)\s*=\s*UPPER\(v_code\)\s+"
             r"ORDER\s+BY\s+id\s+LIMIT\s+1\s+FOR\s+UPDATE",
-            body,
+            self._redeem_body(REDEEM_MIGRATION),
             re.IGNORECASE | re.DOTALL,
         ), "the coupon lookup must be ORDER BY id LIMIT 1 ... FOR UPDATE"
 
     def test_still_takes_the_row_lock(self):
         """Adding ORDER BY must not have cost us the lock."""
-        body = REDEEM_MIGRATION.read_text(encoding="utf-8").split("$$")[1]
-        assert re.search(r"FOR\s+UPDATE", body, re.IGNORECASE)
+        assert re.search(r"FOR\s+UPDATE", self._redeem_body(REDEEM_MIGRATION), re.IGNORECASE)
+
+
+class TestCorrectionIsActuallyApplied:
+    """20260917010000 was applied to production by #2348 before its lookup was
+    corrected. Supabase records applied migrations by version, so editing that
+    file changes nothing on any database that already ran it -- verified against
+    the CLI: the push reports "Remote database is up to date" and the function
+    keeps the old body. The correction therefore has to arrive as its own
+    migration, and these tests pin the two things that make it work.
+    """
+
+    def test_a_reapply_migration_exists(self):
+        assert REAPPLY_MIGRATION.is_file(), REAPPLY_MIGRATION
+
+    def test_it_carries_the_corrected_lookup(self):
+        assert re.search(
+            r"ORDER\s+BY\s+id\s+LIMIT\s+1\s+FOR\s+UPDATE",
+            REAPPLY_MIGRATION.read_text(encoding="utf-8"),
+            re.IGNORECASE | re.DOTALL,
+        )
+
+    def test_it_replaces_rather_than_creates(self):
+        """CREATE OR REPLACE so it is a no-op on a fresh database whose
+        20260917010000 already carried the fix."""
+        sql = REAPPLY_MIGRATION.read_text(encoding="utf-8")
+        assert re.search(
+            r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+public\.redeem_coupon", sql, re.IGNORECASE
+        )
+
+    def test_its_body_is_identical_to_the_original(self):
+        """The reviewed definition and the applied one must not drift.
+
+        A copy that is edited independently is two functions with one name, and
+        the one people read would stop being the one that runs.
+        """
+        original = REDEEM_MIGRATION.read_text(encoding="utf-8").split("$$")[1]
+        reapplied = REAPPLY_MIGRATION.read_text(encoding="utf-8").split("$$")[1]
+        assert reapplied == original, "20260917015000's body has drifted from 20260917010000's"
+
+    def test_it_keeps_the_permissions(self):
+        """SECURITY DEFINER credit-granting function: CREATE OR REPLACE does not
+        reset grants, but the file must not hand it to a PostgREST-reachable
+        role either."""
+        sql = REAPPLY_MIGRATION.read_text(encoding="utf-8")
+        for role in ("PUBLIC", "anon", "authenticated"):
+            assert re.search(
+                rf"REVOKE\s+ALL\s+ON\s+FUNCTION\s+public\.redeem_coupon\b.*?FROM\s+{role}\b",
+                sql,
+                re.IGNORECASE | re.DOTALL,
+            ), f"missing REVOKE from {role}"
+        granted = set(
+            re.findall(
+                r"GRANT\s+EXECUTE\s+ON\s+FUNCTION\s+public\.redeem_coupon\b[^;]*?\bTO\s+(\w+)",
+                sql,
+                re.IGNORECASE | re.DOTALL,
+            )
+        )
+        assert granted == {"service_role"}, f"unexpected EXECUTE grantees: {sorted(granted)}"
+
+    def test_it_sorts_before_the_index_migration(self):
+        """The ordering invariant, and the reason this is not one migration.
+
+        20260917020000 can fail -- its pre-flight aborts when a collision
+        already exists -- and `supabase db push` commits one transaction PER
+        migration. So the correction must land in an EARLIER file, or it rolls
+        back alongside the index in exactly the case that needs it. Measured on
+        that database state: correction first -> $50 paid once; correction
+        inside the failing migration -> $55 across two redemption rows.
+        """
+        assert (
+            REAPPLY_MIGRATION.name < MIGRATION.name
+        ), f"{REAPPLY_MIGRATION.name} must sort before {MIGRATION.name}"
+
+    def test_the_index_migration_does_not_redefine_the_function(self):
+        """The regression guard for the above: folding the CREATE OR REPLACE
+        back into the index migration is the tidy-looking edit that reopens the
+        double grant."""
+        executable = _executable()
+        assert not re.search(
+            r"CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\s+public\.redeem_coupon",
+            executable,
+            re.IGNORECASE,
+        ), (
+            "20260917020000 must not (re)define redeem_coupon -- it can fail, and "
+            "the correction would roll back with it"
+        )
