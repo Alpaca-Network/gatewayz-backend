@@ -1,85 +1,54 @@
--- Migration: redeem_coupon() -- the atomic check-and-grant for coupon redemption.
+-- Migration: re-apply redeem_coupon() with the deterministic lookup.
 --
--- WHY A NEW FUNCTION RATHER THAN is_coupon_redeemable()
+-- WHY THIS FILE EXISTS
+-- ====================
+-- 20260917010000 defines redeem_coupon(). Its coupon lookup was corrected to
+-- `ORDER BY id LIMIT 1` -- but only after that migration had already been applied
+-- to production (#2348). Supabase records applied migrations by their leading
+-- version in supabase_migrations.schema_migrations, so 20260917010000 is now
+-- consumed: any later edit to that file is skipped forever on any database that
+-- has already run it.
+--
+-- The result without this file: a fresh database replaying migrations in order
+-- gets the corrected function, and production keeps the uncorrected one,
+-- permanently. Two databases, same migration history, different behaviour -- the
+-- divergence being invisible is what makes it worth a whole migration to fix.
+--
+-- The edit in 20260917010000 is deliberately KEPT. It costs nothing, and it keeps
+-- a fresh database's FIRST definition of the function correct rather than briefly
+-- wrong. 20260917010000 remains the readable original -- it carries the full
+-- rationale for every branch of the function. This file is the applied correction,
+-- and its body is a byte-for-byte copy of that one, not a retyping.
+--
+-- WHY IT SORTS BEFORE THE UNIQUE INDEX (20260917020000)
 -- =====================================================
--- 20251009040000_add_coupon_system.sql shipped is_coupon_redeemable(code, user_id).
--- It is a *read-only validator*: it inspects the coupon and returns a verdict, and
--- it increments nothing. Redeeming through it means
+-- Not cosmetic ordering. 20260917020000 can legitimately FAIL: its pre-flight
+-- aborts the migration if the coupons table already holds a case-insensitive
+-- collision. And `supabase db push` commits one transaction PER MIGRATION --
+-- verified against the CLI (v2.109.0) by making a second migration fail and
+-- confirming the first had committed and was recorded, while the second rolled
+-- back whole.
 --
---     verdict := is_coupon_redeemable(...);       -- transaction A
---     if verdict.is_valid then                     -- ... time passes ...
---         insert coupon_redemptions; update times_used   -- transaction B
+-- So ordering decides whether the mitigation survives the failure:
 --
--- which is a textbook TOCTOU. Two users redeeming a max_uses=1 global coupon at the
--- same moment both read times_used=0, both get is_valid=true, and both grant. The
--- `times_used_within_limit` CHECK does not save this, because PostgREST cannot
--- express `times_used = times_used + 1`: the Python client reads 0 and writes 1
--- twice, so the counter never exceeds max_uses and the CHECK never fires while the
--- money goes out twice. That is the bug this migration exists to make impossible.
+--   this file first  -> the deterministic lookup COMMITS, then the index attempt
+--                       fails on the collision. The double-grant path is closed
+--                       even though the index could not be created.
+--   index file first -> it aborts, the push halts, and the lookup correction
+--                       never runs -- in exactly the case it is needed, because a
+--                       collision already exists.
 --
--- is_coupon_redeemable() is therefore kept as-is (it is the honest name for what it
--- does, and a preview/"can I use this code" surface can still use it), and this
--- function does check-and-increment inside ONE transaction, under a row lock.
+-- The `ORDER BY` is "belt and braces" only while the index holds. On a database
+-- that already has a collision the index cannot be created at all, and this is
+-- the only thing standing between one typed coupon code and two grants to the
+-- same user. Measured on Postgres 16: without it, one user redeemed one typed
+-- code on two consecutive days and was paid $50 then $5, because uq_coupon_user
+-- compares coupon_id and a VACUUM FULL had flipped which row the code resolved
+-- to. With it, $50 once.
 --
--- THE MECHANISM
--- =============
---   SELECT ... FROM coupons WHERE UPPER(code) = UPPER($1) FOR UPDATE
---
--- is the serialization point. Concurrent redemptions of the SAME coupon queue on
--- that lock; under READ COMMITTED the waiter re-reads the committed row when the
--- lock is released, so it sees the incremented times_used and is refused with
--- MAX_USES_EXCEEDED. Redemptions of *different* coupons never contend.
---
--- Three independent layers guard the money, in order of who catches what:
---   1. the row lock above          -- serializes; makes the counter check correct
---   2. uq_coupon_user              -- UNIQUE(coupon_id, user_id): one user cannot
---                                     redeem one coupon twice, enforced by the index
---   3. times_used_within_limit     -- CHECK(times_used <= max_uses): the ceiling,
---                                     enforced by Postgres on the increment
--- plus a fourth, inherited from the grant path: atomic_add_credits is called with a
--- DETERMINISTIC request_id derived from (coupon_id, user_id), so the partial-unique
--- index idx_credit_transactions_request_id (20260223000001) refuses a second credit
--- transaction for the same logical redemption even if layers 1-3 were all removed.
---
--- Layers 2, 3 and 4 are backstops, not the primary mechanism. They exist because a
--- coupon is money and the primary mechanism is one `FOR UPDATE` away from wrong.
---
--- LEDGER CONSISTENCY
--- ==================
--- The coupon_redemptions row, the coupons.times_used increment and the
--- credit_transactions row are written in this one function, therefore in one
--- transaction. There is no interleaving in which a user is credited without a
--- redemption row, or a redemption row exists without the credit -- the pairing that
--- would otherwise become a reconciliation problem nobody can settle later.
---
--- Verified against prod (ynleroehyrmaafkgjgmr) on 2026-09-16, from the live schema
--- rather than from this repo's migration history: both tables' columns come from
--- PostgREST's OpenAPI document, and every constraint named above was confirmed
--- present by probing it with a statement engineered to abort either way (a CHECK
--- violation if the constraint exists, an FK violation against a non-existent user
--- id if it does not) -- no rows were written.
---
--- Returns JSONB:
---   { "success": bool,
---     "error_code": text|null,     -- COUPON_NOT_FOUND | COUPON_INACTIVE |
---                                     COUPON_NOT_YET_ACTIVE | COUPON_EXPIRED |
---                                     COUPON_NOT_ASSIGNED | MAX_USES_EXCEEDED |
---                                     ALREADY_REDEEMED | USER_NOT_FOUND |
---                                     REDEMPTION_FAILED
---     "error_message": text|null,  -- safe to show a user
---     "debug": text|null,          -- server-side only; never returned to a caller
---     "coupon_id": bigint|null, "code": text|null, "value_applied": numeric|null,
---     "balance_before": numeric|null, "balance_after": numeric|null,
---     "redemption_id": bigint|null, "transaction_id": bigint|null }
+-- CREATE OR REPLACE is idempotent, so this is a no-op on a database whose
+-- 20260917010000 already carried the fix.
 
--- ============================================================================
--- PRE-CREATE CLEANUP (make migration idempotent)
--- ============================================================================
-DROP FUNCTION IF EXISTS public.redeem_coupon(VARCHAR, BIGINT, VARCHAR, TEXT);
-
--- ============================================================================
--- FUNCTION DEFINITION
--- ============================================================================
 CREATE OR REPLACE FUNCTION public.redeem_coupon(
     p_coupon_code VARCHAR(50),
     p_user_id     BIGINT,
@@ -426,14 +395,13 @@ GRANT EXECUTE ON FUNCTION public.redeem_coupon(VARCHAR, BIGINT, VARCHAR, TEXT) T
 -- ============================================================================
 COMMENT ON FUNCTION public.redeem_coupon(VARCHAR, BIGINT, VARCHAR, TEXT) IS
 'Atomically redeems a coupon for a user: validates eligibility under a
-SELECT ... FOR UPDATE on the coupon row, grants the credits via
-atomic_add_credits with a deterministic request_id, writes the
+SELECT ... ORDER BY id LIMIT 1 ... FOR UPDATE on the coupon row, grants the
+credits via atomic_add_credits with a deterministic request_id, writes the
 coupon_redemptions ledger row and increments coupons.times_used -- all in one
-transaction, so a granted credit without a redemption row (or the reverse) is
-not representable. Returns a structured JSONB verdict with a distinct
-error_code per failure reason; never raises to the caller.';
+transaction. Returns a structured JSONB verdict with a distinct error_code per
+failure reason; never raises to the caller.';
 
 -- ============================================================================
 -- DOWN MIGRATION (commented out - run manually to rollback)
 -- ============================================================================
--- DROP FUNCTION IF EXISTS public.redeem_coupon(VARCHAR, BIGINT, VARCHAR, TEXT);
+-- Re-apply 20260917010000 as it stands on main to restore the unordered lookup.
