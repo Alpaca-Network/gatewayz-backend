@@ -782,6 +782,13 @@ def _map_provider_error_impl(
     # Retry-After, not a misleading 502 (this is why OpenRouter free-tier models
     # appeared "broken" in the model selector).
     msg = str(exc)
+    # Narrower on purpose than errors.parse_upstream_status(), which chat_streaming uses:
+    # this status decides the *mapped HTTP status*, and therefore whether failover fires
+    # (FAILOVER_STATUS_CODES). Widening the shapes accepted here would change which
+    # upstream errors get retried against another provider -- a routing decision, not a
+    # message-copy one. Both are safe against the key-id problem for the same reason
+    # (they require a label, never a bare digit run); if a third reader appears, it
+    # should use the shared helper rather than grow a third regex.
     code_match = re.search(r"Error code:\s*(\d{3})", msg)
     parsed_status = int(code_match.group(1)) if code_match else None
     is_rate_limited = (

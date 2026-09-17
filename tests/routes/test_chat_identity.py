@@ -11,6 +11,7 @@ docstring for the same convention).
 """
 
 import ast
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -99,6 +100,77 @@ def test_anonymous_request_hits_the_anonymous_gate():
     assert resp.json()["error"]["code"] == "missing_api_key"
 
 
+# Caches the chat request path loads lazily, with the module-level globals each one
+# writes. Their loaders flip `_cache_loaded`, so these are restored afterwards: leaving
+# an empty-but-"loaded" cache behind would silently change the behaviour of every later
+# test sharing the worker process.
+_LAZY_CACHES = {
+    "src.services.cache.model_mappings_cache": (
+        "_aliases",
+        "_provider_mappings",
+        "_routing_rules",
+        "_provider_native_values",
+        "_cache_loaded",
+        "_cache_loaded_at",
+    ),
+    "src.services.cache.model_capabilities_cache": (
+        "_max_tokens",
+        "_has_json_mode",
+        "_is_reasoning",
+        "_free_models",
+        "_latency_tier",
+        "_quality_priors",
+        "_cache_loaded",
+        "_cache_loaded_at",
+    ),
+}
+
+
+@contextmanager
+def _no_database():
+    """Make the request path's database calls fail instantly instead of over the wire.
+
+    This module's docstring says downstream lookup is "stubbed to fail fast and
+    deterministically instead of hitting a real database". That was true of the user
+    lookup and false of everything else: `chat_completions` lazily loads a model-mappings
+    cache on the way to `model_has_pricing`, and a model-capabilities cache on the way to
+    `is_free_model`, and both go through PostgREST.
+
+    With no database reachable, httpx does not fail fast -- it walks its connection-retry
+    ladder, sleeping between attempts (`httpcore._sync.connection._connect` ->
+    `_network_backend.sleep`). That cost **31.85s of pure time.sleep** against this file's
+    30s timeout. It was deterministic rather than flaky, and it was not DNS: pointing
+    SUPABASE_URL at a connection-refused port cost the same. Whether this test passed came
+    down to which machine ran it, and it failed 5/5 here on an unmodified tree.
+
+    Raising the timeout would have left a real network call inside a unit test and moved
+    the cliff rather than removing it. Failing the client at the boundary takes the test
+    to **~4.6s**, and unlike stubbing individual tables it also covers whatever the
+    request path starts loading next. Same stub `tests/routes/test_admin_status.py` uses,
+    for the same reason.
+
+    **Do not delete this as redundant.** Nothing else stubs these calls, and without it
+    the only symptom is a slow test that passes on some machines and not others.
+    """
+    import importlib
+
+    saved = {}
+    for module_path, names in _LAZY_CACHES.items():
+        module = importlib.import_module(module_path)
+        saved[module] = {name: getattr(module, name) for name in names}
+
+    try:
+        with patch(
+            "src.config.supabase_config.get_supabase_client",
+            side_effect=RuntimeError("no database in this test"),
+        ):
+            yield
+    finally:
+        for module, values in saved.items():
+            for name, value in values.items():
+                setattr(module, name, value)
+
+
 def test_overriding_identity_bypasses_the_anonymous_gate():
     """Proof that chat.py reads `identity`, not a local api_key re-check:
     override just the identity dependency to a non-anonymous one (leaving no
@@ -120,7 +192,10 @@ def test_overriding_identity_bypasses_the_anonymous_gate():
     app.dependency_overrides[get_request_identity_strict] = lambda: fake_identity
 
     try:
-        with patch("src.security.inference_gates.Config.ANONYMOUS_ENABLED", False):
+        with (
+            patch("src.security.inference_gates.Config.ANONYMOUS_ENABLED", False),
+            _no_database(),
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={"model": "openai/gpt-4o", "messages": [{"role": "user", "content": "hi"}]},

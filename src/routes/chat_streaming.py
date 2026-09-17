@@ -441,8 +441,26 @@ async def stream_generator(
         from src.utils.errors import (
             PROVIDER_CAPACITY_MESSAGE,
             is_provider_budget_error,
+            parse_upstream_status,
             sanitize_provider_error_for_user,
         )
+
+        # The status the upstream explicitly labelled, or None if it labelled none.
+        # Every numeric test below keys off this rather than scanning error_str for a
+        # digit run, because error_str routinely contains a 64-character hex key id and
+        # a random hex id holds any given digit triple about one time in sixty-five. The
+        # budget branch above was already reordered for that reason (a key id containing
+        # "429" was being reported to users as a rate limit); this removes the class
+        # rather than stepping around it once more.
+        #
+        # When no status is labelled we fall back to the phrase tests alone, NOT to a
+        # digit scan. That is a deliberate downgrade in specificity: an upstream error
+        # that states its status only as a bare unlabelled number, and uses none of the
+        # phrases, now lands in the generic arm with a sanitized message instead of a
+        # named one. A vaguer true message beats a confident false one -- telling
+        # somebody "check your API key" because their timeout happened to contain the
+        # digits 401 is worse than telling them the stream failed.
+        upstream_status = parse_upstream_status(error_str)
 
         # Budget exhaustion is checked FIRST, ahead of the rate-limit heuristic below.
         # is_provider_budget_error() matches specific phrases; the rate-limit check is a
@@ -486,20 +504,15 @@ async def stream_generator(
             except Exception:
                 logger.warning("Failed to record provider budget event (stream)", exc_info=True)
         # Check for rate limit errors
-        elif "rate limit" in error_str or "429" in error_str or "too many" in error_str:
+        elif upstream_status == 429 or "rate limit" in error_str or "too many" in error_str:
             error_message = "Rate limit exceeded. Please wait a moment and try again."
             error_type = "rate_limit_error"
         # Check for authentication errors
-        elif "401" in error_str or "unauthorized" in error_str or "authentication" in error_str:
+        elif upstream_status == 401 or "unauthorized" in error_str or "authentication" in error_str:
             error_message = "Authentication failed. Please check your API key or sign in again."
             error_type = "auth_error"
         # Check for provider/upstream errors
-        elif (
-            "upstream" in error_str
-            or "provider" in error_str
-            or "503" in error_str
-            or "502" in error_str
-        ):
+        elif upstream_status in (502, 503) or "upstream" in error_str or "provider" in error_str:
             # Generic client message — the raw error is logged above and
             # captured to Sentry below; never surfaced to the end user.
             error_message = (
@@ -524,7 +537,7 @@ async def stream_generator(
             error_message = "Request timed out. The model may be overloaded. Please try again."
             error_type = "timeout_error"
         # Check for model not found errors
-        elif "not found" in error_str or "404" in error_str:
+        elif upstream_status == 404 or "not found" in error_str:
             error_message = (
                 f"Model '{model}' was not found or is currently unavailable. "
                 "Please check the model ID or try another model."
