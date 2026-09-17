@@ -163,6 +163,19 @@ jobs:
           # is unreachable and would make a skipped guard read as coverage.
           - category: schema-guards
             paths: "tests/schema/"
+          # tests/handlers/ covers the chat request path -- product code, and it
+          # had never run in CI. Found 2026-09-17 by listing tests/* against the
+          # paths in this matrix: EIGHT directories were unmapped, 164 tests in
+          # total. A directory joins this repo by being created, not by being
+          # added here, so the default for a new test directory is silence.
+          - category: handlers
+            paths: "tests/handlers/"
+          # The rest of what was unmapped. All run without a database.
+          # tests/smoke/ is deliberately absent: it collects no tests without
+          # live credentials, and a category that always reports "no tests ran"
+          # is worse than none -- it looks like coverage.
+          - category: tooling
+            paths: "tests/migrations/ tests/infrastructure/ tests/scripts/ tests/data/ tests/eval/ tests/benchmarks/"
 
     steps:
       - name: Checkout code
