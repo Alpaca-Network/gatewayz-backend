@@ -518,7 +518,10 @@ def create_app() -> FastAPI:
             "Model Ranking",
         ),  # Re-enabled — frontend model dropdowns depend on /ranking/models
         ("activity", "Activity Tracking"),
-        # coupons / referral removed - MVP non-goal (growth-mechanics cut)
+        # referral removed - MVP non-goal (growth-mechanics cut). Coupons came
+        # back: #2341 shipped the admin CRUD surface, and this is the user-facing
+        # half that makes a coupon redeemable at all.
+        ("coupons", "Coupon Redemption"),
         ("roles", "Role Management"),
         ("transaction_analytics", "Transaction Analytics"),
         # analytics (Statsig/PostHog events proxy) removed - MVP observability teardown
