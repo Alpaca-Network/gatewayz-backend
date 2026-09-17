@@ -117,10 +117,15 @@ def test_no_query_names_a_missing_provider_budget_events_column():
 
 def test_the_select_list_is_resolved_from_its_constant():
     """The scanner must follow `_EVENT_COLUMNS`, not skip it."""
-    source = '_EVENT_COLUMNS = "provider,reason,phantom_col"\n' 'r = c.table("provider_budget_events").select(_EVENT_COLUMNS).execute()\n'
+    source = (
+        '_EVENT_COLUMNS = "provider,reason,phantom_col"\n'
+        'r = c.table("provider_budget_events").select(_EVENT_COLUMNS).execute()\n'
+    )
     constants = _string_constants(ast.parse(source))
     assert constants.get("_EVENT_COLUMNS") == "provider,reason,phantom_col"
-    bad = [c for c in _columns(constants["_EVENT_COLUMNS"]) if c not in PROVIDER_BUDGET_EVENTS_COLUMNS]
+    bad = [
+        c for c in _columns(constants["_EVENT_COLUMNS"]) if c not in PROVIDER_BUDGET_EVENTS_COLUMNS
+    ]
     assert bad == ["phantom_col"], f"constant-held select list was not scanned: {bad}"
 
 
