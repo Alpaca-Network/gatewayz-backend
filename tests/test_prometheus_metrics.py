@@ -7,6 +7,8 @@ Tests verify that:
 - Core metrics are initialized and tracked
 """
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,9 +18,16 @@ from src.services import prometheus_metrics
 
 @pytest.fixture
 def client():
-    """Create a test client for the application."""
+    """
+    Test client that authenticates to the metrics surfaces.
+
+    /metrics and /api/metrics/parsed are gated (src/main.py::_require_metrics_auth)
+    because they publish per-route request volume and per-model spend. These tests
+    are about the metrics themselves, so the client carries the admin key conftest
+    configures; the gate itself is covered in tests/routes/test_metrics_auth.py.
+    """
     app = create_app()
-    return TestClient(app)
+    return TestClient(app, headers={"Authorization": f"Bearer {os.environ['ADMIN_API_KEY']}"})
 
 
 class TestMetricsEndpoint:

@@ -275,6 +275,37 @@ def create_app() -> FastAPI:
 
     from src.services import prometheus_metrics  # noqa: F401
 
+    def _require_metrics_auth(request: Request) -> None:
+        """
+        Gate the metrics surfaces behind a bearer token.
+
+        /metrics served ~18k lines to anyone: exact request volume per route,
+        credits_used_total per model and provider, error counts, and the paths
+        scanners probe. No credentials or personal data, but it is the business's
+        traffic and spend, published.
+
+        Accepts METRICS_TOKEN or ADMIN_API_KEY, so an existing scraper keeps one
+        token of its own and admin tooling needs no second secret. With neither
+        configured this fails closed in production (404, the same answer an
+        unrouted path gets — an authentication challenge would confirm the
+        endpoint exists) and stays open outside it, where `curl localhost:8000/
+        metrics` during development is the point.
+        """
+        expected = [t for t in (Config.METRICS_TOKEN, os.environ.get("ADMIN_API_KEY")) if t]
+        if not expected:
+            if Config.IS_PRODUCTION:
+                raise HTTPException(status_code=404, detail="Not Found")
+            return
+
+        header = request.headers.get("authorization", "")
+        scheme, _, presented = header.partition(" ")
+        if scheme.lower() != "bearer" or not presented:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        # compare_digest against every configured token: constant-time, and no
+        # early return that would leak which token matched.
+        if not any(secrets.compare_digest(presented, token) for token in expected):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
     @app.get("/metrics", tags=["monitoring"], include_in_schema=False)
     async def metrics(request: Request):
         """
@@ -284,7 +315,11 @@ def create_app() -> FastAPI:
         OpenMetrics format is required for serving exemplars (trace_id links
         that let you click from a metric datapoint to the trace in Tempo).
         Prometheus requests OpenMetrics when --enable-feature=exemplar-storage is set.
+
+        Requires a METRICS_TOKEN / ADMIN_API_KEY bearer token — see
+        _require_metrics_auth. A scraper sends it as a normal Authorization header.
         """
+        _require_metrics_auth(request)
         # Refresh Redis INFO gauges on each scrape (run in threadpool to avoid blocking).
         # Hard cap at 5 s so a slow Upstash round-trip never causes the Prometheus scrape
         # to time out (scrape_timeout=10s in prometheus.yml → up{job="gatewayz_production"}=0).
@@ -316,7 +351,7 @@ def create_app() -> FastAPI:
 
     # Add structured metrics endpoint (parses Prometheus metrics)
     @app.get("/api/metrics/parsed", tags=["monitoring"], include_in_schema=False)
-    async def get_parsed_metrics():
+    async def get_parsed_metrics(request: Request):
         """
         Get parsed Prometheus metrics in structured JSON format.
 
@@ -349,12 +384,16 @@ def create_app() -> FastAPI:
         - Request counts by endpoint/method from http_requests_total
         - Error counts by endpoint/method from http_request_errors_total
         """
+        _require_metrics_auth(request)
+
         from src.services.metrics_parser import get_metrics_parser
 
-        # Get metrics from the local /metrics endpoint
-        parser = get_metrics_parser("http://localhost:8000/metrics")
-        metrics = await parser.get_metrics()
-        return metrics
+        # Read the registry directly rather than fetching our own /metrics over
+        # localhost: that round trip now needs a bearer token (so the app would
+        # have to authenticate to itself), and it depended on the server actually
+        # listening on port 8000 — not true under a different port or in tests.
+        parser = get_metrics_parser()
+        return parser.parse_metrics(generate_latest(REGISTRY).decode("utf-8"))
 
     logger.info("  [OK] Parsed metrics endpoint at /api/metrics/parsed")
 
