@@ -160,6 +160,39 @@ def _load_coupon_or_404(coupon_id: int) -> dict[str, Any]:
     return row
 
 
+# The unique constraints that mean "this coupon code is taken", and only those.
+# `coupons_code_key` is the inline UNIQUE(code) from 20251009040000 (case-
+# SENSITIVE); `uq_coupons_code_upper` is the case-insensitive one added by
+# 20260917020000. Any OTHER unique violation must NOT be reported as a taken
+# code -- a confident wrong reason is the failure mode this module exists to
+# avoid, and it would send an admin hunting for a duplicate that isn't there.
+_CODE_UNIQUE_CONSTRAINTS = ("uq_coupons_code_upper", "coupons_code_key")
+
+
+def _is_duplicate_code_error(error: Exception) -> bool:
+    """True if *error* is a unique violation on one of the coupon-code indexes.
+
+    Follows src/db/gpu_payouts.py::_is_duplicate_error's convention of matching
+    on the message, because PostgREST surfaces the SQLSTATE in the error body
+    rather than as a typed exception -- but narrowed to the code indexes.
+    """
+    message = str(error).lower()
+    is_unique_violation = (
+        "23505" in message or "duplicate key" in message or "unique constraint" in message
+    )
+    return is_unique_violation and any(name in message for name in _CODE_UNIQUE_CONSTRAINTS)
+
+
+def _code_taken(code: str) -> HTTPException:
+    return _error(
+        409,
+        f"Coupon code '{code}' already exists.",
+        "coupon_code_taken",
+        "conflict_error",
+        code,
+    )
+
+
 def _assert_code_available(code: str, *, exclude_id: int | None = None) -> None:
     try:
         clash = get_coupon_by_code(code, exclude_id=exclude_id)
@@ -167,13 +200,7 @@ def _assert_code_available(code: str, *, exclude_id: int | None = None) -> None:
         logger.error("coupon code uniqueness check failed: %s", e, exc_info=True)
         raise _unavailable("coupon_lookup_unavailable", "Coupon lookup is temporarily unavailable.")
     if clash is not None:
-        raise _error(
-            409,
-            f"Coupon code '{code}' already exists.",
-            "coupon_code_taken",
-            "conflict_error",
-            code,
-        )
+        raise _code_taken(code)
 
 
 @router.get("/admin/coupons", tags=["admin", "coupons"])
@@ -385,6 +412,15 @@ async def create_admin_coupon(
     try:
         row = create_coupon(values)
     except Exception as e:
+        # _assert_code_available above and this INSERT are two statements with
+        # no lock between them. Two concurrent creates of 'welcome' and
+        # 'WELCOME' both pass the pre-check; UNIQUE (UPPER(code)) is what stops
+        # the second, and it surfaces here as a 23505. That is a conflict the
+        # caller can act on, not an outage -- answer it exactly as the
+        # pre-check would have.
+        if _is_duplicate_code_error(e):
+            logger.info("POST /admin/coupons lost the code-uniqueness race for %r", code)
+            raise _code_taken(code)
         logger.error("POST /admin/coupons failed: %s", e, exc_info=True)
         raise _unavailable("coupon_create_failed", "Could not create the coupon.")
 
@@ -455,6 +491,16 @@ async def update_admin_coupon(
     try:
         row = update_coupon(coupon_id, write)
     except Exception as e:
+        # Renaming a coupon into a code another row already holds collides the
+        # same way as a create, and for the same reason: the pre-check is not
+        # atomic with the write.
+        if _is_duplicate_code_error(e):
+            logger.info(
+                "PATCH /admin/coupons/%s lost the code-uniqueness race for %r",
+                coupon_id,
+                write.get("code"),
+            )
+            raise _code_taken(str(write.get("code")))
         logger.error("PATCH /admin/coupons/%s failed: %s", coupon_id, e, exc_info=True)
         raise _unavailable("coupon_update_failed", "Could not update the coupon.")
 

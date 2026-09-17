@@ -353,6 +353,61 @@ class TestCreateCoupon:
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "coupon_code_taken"
 
+    def test_lost_uniqueness_race_is_409_not_503(self, admin_override):
+        """_assert_code_available and the INSERT are two statements with no lock
+        between them, so two concurrent creates of 'welcome' and 'WELCOME' both
+        pass the pre-check. UNIQUE (UPPER(code)) stops the second, and it
+        arrives here as a 23505. That is a conflict the caller can act on --
+        reporting it as a 503 would send an admin chasing an outage that isn't
+        one, and reporting it as 500 would be a regression in error quality."""
+        error = Exception('duplicate key value violates unique constraint "uq_coupons_code_upper"')
+        with (
+            patch("src.routes.admin_coupons.get_coupon_by_code", return_value=None),
+            patch("src.routes.admin_coupons.create_coupon", side_effect=error),
+        ):
+            response = client.post("/admin/coupons", json=_create_body())
+
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "coupon_code_taken"
+
+    def test_case_sensitive_unique_violation_is_also_409(self, admin_override):
+        """The pre-existing inline UNIQUE(code) is named coupons_code_key; a
+        violation of it means the same thing to the caller."""
+        error = Exception('duplicate key value violates unique constraint "coupons_code_key"')
+        with (
+            patch("src.routes.admin_coupons.get_coupon_by_code", return_value=None),
+            patch("src.routes.admin_coupons.create_coupon", side_effect=error),
+        ):
+            response = client.post("/admin/coupons", json=_create_body())
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "coupon_code_taken"
+
+    def test_an_unrelated_unique_violation_is_not_reported_as_a_taken_code(self, admin_override):
+        """The narrowing that matters. A unique violation on some OTHER index is
+        not "your code is taken" -- saying so would send an admin hunting for a
+        duplicate that does not exist, which is the confident-wrong-reason
+        failure this module exists to avoid."""
+        error = Exception('duplicate key value violates unique constraint "some_other_idx"')
+        with (
+            patch("src.routes.admin_coupons.get_coupon_by_code", return_value=None),
+            patch("src.routes.admin_coupons.create_coupon", side_effect=error),
+        ):
+            response = client.post("/admin/coupons", json=_create_body())
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "coupon_create_failed"
+
+    def test_a_plain_outage_is_still_503(self, admin_override):
+        with (
+            patch("src.routes.admin_coupons.get_coupon_by_code", return_value=None),
+            patch(
+                "src.routes.admin_coupons.create_coupon",
+                side_effect=RuntimeError("connection reset"),
+            ),
+        ):
+            response = client.post("/admin/coupons", json=_create_body())
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "coupon_create_failed"
+
     def test_duplicate_check_is_case_insensitive_on_the_normalized_code(self, admin_override):
         with patch("src.routes.admin_coupons.get_coupon_by_code", return_value=None) as mock_lookup:
             with patch("src.routes.admin_coupons.create_coupon", return_value=make_coupon()):
@@ -437,6 +492,33 @@ class TestUpdateCoupon:
         assert mock.call_args.args[1] == {"is_active": True}
         assert response.json()["is_active"] is True
         assert _mute_audit.call_args.kwargs["action"] == "coupon.updated"
+
+    def test_rename_into_an_existing_code_is_409_not_503(self, admin_override):
+        """Renaming a coupon into a code another row holds collides the same way
+        a create does, and for the same reason: the pre-check is not atomic with
+        the write."""
+        error = Exception('duplicate key value violates unique constraint "uq_coupons_code_upper"')
+        with (
+            patch("src.routes.admin_coupons.get_coupon", return_value=make_coupon()),
+            patch("src.routes.admin_coupons.get_coupon_by_code", return_value=None),
+            patch("src.routes.admin_coupons.update_coupon", side_effect=error),
+        ):
+            response = client.patch("/admin/coupons/19", json={"code": "WELCOME"})
+
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "coupon_code_taken"
+
+    def test_update_outage_is_still_503(self, admin_override):
+        with (
+            patch("src.routes.admin_coupons.get_coupon", return_value=make_coupon()),
+            patch(
+                "src.routes.admin_coupons.update_coupon",
+                side_effect=RuntimeError("connection reset"),
+            ),
+        ):
+            response = client.patch("/admin/coupons/19", json={"is_active": True})
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "coupon_update_failed"
 
     def test_put_is_accepted_as_well_as_patch(self, admin_override):
         with (

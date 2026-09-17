@@ -142,13 +142,24 @@ BEGIN
     -- a decision rather than a guess.
     --
     -- Matched on UPPER(code) to agree with is_coupon_redeemable() and with
-    -- idx_coupons_code_upper. coupons.code is UNIQUE but case-SENSITIVELY,
-    -- so 'welcome' and 'WELCOME' can coexist as two rows that both answer to
-    -- one typed code; src/schemas/coupons.py refuses to create the second.
+    -- idx_coupons_code_upper.
+    --
+    -- ORDER BY id LIMIT 1 is belt and braces. 20260917020000 adds
+    -- UNIQUE (UPPER(code)), so at most one row can match and the ordering is a
+    -- no-op. It is here so this function is not INDEPENDENTLY fragile: without
+    -- it, and with a collision present, the row returned is whatever the plan
+    -- yields first, and a VACUUM FULL rewrites the heap in index order and
+    -- flips it. Measured: the same user redeemed one typed code on two
+    -- consecutive days and was paid from two different coupon rows, because
+    -- uq_coupon_user compares coupon_id and the ids differed. Pinning the
+    -- oldest matching row makes that a single repeatable answer instead --
+    -- still the wrong data, but no longer a double-grant path.
     -- ======================================================================
     SELECT * INTO v_coupon
     FROM public.coupons
     WHERE UPPER(code) = UPPER(v_code)
+    ORDER BY id
+    LIMIT 1
     FOR UPDATE;
 
     IF NOT FOUND THEN
