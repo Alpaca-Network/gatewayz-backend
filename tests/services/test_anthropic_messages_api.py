@@ -321,11 +321,19 @@ class TestStreamErrorPropagation:
         assert error_events[0]["error"]["type"] == "rate_limit_error"
 
     @pytest.mark.asyncio
-    async def test_capacity_error_maps_to_overloaded(self):
+    async def test_capacity_error_is_terminal_not_overloaded(self):
+        # Changed 2026-09-21. This used to assert overloaded_error, which
+        # described the mapping rather than defending it -- and the mapping was
+        # wrong. `capacity_error` is emitted from exactly one place, the
+        # provider-budget branch in chat_streaming, so it always means a spend
+        # limit on our own provider account. overloaded_error is the one
+        # Anthropic type whose documented advice is to back off and retry, and
+        # retrying can never clear a spend limit. #2355 fixed this for the
+        # non-stream path (503 -> 402); this is the same cause mid-stream.
         chunks = ['data: {"error":{"message":"capacity","type":"capacity_error","status":503}}']
         parsed = self._parse(await self._collect(chunks))
         error_events = [p for p in parsed if p["type"] == "error"]
-        assert error_events[0]["error"]["type"] == "overloaded_error"
+        assert error_events[0]["error"]["type"] == "invalid_request_error"
 
     @pytest.mark.asyncio
     async def test_error_after_content_still_surfaces(self):

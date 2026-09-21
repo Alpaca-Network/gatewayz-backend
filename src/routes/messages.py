@@ -156,7 +156,16 @@ _STREAM_ERROR_TYPE_MAP = {
     "plan_limit_exceeded": "rate_limit_error",
     "auth_error": "authentication_error",
     "not_found_error": "not_found_error",
-    "capacity_error": "overloaded_error",
+    # NOT overloaded_error. `capacity_error` is emitted from exactly one place --
+    # chat_streaming's is_provider_budget_error() branch -- so it always means a
+    # spending limit on OUR provider account, never genuine upstream capacity.
+    # overloaded_error is the one Anthropic type whose documented advice is to
+    # back off and retry, which is the advice this condition can never satisfy.
+    #
+    # This is #2355's defect coming through the streaming door: that PR moved the
+    # non-stream path from 503 to a terminal 402, and the mid-stream event for the
+    # identical cause kept telling the SDK to retry.
+    "capacity_error": "invalid_request_error",
 }
 
 # Error-shaped chunks that are advisories emitted AFTER content was fully
