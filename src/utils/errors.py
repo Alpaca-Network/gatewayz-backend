@@ -402,11 +402,23 @@ Usage:
 
 import re
 
-# User-facing, friendly message for provider account/key budget exhaustion (e.g. an
+# User-facing message for provider account/key budget exhaustion (e.g. an
 # OpenRouter key hitting its weekly spend limit). Never expose the upstream key/URL.
+#
+# The words have to agree with the status. #2355 moved this condition from a
+# retryable 503 to a terminal 402 -- and left the prose saying "temporarily
+# unavailable ... try again shortly", so the envelope shipped a 402 that asked
+# the caller to retry. Verified live on 2026-09-21 after that deploy: status
+# terminal, message transient. A human reads the sentence, an SDK reads the
+# status, and they were being told opposite things about one condition.
+#
+# A spend limit stays reached until a person raises it or tops the account up,
+# so the message says that, and says what the caller can actually do now. It
+# still names no key, no URL, and no dollar figure.
 PROVIDER_CAPACITY_MESSAGE = (
-    "This model is temporarily unavailable due to a capacity limit on our side. "
-    "Please try a different model or try again shortly."
+    "This model is unavailable: a spending limit on our provider account has been "
+    "reached. Retrying will not clear it. Please use a different model, or contact "
+    "support so the limit can be raised."
 )
 
 # Closed vocabulary of operator-facing reasons for provider budget exhaustion.
