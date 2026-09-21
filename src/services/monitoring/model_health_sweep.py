@@ -38,6 +38,15 @@ _NOT_FOUND_PATTERNS = (
     "no endpoints",
     "no allowed providers",
     "does not exist",
+    # Upstream retirement. A provider that says "deprecated" / "model_not_found"
+    # is making the same claim as "does not exist", and it is the claim that
+    # justifies hiding a model. Added after gpt-4o-search-preview stayed in the
+    # catalog for weeks: OpenAI had retired it, but our mapper buried the
+    # upstream 404 inside a 502, so every probe classified SOFT and the sweep
+    # never had grounds to act. The mapper now surfaces it (chat_handler, #2354)
+    # and these two patterns catch it from the body even when it does not.
+    "deprecated",
+    "model_not_found",
 )
 # Substrings that indicate a transient rate-limit — a SOFT failure (never hide).
 _RATE_LIMIT_PATTERNS = ("rate limit", "too many requests", "rate_limited")

@@ -640,6 +640,44 @@ class ChatInferenceHandler:
                     detail=error_response.dict(exclude_none=True),
                 ) from e
 
+            # Upstream says this model does not exist -- retired, deprecated, or
+            # never served under this id. 400, NOT 502.
+            #
+            # map_provider_error already classifies this as 404 (NotFoundError, or
+            # "Error code: 404" in the upstream text). This handler used to drop
+            # every non-429/402 mapping into the generic 502 below, so a permanent
+            # deprecation reached the caller as "Provider error ... This is usually
+            # temporary." It is not temporary: OpenAI retired
+            # gpt-4o-search-preview, our catalog kept advertising it, and every SDK
+            # retry policy retried a model that is never coming back.
+            #
+            # 400 rather than 404 deliberately: it is the SAME answer we already
+            # give for an id that was never in the catalog (the pricing gate), and
+            # the caller's correct action is identical -- pick another model. Two
+            # statuses for one condition is the bug this family keeps producing.
+            #
+            # Failover has already run by the time we get here: 404 is in
+            # FAILOVER_STATUS_CODES, so every other provider that could serve this
+            # id has been tried.
+            #
+            # Sixth instance of the family, after #2291 (bare ids 503), #2292
+            # (exhausted cap 429), #2296 (mid-stream silence), #2297 (unknown id
+            # 503) and #2355 (provider budget 503). Could retrying ever help? No.
+            if mapped.status_code == 404:
+                error_response = DetailedErrorFactory.model_not_found(
+                    model_id=model_id,
+                    provider=provider_name,
+                    request_id=self.request_id,
+                )
+                detail = error_response.dict(exclude_none=True)
+                # Keep the envelope's own `status` in step with the HTTP status --
+                # the factory's default is 404 and a body that disagrees with its
+                # own response code is how a client ends up branching on the wrong
+                # one.
+                if isinstance(detail.get("error"), dict):
+                    detail["error"]["status"] = 400
+                raise HTTPException(status_code=400, detail=detail) from e
+
             # Other provider errors keep the existing 502 provider-error contract,
             # sanitized so we never leak upstream URLs/key ids to end users.
             error_response = DetailedErrorFactory.provider_error(
