@@ -481,8 +481,12 @@ class TestChatHandlerDetectionSite:
     def test_a_budget_failure_is_recorded_once(self, flushes):
         exc = _call_provider_expecting_failure(_handler(), REAL_ANTHROPIC)
 
-        # 503 + the friendly capacity text is the existing user-facing contract.
-        assert exc.status_code == 503
+        # 402 + the friendly capacity text. This asserted 503 until 2026-09-21:
+        # a budget condition is terminal until a human raises the limit, and
+        # 503 + Retry-After told every SDK to retry it forever. The intent of
+        # THIS test is the recorder latch below -- one flush, not two -- and
+        # that is unchanged.
+        assert exc.status_code == 402
         # map_provider_error() and the handler's own budget branch both call the
         # recorder; the exception latch means the operator sees one occurrence, not two.
         assert len(flushes) == 1
@@ -542,7 +546,9 @@ class TestChatHandlerDetectionSite:
         from src.services.provider_failover import map_provider_error as _map
 
         assert _map("testprovider", "claude-sonnet-5", exc).status_code != 402
-        assert excinfo.value.status_code == 503
+        # The handler's own branch answers 402 even though the mapper did not --
+        # which is the point of this test. It asserted 503 until 2026-09-21.
+        assert excinfo.value.status_code == 402
         assert flushes[0]["reason"] == "credit_balance_low"
 
     def test_a_recorder_that_somehow_raises_does_not_break_the_request(self, flushes):
@@ -553,7 +559,7 @@ class TestChatHandlerDetectionSite:
             exc = _call_provider_expecting_failure(_handler(), REAL_ANTHROPIC)
 
         # Same status, same masked message: the user cannot tell monitoring broke.
-        assert exc.status_code == 503
+        assert exc.status_code == 402
         assert KEY_ID not in str(exc.detail)
 
 
