@@ -780,3 +780,44 @@ class TestUsageMatch:
         db.spent(7, "10000")
         rewards.run_holdings_rewards_once(DAY)
         assert db.accruals[(W1, DAY_STR)]["credits"] == "50.000000"
+
+
+class TestRewardDateIsDeterministic:
+    """A reward date's answer must not depend on when it is computed.
+
+    `usage_since` was `datetime.now(UTC) - lookback`, so the allowance for
+    2026-09-13 was measured against the seven days before *today*. A day that
+    legitimately paid when the job ran could pay nothing on a replay a week
+    later, and the test that caught it passed at merge and failed four days
+    afterwards -- it was measuring the clock, not the code.
+
+    For an accrual ledger the property that matters is: the same date, computed
+    at any time, yields the same answer. Otherwise the record is a function of
+    when you asked rather than of what happened.
+    """
+
+    def test_the_usage_window_is_anchored_to_the_reward_date(self, db, monkeypatch):
+        from datetime import UTC, datetime, timedelta
+
+        seen: list[datetime] = []
+        real = rewards._usage_headroom
+        monkeypatch.setattr(
+            rewards,
+            "_usage_headroom",
+            lambda uid, since, cache: seen.append(since) or real(uid, since, cache),
+        )
+
+        db.spent(7, "4")
+        db.link(W1, 7)
+        db.observe(W1, 5000, day=DAY)
+        rewards.run_holdings_rewards_once(DAY)
+
+        assert seen, "the usage window was never computed"
+        since = seen[0]
+        # The window ends at the close of the reward date, so it can never
+        # include spend that did not exist yet when that day closed.
+        assert since < datetime(DAY.year, DAY.month, DAY.day + 1, tzinfo=UTC)
+        # And it is nowhere near "now" -- which is what the bug was.
+        assert (
+            abs((datetime.now(UTC) - since).days) > 1
+        ), "the window is still tracking wall-clock now rather than the reward date"
