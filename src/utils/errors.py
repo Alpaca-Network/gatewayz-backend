@@ -2534,15 +2534,41 @@ class DetailedErrorFactory:
 
         return ErrorResponse(error=resp)
 
+    # Advice for a 503 whose cause the route named: the default suggestions all
+    # say "wait and try again", which is wrong for a deterministic one.
+    _DETERMINISTIC_503_DETAIL = (
+        "This is a server-side configuration or dependency problem, not load. "
+        "Retrying the same request will not change the result until it is fixed."
+    )
+    _DETERMINISTIC_503_SUGGESTIONS = [
+        "Retrying will not help — this needs a fix on our side",
+        "Contact support with the request id above",
+    ]
+
     @staticmethod
     def service_unavailable(
         service: str = "service",
         retry_after: int | None = None,
         request_id: str | None = None,
+        reason: str | None = None,
     ) -> ErrorResponse:
-        """Create a service unavailable error."""
+        """Create a service unavailable error.
+
+        ``reason``: the cause the route stated when it raised, e.g.
+        "Signing unavailable: USAGE_SIGNING_KEY is not set". When present it
+        REPLACES the boilerplate, and the advice flips from "wait and try
+        again" to "this will not clear on its own".
+
+        Why it matters: /v1/usage/export/key answered 503 "temporarily
+        unavailable due to maintenance or high load. Please try again shortly"
+        for weeks. The real cause was one unset environment variable, named
+        precisely by the route and then discarded here. A deterministic
+        condition dressed as load is invisible to the person who could fix it
+        in thirty seconds -- and this handler put that dress on every 503 that
+        was not a provider error.
+        """
         code = ErrorCode.SERVICE_UNAVAILABLE
-        message = get_error_message(code)
+        message = reason or get_error_message(code)
 
         context = ErrorContext(
             retry_after=retry_after,
@@ -2551,12 +2577,18 @@ class DetailedErrorFactory:
         error = ErrorDetail(
             type=get_error_type(code),
             message=message,
-            detail=get_error_detail(code),
+            detail=(
+                DetailedErrorFactory._DETERMINISTIC_503_DETAIL if reason else get_error_detail(code)
+            ),
             code=code,
             status=get_status_code(code),
             request_id=request_id or f"req_{uuid.uuid4().hex[:12]}",
             timestamp=datetime.utcnow().isoformat() + "Z",
-            suggestions=get_suggestions(code),
+            suggestions=(
+                DetailedErrorFactory._DETERMINISTIC_503_SUGGESTIONS
+                if reason
+                else get_suggestions(code)
+            ),
             context=context,
             docs_url=get_docs_url(code),
         )
