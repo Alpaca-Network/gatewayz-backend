@@ -611,17 +611,33 @@ class ChatInferenceHandler:
                 except Exception:
                     logger.warning("Failed to record provider budget event", exc_info=True)
 
+                # 402, NOT 503, and no Retry-After.
+                #
+                # A provider account or key that is out of budget stays out of
+                # budget until a human tops it up or raises the limit. 503 with
+                # Retry-After: 30 tells every SDK retry policy the opposite --
+                # so a spend limit reads as transient capacity and callers
+                # retry it forever, which is how eleven Anthropic models can be
+                # down for a day with the only accurate signal sitting on an
+                # admin-only page.
+                #
+                # provider_failover.map_provider_error already maps this exact
+                # condition to 402. Two code paths disagreeing about the same
+                # cause is the bug; this is the one /v1/messages reaches.
+                #
+                # Same family as #2292, which moved an exhausted request cap
+                # from 429 to 402 for the identical reason: could retrying ever
+                # help? If not, the status must not invite it.
                 error_response = DetailedErrorFactory.provider_error(
                     provider=provider_name,
                     model=model_id,
                     provider_message=PROVIDER_CAPACITY_MESSAGE,
-                    status_code=503,
+                    status_code=402,
                     request_id=self.request_id,
                 )
                 raise HTTPException(
                     status_code=error_response.error.status,
                     detail=error_response.dict(exclude_none=True),
-                    headers={"Retry-After": "30"},
                 ) from e
 
             # Other provider errors keep the existing 502 provider-error contract,

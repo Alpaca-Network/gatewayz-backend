@@ -131,8 +131,11 @@ def _anthropic_error_type(status_code: int, code: str | None) -> str:
         403: "permission_error",
         404: "not_found_error",
         429: "rate_limit_error",
-        # Provider capacity/budget exhaustion (e.g. unfunded upstream
-        # account) surfaces as 503 — Anthropic SDKs retry overloaded_error.
+        # Provider budget exhaustion is 402 and terminal: an SDK must not
+        # retry it, and an operator must be told to top up rather than wait.
+        402: "invalid_request_error",
+        # 503 stays overloaded_error for GENUINE upstream capacity, which is
+        # the one case where retrying is the right advice.
         503: "overloaded_error",
     }.get(status_code, "api_error")
     # A 503 for missing pricing config is deterministic, not transient —
