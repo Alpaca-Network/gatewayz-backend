@@ -68,7 +68,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import Any
 
@@ -313,7 +313,19 @@ def run_holdings_rewards_once(reward_date: date | None = None) -> dict[str, Any]
     counts = {"paid": 0, "pending": 0, "already": 0, "errors": 0}
     # Each reason is counted separately and never folded together: when a
     # run pays less than expected, WHICH reason grew is the diagnosis.
-    usage_since = datetime.now(UTC) - timedelta(days=int(Config.HOLDINGS_USAGE_LOOKBACK_DAYS))
+    # Anchored to the DATE BEING PAID, not to wall-clock now.
+    #
+    # With now() the same reward date produced a different allowance depending on
+    # when the job ran: a replay or backfill of 2026-09-13 looked at the seven days
+    # before *today*, so a day that legitimately paid on the day could pay nothing a
+    # week later, and vice versa. For an accrual ledger that is the wrong property --
+    # a given date's answer has to be the same whenever it is computed, or the record
+    # is a function of when you asked rather than of what happened.
+    #
+    # End of the reward date (exclusive of the next day) is the window's upper bound,
+    # so a day sees exactly the spend that existed when it closed.
+    usage_window_end = datetime.combine(effective_date + timedelta(days=1), time.min, tzinfo=UTC)
+    usage_since = usage_window_end - timedelta(days=int(Config.HOLDINGS_USAGE_LOOKBACK_DAYS))
     usage_capped = 0
     spend_cache: dict[int, Decimal] = {}
     skipped = {
