@@ -184,37 +184,44 @@ def test_get_my_provider_returns_provider_nodes_and_earnings(
     assert data["earnings"] == {"accrued_wei": "0", "settled_wei": "0", "void_wei": "0"}
 
 
-@patch("src.config.supabase_config.get_supabase_client")
+@patch("src.db.gpu_payouts.get_supabase_client")
 def test_earnings_summary_sums_accrued_settled_and_void_separately(mock_get_client):
     fake_client = MagicMock()
-    fake_client.table.return_value.select.return_value.eq.return_value.execute.return_value = (
-        MagicMock(
-            data=[
-                {"amount_wei": "100", "status": "accrued"},
-                {"amount_wei": "40", "status": "accrued"},
-                {"amount_wei": "50", "status": "settled"},
-                {"amount_wei": "25", "status": "void"},
-            ]
-        )
+    fake_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[
+            {"amount_usd_micros": 1_000_000, "amount_wei": None, "status": "accrued"},
+            {"amount_usd_micros": 400_000, "amount_wei": None, "status": "accrued"},
+            {"amount_usd_micros": 500_000, "amount_wei": None, "status": "settled"},
+            {"amount_usd_micros": 250_000, "amount_wei": None, "status": "void"},
+            {"amount_usd_micros": None, "amount_wei": "25", "status": "settled"},  # legacy WAYZ
+        ]
     )
     mock_get_client.return_value = fake_client
 
     assert _earnings_summary(1) == {
-        "accrued_wei": "140",
-        "settled_wei": "50",
-        "void_wei": "25",
+        "payout_asset": "ETH",
+        "payout_chain": "base",
+        "accrued_usd": "1.4",
+        "accrued_usd_micros": 1_400_000,
+        "accrued_wei": "0",
+        "settled_usd": "0.5",
+        "settled_usd_micros": 500_000,
+        "settled_wei": "25",
+        "void_usd": "0.25",
+        "void_usd_micros": 250_000,
+        "void_wei": "0",
     }
 
 
-@patch("src.config.supabase_config.get_supabase_client")
+@patch("src.db.gpu_payouts.get_supabase_client")
 def test_earnings_summary_zeros_on_lookup_error(mock_get_client):
     mock_get_client.side_effect = RuntimeError("boom")
 
-    assert _earnings_summary(1) == {
-        "accrued_wei": "0",
-        "settled_wei": "0",
-        "void_wei": "0",
-    }
+    summary = _earnings_summary(1)
+    assert summary["accrued_usd_micros"] == 0
+    assert summary["settled_usd_micros"] == 0
+    assert summary["void_usd_micros"] == 0
+    assert summary["accrued_wei"] == "0"
 
 
 @patch("src.routes.gpu.get_provider_by_user")

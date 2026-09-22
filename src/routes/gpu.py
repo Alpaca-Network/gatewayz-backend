@@ -291,29 +291,12 @@ def _merge_heartbeat_models(
 
 
 def _earnings_summary(provider_id: int) -> dict[str, Any]:
-    """Accrued/settled totals for a provider. The provider_earnings CRUD
-    module belongs to W-B (spec section 5) -- this reads the table
-    directly with the same safe-default (zeros) on any error, so
-    GET /gpu/providers/me has something to show before W-B ships."""
-    try:
-        from src.config.supabase_config import get_supabase_client
+    """Accrued/settled/void totals for a provider -- USD (paid in ETH on
+    Base since 2026-09-22) plus the legacy WAYZ wei totals for history."""
+    from src.db.gpu_payouts import earnings_totals
+    from src.services.gpu.payout_views import usd_totals_view
 
-        client = get_supabase_client()
-        result = (
-            client.table("provider_earnings")
-            .select("amount_wei, status")
-            .eq("provider_id", provider_id)
-            .execute()
-        )
-        rows = result.data or []
-    except Exception as e:
-        logger.warning(f"provider_earnings summary lookup failed for {provider_id}: {e}")
-        rows = []
-
-    accrued = sum(int(r["amount_wei"]) for r in rows if r.get("status") == "accrued")
-    settled = sum(int(r["amount_wei"]) for r in rows if r.get("status") == "settled")
-    void = sum(int(r["amount_wei"]) for r in rows if r.get("status") == "void")
-    return {"accrued_wei": str(accrued), "settled_wei": str(settled), "void_wei": str(void)}
+    return usd_totals_view(earnings_totals(provider_id))
 
 
 # ---------------------------------------------------------------------------

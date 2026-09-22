@@ -1,18 +1,55 @@
-# Community GPU: verified work + WAYZ payouts
+# Community GPU: verified work + ETH payouts
 
-Covers gatewayz-backend#2265 (spot-check verification) and #2266 (WAYZ
-earnings/settlement). See `m4/spec.md` §5 for the binding design; this
+Covers gatewayz-backend#2265 (spot-check verification) and #2266
+(earnings/settlement). See `m4/spec.md` §5 for the binding design; this
 document is the operator/provider-facing reference plus the decisions made
 where the spec was silent.
+
+## Payout asset: USD-denominated, paid in native ETH on Base (2026-09-22)
+
+WAYZ is not going public for now, so providers are **no longer paid in
+WAYZ**. Decisions (migration `20260922120000_provider_payouts_eth_base.sql`):
+
+- **Accrual is in USD**, as integer micro-dollars (1 USD = 1,000,000):
+  `provider_payout_rates.usd_micros_per_1k_tokens` →
+  `provider_earnings.amount_usd_micros`. Providers get a stable dollar
+  rate; the treasury's cost is predictable.
+- **Payout is native ETH on Base** (chain id 8453), a plain value transfer
+  (21000 gas, EIP-1559 fees) from the payout pool EOA
+  (`PROVIDER_PAYOUT_POOL_PRIVATE_KEY`) via
+  `src/services/chain/eth_payout_client.py`.
+- **Conversion happens at settlement time**, once per run, at the
+  Chainlink ETH/USD aggregator on Base
+  (`0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70`, verified on-chain:
+  `description()=="ETH / USD"`, 8 decimals). `wei = usd_micros * 1e18 *
+  10^decimals // (1e6 * answer)` -- floored, never overpays. If the answer
+  is non-positive or older than `ETH_USD_PRICE_MAX_AGE_SECONDS` (default
+  3600; the feed's Base heartbeat is 20 min) or can't be read, **the whole
+  run aborts and nobody is paid** -- earnings stay `'accrued'` and the
+  `gpu_settlement` job run is recorded as failed. The price and its
+  `updatedAt` are stored on every `provider_settlements` row
+  (`eth_usd_price`, `price_updated_at`, `asset='ETH'`, `chain='base'`).
+- **Legacy WAYZ rows are never paid in ETH.** Rows accrued before the
+  switch have `amount_usd_micros IS NULL` (only `amount_wei`); the
+  settlement queries only claim rows with a USD amount. The WAYZ/wei
+  columns are kept (nullable) for history and still surfaced as
+  `*_wei` totals on the earnings endpoints.
+- `PROVIDER_PAYOUT_ASSET` (default `ETH`) is the switch; `ETH` is the only
+  supported value -- anything else keeps the settlement scheduler from
+  starting (logged at ERROR).
+- Not done (yet): no L2 sequencer-uptime feed check. A Base sequencer
+  outage freezes the price feed's `updatedAt`, which the staleness check
+  already catches.
 
 ## Two payout modes: `per_unit` (this doc) vs `emission`
 
 Everything below describes `Config.REWARDS_MODE`'s default, `per_unit`:
 a provider is accrued a `provider_earnings` row **per verified work item**
 (this doc's payout-rate table below). The alternative,
-**`emission`** (Chutes-style WAYZ emission rewards,
+**`emission`** (Chutes-style emission rewards,
 `docs/tokenomics/EMISSION.md`), pays providers a **daily share of a fixed
-WAYZ emission pool** by 7-day rolling score instead -- verification
+USD pool** (`PROVIDER_EMISSION_USD_PER_DAY`, paid in ETH) by 7-day
+rolling score instead -- verification
 itself (sampling, replay, the aging path, `provider_work.verification`)
 is completely unchanged either way; only what happens to a `'verified'`
 row differs:
@@ -123,9 +160,11 @@ unreplayed row was bad, only that the node's recent track record is poor.
 
 | Class | Parameter count | Rate |
 |---|---|---|
-| `small` | ≤ 13B | seeded `wayz_per_1k_tokens` (wei) |
-| `medium` | ≤ 34B | seeded `wayz_per_1k_tokens` (wei) |
-| `large` | > 34B | seeded `wayz_per_1k_tokens` (wei) |
+| `small` | ≤ 13B | `usd_micros_per_1k_tokens` = 20000 ($0.02) -- PLACEHOLDER |
+| `medium` | ≤ 34B | `usd_micros_per_1k_tokens` = 50000 ($0.05) -- PLACEHOLDER |
+| `large` | > 34B | `usd_micros_per_1k_tokens` = 100000 ($0.10) -- PLACEHOLDER |
+
+(The legacy `wayz_per_1k_tokens` column is kept but no longer read.)
 
 ### Model class is an exact allow-list, not a parse of the reported id (C1)
 
@@ -177,9 +216,9 @@ provider.**
 `src/services/gpu/earnings.py`'s `effective_model_class()` implements
 this; `model_class_for()` alone (no cap) is only used to decide payability.
 
-Earnings math is **integer wei throughout**: `amount_wei = (prompt_tokens +
-completion_tokens) * rate_wei_per_1k // 1000`, floored. Never floating
-point at this magnitude.
+Earnings math is **integer USD micros throughout**: `amount_usd_micros =
+(prompt_tokens + completion_tokens) * rate_usd_micros_per_1k // 1000`,
+floored. Never floating point for money.
 
 ### Log sliding-scale volume tiers (`provider_payout_tiers`)
 
@@ -188,8 +227,8 @@ On top of the model-class rate above, every payout is scaled by a
 **verified** token volume:
 
 ```
-amount_wei = ((prompt_tokens + completion_tokens) * rate_wei_per_1k // 1000)
-             * multiplier_bps // 10000
+amount_usd_micros = ((prompt_tokens + completion_tokens) * rate_usd_micros_per_1k // 1000)
+                    * multiplier_bps // 10000
 ```
 
 Both divisions floor, same integer-only rule as the base rate. The tier
@@ -208,7 +247,7 @@ is seeded with these **testnet placeholders**:
 handful of requests, and disappears should earn almost nothing, while a
 large, sustained community provider should be rewarded well above the
 flat per-token rate. A basis-points multiplier keeps every step of the
-math integer (never floats at wei magnitude).
+math integer (never floats for money).
 
 **Tunable without a deploy**: edit `provider_payout_tiers` directly
 (insert/update/delete rows) -- `src/db/gpu_payouts.py`'s
@@ -269,11 +308,12 @@ ever select or filter on `work_id`. No settlement code changed to support
 emission mode; see `tests/services/gpu/test_settlement.py`'s null-`work_id`
 coverage.
 
-Per **approved** provider: preview `'accrued'` earnings; pay out iff the
-preview sum is `>= COMMUNITY_MIN_PAYOUT_WAYZ` (default 10 WAYZ), the
-per-run cumulative cap (`COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ`, default
-100,000 WAYZ, shared across all providers in one run) isn't exceeded, and
-the rewards pool's live on-chain balance covers it.
+Per **approved** provider: preview `'accrued'` USD earnings; pay out iff
+the preview sum is `>= COMMUNITY_MIN_PAYOUT_USD` (default $5), the per-run
+cumulative cap (`COMMUNITY_MAX_PAYOUT_PER_RUN_USD`, default $5,000, shared
+across all providers in one run) isn't exceeded, and the payout pool's
+live ETH balance minus `PROVIDER_PAYOUT_GAS_RESERVE_WEI` (default 0.001
+ETH, left behind for gas) covers the converted wei amount.
 
 - **Idempotent**: a provider with an already-`'pending'` settlement (a
   prior run that crashed mid-flight) is skipped by `run_settlement_once`
@@ -318,7 +358,7 @@ Every settlement run first sweeps `provider_settlements` rows stuck
 2. **Everything else** -- no `tx_hash` at all (crashed before `transfer()`
    even returned), a receipt showing an on-chain revert (`status == 0`),
    or no receipt found after being stuck this long (very likely
-   dropped/never broadcast on a ~2s-block chain) -- mark `'failed'` and
+   dropped/never broadcast on Base's ~2s blocks) -- mark `'failed'` and
    revert its earnings to `'accrued'` so a future run retries them.
 
 **The one real risk this automatic sweep creates**: if the original
@@ -327,25 +367,30 @@ lands on-chain LATER than the 2h threshold, a provider whose earnings
 were reverted-and-retried by the sweep would end up paid twice once both
 transfers land. **Manual check before trusting an automatic-sweep
 outcome you're unsure about**: look up the pool EOA's address on
-[Snowtrace testnet](https://testnet.snowtrace.io) and search its recent
+[Basescan](https://basescan.org) and search its recent
 transaction history for the swept settlement's `error` field's mention of
 a `tx_hash` (if any) or the timeframe around its `created_at` -- confirm
 nothing landed before manually re-approving further settlement for that
 provider.
 
-- **No-op today**: `WAYZ_REWARDS_POOL_PRIVATE_KEY` is unset (nothing
-  deployed to the `providerRewardsPool` EOA on Fuji yet) -- the scheduler
-  doesn't even start until it's configured, matching the WAYZ staking
+- **No-op until funded**: while `PROVIDER_PAYOUT_POOL_PRIVATE_KEY` is
+  unset the scheduler doesn't even start, matching the WAYZ staking
   sync's and faucet's established "unset config → clean no-op" pattern.
-  Earnings still accrue normally in the meantime; nothing is lost, payout
-  is just deferred until the key is provisioned.
+  Earnings still accrue (in USD) normally in the meantime; nothing is
+  lost, payout is just deferred until the key is provisioned and the EOA
+  holds ETH on Base.
 
 ## Provider-facing endpoint
 
-`GET /gpu/providers/me/earnings` (auth) returns wei-string totals
-(`accrued_wei`/`settled_wei`/`void_wei`), the last 50 `provider_work` rows
-(billing_ref, model, token counts, verification -- no hashes), settlements
-with a `https://testnet.snowtrace.io/tx/{tx_hash}` link, and a `tier`
+`GET /gpu/providers/me/earnings` (auth) returns totals as
+`{accrued,settled,void}_usd` (decimal string) and `_usd_micros` (int), plus
+the legacy WAYZ `{accrued,settled,void}_wei` strings for pre-switch
+history, and `payout_asset: "ETH"`, `payout_chain: "base"`; the last 50
+`provider_work` rows (billing_ref, model, token counts, verification -- no
+hashes); settlements with `asset`, `chain`, `amount_usd`, `amount_wei`
+(in the settlement's asset), `eth_usd_price`, and a
+`https://basescan.org/tx/{tx_hash}` link (Snowtrace for legacy WAYZ rows);
+and a `tier`
 object so an operator can see where they stand on the sliding scale:
 `{current_volume_7d, multiplier_bps, next_tier_min_tokens_7d}` --
 `next_tier_min_tokens_7d` is `null` once the provider is at (or above) the
@@ -364,9 +409,16 @@ client-supplied `provider_id`.
 | `COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN` | `5` | per-node cap on live replay calls per run |
 | `COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS` | `0.5` | delay between sequential replay attempts |
 | `COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS` | `48` | how far back the verifier job retries missing-earnings recovery |
-| `WAYZ_REWARDS_POOL_PRIVATE_KEY` | unset | `providerRewardsPool` EOA signing key; settlement no-ops until set |
-| `COMMUNITY_MIN_PAYOUT_WAYZ` | `10` | minimum accrued balance to trigger a payout |
-| `COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ` | `100000` | cumulative cap per settlement run |
+| `PROVIDER_PAYOUT_ASSET` | `ETH` | payout asset; only `ETH` is supported |
+| `PROVIDER_PAYOUT_POOL_PRIVATE_KEY` | unset | payout pool EOA signing key (holds ETH on Base); settlement no-ops until set |
+| `BASE_RPC_URL` | `https://mainnet.base.org` | Base JSON-RPC (use a paid endpoint in prod) |
+| `BASE_CHAIN_ID` | `8453` | Base mainnet |
+| `BASE_ETH_USD_FEED_ADDRESS` | `0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70` | Chainlink ETH/USD aggregator on Base |
+| `ETH_USD_PRICE_MAX_AGE_SECONDS` | `3600` | older feed answer → run aborts, nobody paid |
+| `PROVIDER_PAYOUT_GAS_RESERVE_WEI` | `1000000000000000` | ETH always left in the pool for gas |
+| `COMMUNITY_MIN_PAYOUT_USD` | `5` | minimum accrued USD to trigger a payout |
+| `COMMUNITY_MAX_PAYOUT_PER_RUN_USD` | `5000` | cumulative USD cap per settlement run |
+| `PROVIDER_EMISSION_USD_PER_DAY` | `100` | emission mode only: USD/day split across providers by score |
 | `COMMUNITY_SETTLEMENT_INTERVAL_HOURS` | `24` | settlement job interval |
 | `COMMUNITY_SETTLEMENT_STUCK_HOURS` | `2` | how long a settlement can sit `'pending'` before the automatic reconciliation sweep resolves it |
 

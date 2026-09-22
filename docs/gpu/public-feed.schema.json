@@ -132,6 +132,18 @@
               "title": "Mode",
               "type": "string"
             },
+            "provider_payout_asset": {
+              "default": "ETH",
+              "description": "Provider payout asset",
+              "title": "Provider Payout Asset",
+              "type": "string"
+            },
+            "provider_pool_usd_per_day": {
+              "default": "0",
+              "description": "USD/day allocated to providers by score, paid in ETH on Base",
+              "title": "Provider Pool Usd Per Day",
+              "type": "string"
+            },
             "providers_bps": {
               "title": "Providers Bps",
               "type": "integer"

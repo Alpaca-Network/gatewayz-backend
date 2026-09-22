@@ -66,6 +66,7 @@ def create_epoch(
     stakers_paid: int,
     status: str,
     summary: dict[str, Any],
+    providers_usd_micros: int | None = None,
 ) -> dict[str, Any] | None:
     """Insert the emission_epochs row for one day. Returns the created row,
     or None on any failure -- including the epoch_date PK conflict (a
@@ -87,6 +88,7 @@ def create_epoch(
                     "stakers_paid": stakers_paid,
                     "status": status,
                     "summary": summary,
+                    "providers_usd_micros": providers_usd_micros,
                 }
             )
             .execute()

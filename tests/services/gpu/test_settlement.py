@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.services.chain.eth_payout_client import EthUsdPrice
 from src.services.gpu.settlement import reconcile_stuck_settlements, run_settlement_once
+
+# answer=1e12 with 0 decimals makes usd_micros_to_wei the identity
+# (wei == usd_micros), so these tests can reason in one unit. Real
+# conversion math is covered in tests/services/chain/test_eth_payout_client.py.
+_IDENTITY_PRICE_ANSWER = 10**12
 
 
 @pytest.fixture
@@ -19,8 +25,18 @@ def _client(
     transfer_error=None,
     receipt=None,
     receipt_error=None,
+    price=None,
+    price_error=None,
 ):
+    import time
+
     client = MagicMock()
+    if price_error is not None:
+        client.eth_usd_price.side_effect = price_error
+    else:
+        client.eth_usd_price.return_value = price or EthUsdPrice(
+            answer=_IDENTITY_PRICE_ANSWER, decimals=0, updated_at=int(time.time())
+        )
     client.pool_balance_wei.return_value = pool_balance_wei
     if transfer_error is not None:
         client.transfer = AsyncMock(side_effect=transfer_error)
@@ -37,8 +53,8 @@ def _provider(provider_id=1, wallet="0xwallet"):
     return {"id": provider_id, "payout_wallet_address": wallet, "status": "approved"}
 
 
-def _earning(earning_id, amount_wei):
-    return {"id": earning_id, "amount_wei": str(amount_wei)}
+def _earning(earning_id, amount_usd_micros):
+    return {"id": earning_id, "amount_usd_micros": amount_usd_micros}
 
 
 _PATCH_TARGETS = (
@@ -86,21 +102,23 @@ def _patched(**overrides):
 @pytest.mark.asyncio
 async def test_settlement_pays_provider_above_min_payout(sb):
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider()],
-            list_accrued_earnings=[_earning(1, 20 * 10**18)],
+            list_accrued_earnings=[_earning(1, 20 * 10**6)],
         )
         with stack:
             client = _client()
             result = await run_settlement_once(client)
 
     assert result.settlements_sent == 1
-    assert result.total_sent_wei == 20 * 10**18
-    client.transfer.assert_called_once_with("0xwallet", 20 * 10**18)
+    assert result.total_sent_wei == 20 * 10**6
+    client.transfer.assert_called_once_with("0xwallet", 20 * 10**6)
     mocks["mark_settlement_sent"].assert_called_once_with(99, "0xtxhash")
     mocks["mark_earnings_settled"].assert_called_once_with([1], 99)
 
@@ -108,13 +126,15 @@ async def test_settlement_pays_provider_above_min_payout(sb):
 @pytest.mark.asyncio
 async def test_settlement_skips_provider_below_min_payout(sb):
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider()],
-            list_accrued_earnings=[_earning(1, 5 * 10**18)],  # below 10 WAYZ min
+            list_accrued_earnings=[_earning(1, 5 * 10**6)],  # below $10 min
         )
         with stack:
             client = _client()
@@ -129,14 +149,16 @@ async def test_settlement_skips_provider_below_min_payout(sb):
 @pytest.mark.asyncio
 async def test_settlement_is_idempotent_for_a_pending_settlement(sb):
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider()],
             get_pending_settlement={"id": 5, "status": "pending"},
-            list_accrued_earnings=[_earning(1, 20 * 10**18)],
+            list_accrued_earnings=[_earning(1, 20 * 10**6)],
         )
         with stack:
             client = _client()
@@ -151,14 +173,16 @@ async def test_settlement_is_idempotent_for_a_pending_settlement(sb):
 @pytest.mark.asyncio
 async def test_settlement_respects_per_run_cap_across_providers(sb):
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 30  # 30 WAYZ cap this run
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 30  # $30 cap this run
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         providers = [_provider(1, "0xwallet1"), _provider(2, "0xwallet2")]
         earnings_by_provider = {
-            1: [_earning(1, 20 * 10**18)],
-            2: [_earning(2, 20 * 10**18)],  # second provider would exceed the 30 WAYZ cap
+            1: [_earning(1, 20 * 10**6)],
+            2: [_earning(2, 20 * 10**6)],  # second provider would exceed the $30 cap
         }
 
         stack, mocks = _patched(list_approved_providers=providers)
@@ -169,22 +193,24 @@ async def test_settlement_respects_per_run_cap_across_providers(sb):
 
     assert result.settlements_sent == 1
     assert result.providers_skipped_cap == 1
-    client.transfer.assert_called_once_with("0xwallet1", 20 * 10**18)
+    client.transfer.assert_called_once_with("0xwallet1", 20 * 10**6)
 
 
 @pytest.mark.asyncio
 async def test_settlement_skips_when_pool_balance_insufficient(sb):
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider()],
-            list_accrued_earnings=[_earning(1, 20 * 10**18)],
+            list_accrued_earnings=[_earning(1, 20 * 10**6)],
         )
         with stack:
-            client = _client(pool_balance_wei=5 * 10**18)  # less than owed
+            client = _client(pool_balance_wei=5 * 10**6)  # less than owed
             result = await run_settlement_once(client)
 
     assert result.settlements_sent == 0
@@ -196,13 +222,15 @@ async def test_settlement_skips_when_pool_balance_insufficient(sb):
 @pytest.mark.asyncio
 async def test_settlement_marks_failed_and_keeps_earnings_accrued_on_transfer_error(sb):
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider()],
-            list_accrued_earnings=[_earning(1, 20 * 10**18)],
+            list_accrued_earnings=[_earning(1, 20 * 10**6)],
         )
         with stack:
             client = _client(transfer_error=RuntimeError("rpc down"))
@@ -218,13 +246,15 @@ async def test_settlement_marks_failed_and_keeps_earnings_accrued_on_transfer_er
 @pytest.mark.asyncio
 async def test_settlement_skips_provider_with_no_payout_wallet(sb):
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider(wallet=None)],
-            list_accrued_earnings=[_earning(1, 20 * 10**18)],
+            list_accrued_earnings=[_earning(1, 20 * 10**6)],
         )
         with stack:
             client = _client()
@@ -238,9 +268,11 @@ async def test_settlement_skips_provider_with_no_payout_wallet(sb):
 @pytest.mark.asyncio
 async def test_settlement_aborts_run_when_pool_balance_lookup_fails(sb):
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(list_approved_providers=[_provider()])
         with stack:
@@ -265,27 +297,29 @@ async def test_settlement_uses_the_atomic_flip_amount_not_the_preview(sb):
     source of truth for what gets transferred and later marked settled,
     not the stale preview."""
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider()],
-            list_accrued_earnings=[_earning(1, 20 * 10**18), _earning(2, 20 * 10**18)],
+            list_accrued_earnings=[_earning(1, 20 * 10**6), _earning(2, 20 * 10**6)],
         )
         with stack:
             # The atomic flip only claims earning 1 -- earning 2 was voided
             # by a concurrent spot-check failure between preview and flip.
             mocks["mark_earnings_settling"].side_effect = None
-            mocks["mark_earnings_settling"].return_value = [_earning(1, 20 * 10**18)]
+            mocks["mark_earnings_settling"].return_value = [_earning(1, 20 * 10**6)]
             client = _client()
             result = await run_settlement_once(client)
 
     assert result.settlements_sent == 1
-    assert result.total_sent_wei == 20 * 10**18  # NOT 40 -- the flip's amount, not the preview's
-    client.transfer.assert_called_once_with("0xwallet", 20 * 10**18)
+    assert result.total_sent_wei == 20 * 10**6  # NOT 40 -- the flip's amount, not the preview's
+    client.transfer.assert_called_once_with("0xwallet", 20 * 10**6)
     mocks["mark_earnings_settled"].assert_called_once_with([1], 99)
-    mocks["update_settlement_amount"].assert_called_once_with(99, 20 * 10**18)
+    mocks["update_settlement_amount"].assert_called_once_with(99, 20 * 10**6, 20 * 10**6)
 
 
 @pytest.mark.asyncio
@@ -294,13 +328,15 @@ async def test_settlement_reverts_and_fails_when_flip_claims_nothing(sb):
     flip every one of them had already been voided -- must fail cleanly,
     not transfer 0 wei."""
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider()],
-            list_accrued_earnings=[_earning(1, 20 * 10**18)],
+            list_accrued_earnings=[_earning(1, 20 * 10**6)],
         )
         with stack:
             mocks["mark_earnings_settling"].side_effect = None
@@ -319,18 +355,20 @@ async def test_settlement_reverts_when_flip_amount_falls_below_min_after_race(sb
     amount doesn't -- must revert the claimed earnings back to accrued,
     not transfer below the configured minimum."""
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider()],
-            list_accrued_earnings=[_earning(1, 20 * 10**18), _earning(2, 20 * 10**18)],
+            list_accrued_earnings=[_earning(1, 20 * 10**6), _earning(2, 20 * 10**6)],
         )
         with stack:
-            # Only a tiny sliver survived the race -- below the 10 WAYZ minimum.
+            # Only a tiny sliver survived the race -- below the $10 minimum.
             mocks["mark_earnings_settling"].side_effect = None
-            mocks["mark_earnings_settling"].return_value = [_earning(1, 1 * 10**18)]
+            mocks["mark_earnings_settling"].return_value = [_earning(1, 1 * 10**6)]
             client = _client()
             result = await run_settlement_once(client)
 
@@ -364,7 +402,7 @@ def _patched_reconcile(**overrides):
     for target in _RECONCILE_TARGETS:
         name = target.rsplit(".", 1)[-1]
         mocks[name] = stack.enter_context(patch(target))
-    mocks["list_settling_earnings_for_settlement"].return_value = [_earning(1, 20 * 10**18)]
+    mocks["list_settling_earnings_for_settlement"].return_value = [_earning(1, 20 * 10**6)]
     for key, value in overrides.items():
         mocks[key].return_value = value
     return stack, mocks
@@ -449,15 +487,17 @@ async def test_settlement_pays_an_emission_mode_earning_with_null_work_id(sb):
     docs/gpu/VERIFICATION_AND_PAYOUTS.md's "Settlement" section."""
     emission_earning = {
         "id": 1,
-        "amount_wei": str(20 * 10**18),
+        "amount_usd_micros": 20 * 10**6,
         "work_id": None,
         "source": "emission",
         "epoch_date": "2026-09-12",
     }
     with patch("src.services.gpu.settlement.Config") as mock_config:
-        mock_config.COMMUNITY_MIN_PAYOUT_WAYZ = 10
-        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = 100_000
+        mock_config.COMMUNITY_MIN_PAYOUT_USD = 10
+        mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = 100_000
         mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+        mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
 
         stack, mocks = _patched(
             list_approved_providers=[_provider()],
@@ -468,6 +508,110 @@ async def test_settlement_pays_an_emission_mode_earning_with_null_work_id(sb):
             result = await run_settlement_once(client)
 
     assert result.settlements_sent == 1
-    assert result.total_sent_wei == 20 * 10**18
-    client.transfer.assert_called_once_with("0xwallet", 20 * 10**18)
+    assert result.total_sent_wei == 20 * 10**6
+    client.transfer.assert_called_once_with("0xwallet", 20 * 10**6)
     mocks["mark_earnings_settled"].assert_called_once_with([1], 99)
+
+
+# ---------------------------------------------------------------------------
+# ETH-on-Base specifics (2026-09-22): price gate, real conversion, gas reserve
+# ---------------------------------------------------------------------------
+
+
+def _eth_config(mock_config):
+    mock_config.COMMUNITY_MIN_PAYOUT_USD = "10"
+    mock_config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD = "5000"
+    mock_config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS = 24
+    mock_config.ETH_USD_PRICE_MAX_AGE_SECONDS = 3600
+    mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 0
+
+
+@pytest.mark.asyncio
+async def test_settlement_aborts_without_paying_when_price_is_stale(sb):
+    import time
+
+    with patch("src.services.gpu.settlement.Config") as mock_config:
+        _eth_config(mock_config)
+        stack, mocks = _patched(
+            list_approved_providers=[_provider()],
+            list_accrued_earnings=[_earning(1, 20 * 10**6)],
+        )
+        with stack:
+            stale = EthUsdPrice(answer=3000 * 10**8, decimals=8, updated_at=int(time.time()) - 7200)
+            client = _client(price=stale)
+            result = await run_settlement_once(client)
+
+    assert result.aborted_reason is not None
+    assert result.aborted_reason.startswith("stale_price")
+    client.transfer.assert_not_called()
+    mocks["create_settlement"].assert_not_called()
+    mocks["mark_earnings_settling"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_settlement_aborts_without_paying_when_price_read_fails(sb):
+    with patch("src.services.gpu.settlement.Config") as mock_config:
+        _eth_config(mock_config)
+        stack, mocks = _patched(
+            list_approved_providers=[_provider()],
+            list_accrued_earnings=[_earning(1, 20 * 10**6)],
+        )
+        with stack:
+            client = _client(price_error=RuntimeError("rpc down"))
+            result = await run_settlement_once(client)
+
+    assert result.aborted_reason.startswith("price_unavailable")
+    client.transfer.assert_not_called()
+    mocks["create_settlement"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_settlement_converts_usd_to_eth_wei_at_the_feed_price(sb):
+    """$30 at $3000/ETH (Chainlink 8-decimals answer) == 0.01 ETH."""
+    import time
+
+    with patch("src.services.gpu.settlement.Config") as mock_config:
+        _eth_config(mock_config)
+        stack, mocks = _patched(
+            list_approved_providers=[_provider()],
+            list_accrued_earnings=[_earning(1, 30 * 10**6)],
+        )
+        with stack:
+            price = EthUsdPrice(answer=3000 * 10**8, decimals=8, updated_at=int(time.time()))
+            client = _client(pool_balance_wei=10**18, price=price)
+            result = await run_settlement_once(client)
+
+    assert result.settlements_sent == 1
+    assert result.total_sent_usd_micros == 30 * 10**6
+    assert result.total_sent_wei == 10**16
+    assert result.eth_usd_price == "3000"
+    client.transfer.assert_called_once_with("0xwallet", 10**16)
+    args = mocks["create_settlement"].call_args.args
+    # (provider_id, period_start, period_end, usd_micros, wei, price, price_updated_at)
+    assert args[0] == 1
+    assert args[3] == 30 * 10**6
+    assert args[4] == 10**16
+    assert args[5] == "3000"
+
+
+@pytest.mark.asyncio
+async def test_settlement_keeps_a_gas_reserve_in_the_pool(sb):
+    """Pool holds exactly the payout but the gas reserve must stay behind --
+    the provider is deferred (insufficient pool), not paid."""
+    import time
+
+    with patch("src.services.gpu.settlement.Config") as mock_config:
+        _eth_config(mock_config)
+        mock_config.PROVIDER_PAYOUT_GAS_RESERVE_WEI = 10**15
+        stack, mocks = _patched(
+            list_approved_providers=[_provider()],
+            list_accrued_earnings=[_earning(1, 30 * 10**6)],
+        )
+        with stack:
+            price = EthUsdPrice(answer=3000 * 10**8, decimals=8, updated_at=int(time.time()))
+            client = _client(pool_balance_wei=10**16, price=price)
+            result = await run_settlement_once(client)
+
+    assert result.providers_skipped_insufficient_pool == 1
+    client.transfer.assert_not_called()
+    mocks["create_settlement"].assert_not_called()

@@ -21,7 +21,12 @@ def test_earnings_returns_totals_work_and_settlements(
     mock_get_provider, mock_totals, mock_work, mock_settlements, mock_volume, mock_tiers
 ):
     mock_get_provider.return_value = {"id": 5, "user_id": 42}
-    mock_totals.return_value = {"accrued": 1000, "settled": 2000, "void": 300}
+    mock_totals.return_value = {
+        "accrued": 1_000_000,
+        "settled": 2_000_000,
+        "void": 300_000,
+        "wayz_wei": {"accrued": 0, "settled": 2000, "void": 0},
+    }
     mock_work.return_value = [
         {
             "billing_ref": "br-1",
@@ -43,7 +48,21 @@ def test_earnings_returns_totals_work_and_settlements(
             "tx_hash": "0xabc123",
             "error": None,
             "created_at": "2026-09-02T00:00:00Z",
-        }
+        },
+        {
+            "id": 2,
+            "period_start": "2026-09-22T00:00:00Z",
+            "period_end": "2026-09-23T00:00:00Z",
+            "asset": "ETH",
+            "chain": "base",
+            "amount_usd_micros": 30_000_000,
+            "amount_wei": str(10**16),
+            "eth_usd_price": "3000.00000000",
+            "status": "sent",
+            "tx_hash": "0xdef456",
+            "error": None,
+            "created_at": "2026-09-23T00:00:00Z",
+        },
     ]
     mock_volume.return_value = 150000
     mock_tiers.return_value = [
@@ -56,10 +75,24 @@ def test_earnings_returns_totals_work_and_settlements(
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["totals"] == {"accrued_wei": "1000", "settled_wei": "2000", "void_wei": "300"}
+    assert data["totals"]["payout_asset"] == "ETH"
+    assert data["totals"]["accrued_usd"] == "1"
+    assert data["totals"]["settled_usd"] == "2"
+    assert data["totals"]["void_usd_micros"] == 300_000
+    assert data["totals"]["settled_wei"] == "2000"  # legacy WAYZ history still exposed
     assert data["work"][0]["billing_ref"] == "br-1"
     assert "prompt_hash" not in data["work"][0]
+    # legacy WAYZ settlement (no asset column) -> Snowtrace
+    assert data["settlements"][0]["asset"] == "WAYZ"
     assert data["settlements"][0]["tx_url"] == "https://testnet.snowtrace.io/tx/0xabc123"
+    # ETH-on-Base settlement -> Basescan, with USD + price exposed
+    eth = data["settlements"][1]
+    assert eth["asset"] == "ETH"
+    assert eth["chain"] == "base"
+    assert eth["amount_usd"] == "30"
+    assert eth["amount_wei"] == str(10**16)
+    assert eth["eth_usd_price"] == "3000.00000000"
+    assert eth["tx_url"] == "https://basescan.org/tx/0xdef456"
     assert data["tier"] == {
         "current_volume_7d": 150000,
         "multiplier_bps": 2500,

@@ -1,4 +1,5 @@
-"""DB access for community-GPU verification + WAYZ payouts
+"""DB access for community-GPU verification + provider payouts (USD-denominated,
+paid in ETH on Base since 2026-09-22; legacy WAYZ/wei columns kept for history)
 (gatewayz-backend#2265, #2266; m4/spec.md §2, §5).
 
 Mirrors src/db/wallet_stakes.py's try/except + logger.warning + safe-default
@@ -63,21 +64,21 @@ _PAYOUT_TIERS_CACHE_TTL = 60.0
 # ---------------------------------------------------------------------------
 
 
-def get_payout_rate_wei_per_1k(model_class: str) -> int | None:
-    """wayz_per_1k_tokens (wei) for a model class, or None if unseeded/on error."""
+def get_payout_rate_usd_micros_per_1k(model_class: str) -> int | None:
+    """usd_micros_per_1k_tokens for a model class, or None if unseeded/on error."""
     try:
         client = get_supabase_client()
         result = (
             client.table(_RATES_TABLE)
-            .select("wayz_per_1k_tokens")
+            .select("usd_micros_per_1k_tokens")
             .eq("model_class", model_class)
             .execute()
         )
-        if not result.data:
+        if not result.data or result.data[0].get("usd_micros_per_1k_tokens") is None:
             return None
-        return int(result.data[0]["wayz_per_1k_tokens"])
+        return int(result.data[0]["usd_micros_per_1k_tokens"])
     except Exception as e:
-        logger.warning(f"provider_payout_rates lookup failed for {model_class}: {e}")
+        logger.warning(f"provider_payout_rates USD lookup failed for {model_class}: {e}")
         return None
 
 
@@ -404,8 +405,8 @@ def work_24h_stats() -> dict[str, int]:
         return stats
 
 
-def earnings_totals_all() -> dict[str, int]:
-    """{'accrued': wei, 'settling': wei, 'settled': wei, 'void': wei} totals
+def earnings_totals_all() -> dict:
+    """{'accrued', 'settling', 'settled', 'void'} USD-micros totals
     across ALL providers, for the admin WAYZ ops status endpoint. Unlike
     earnings_totals(provider_id), this also includes 'settling' (money
     claimed by an in-flight settlement but not yet confirmed sent).
@@ -415,15 +416,11 @@ def earnings_totals_all() -> dict[str, int]:
         client = get_supabase_client()
         result = (
             client.table(_EARNINGS_TABLE)
-            .select("amount_wei,status")
+            .select("amount_usd_micros,amount_wei,status")
             .limit(_WORK_QUERY_ROW_CAP)
             .execute()
         )
-        for row in result.data or []:
-            status = row.get("status")
-            if status in totals:
-                totals[status] += int(row["amount_wei"])
-        return totals
+        return _usd_totals(result.data or [], tuple(totals))
     except Exception as e:
         logger.warning(f"provider_earnings global totals failed: {e}")
         return totals
@@ -533,7 +530,7 @@ def _is_duplicate_error(error: Exception) -> bool:
 def create_earning(
     provider_id: int,
     work_id: int,
-    amount_wei: int,
+    amount_usd_micros: int,
     multiplier_bps: int | None = None,
     volume_7d_at_accrual: int | None = None,
 ) -> tuple[dict | None, str]:
@@ -562,7 +559,7 @@ def create_earning(
     payload: dict[str, object] = {
         "provider_id": provider_id,
         "work_id": work_id,
-        "amount_wei": str(amount_wei),
+        "amount_usd_micros": amount_usd_micros,
         "status": "accrued",
     }
     if multiplier_bps is not None:
@@ -582,9 +579,9 @@ def create_earning(
 
 
 def create_emission_earning(
-    provider_id: int, epoch_date: str, amount_wei: int
+    provider_id: int, epoch_date: str, amount_usd_micros: int
 ) -> tuple[dict | None, str]:
-    """Insert an 'accrued' provider_earnings row for a daily WAYZ emission
+    """Insert an 'accrued' provider_earnings row for a daily USD emission
     allocation (Chutes-style emission rewards, gatewayz-backend
     tokenomics) -- source='emission', work_id=NULL, epoch_date set.
 
@@ -606,7 +603,7 @@ def create_emission_earning(
     payload: dict[str, object] = {
         "provider_id": provider_id,
         "work_id": None,
-        "amount_wei": str(amount_wei),
+        "amount_usd_micros": amount_usd_micros,
         "status": "accrued",
         "source": "emission",
         "epoch_date": epoch_date,
@@ -656,6 +653,7 @@ def list_accrued_earnings(provider_id: int) -> list[dict]:
             .select("*")
             .eq("provider_id", provider_id)
             .eq("status", "accrued")
+            .not_.is_("amount_usd_micros", "null")
             .limit(_WORK_QUERY_ROW_CAP)
             .execute()
         )
@@ -665,24 +663,39 @@ def list_accrued_earnings(provider_id: int) -> list[dict]:
         return []
 
 
-def earnings_totals(provider_id: int) -> dict[str, int]:
-    """{'accrued': wei, 'settled': wei, 'void': wei} totals for a provider.
-    Zeroed out on error."""
-    totals = {"accrued": 0, "settled": 0, "void": 0}
+def _usd_totals(rows: list[dict], statuses: tuple[str, ...]) -> dict:
+    """Per-status USD-micros totals, plus a nested 'wayz_wei' dict of the
+    same statuses summed over legacy WAYZ-denominated rows (amount_wei,
+    pre-2026-09-22) so existing clients keep seeing their history."""
+    totals: dict = dict.fromkeys(statuses, 0)
+    legacy: dict[str, int] = dict.fromkeys(statuses, 0)
+    for row in rows:
+        status = row.get("status")
+        if status not in totals:
+            continue
+        amount = row.get("amount_usd_micros")
+        if amount is not None:
+            totals[status] += int(amount)
+        elif row.get("amount_wei") is not None:
+            legacy[status] += int(row["amount_wei"])
+    totals["wayz_wei"] = legacy
+    return totals
+
+
+def earnings_totals(provider_id: int) -> dict:
+    """{'accrued', 'settled', 'void'} USD-micros totals for a provider, plus
+    'wayz_wei' (the same statuses for legacy WAYZ rows). Zeroed on error."""
+    totals: dict = {"accrued": 0, "settled": 0, "void": 0}
     try:
         client = get_supabase_client()
         result = (
             client.table(_EARNINGS_TABLE)
-            .select("amount_wei,status")
+            .select("amount_usd_micros,amount_wei,status")
             .eq("provider_id", provider_id)
             .limit(_WORK_QUERY_ROW_CAP)
             .execute()
         )
-        for row in result.data or []:
-            status = row.get("status")
-            if status in totals:
-                totals[status] += int(row["amount_wei"])
-        return totals
+        return _usd_totals(result.data or [], tuple(totals))
     except Exception as e:
         logger.warning(f"provider_earnings totals failed for provider {provider_id}: {e}")
         return totals
@@ -691,7 +704,7 @@ def earnings_totals(provider_id: int) -> dict[str, int]:
 def mark_earnings_settling(provider_id: int, settlement_id: int) -> list[dict]:
     """Atomically flip a provider's 'accrued' earnings to 'settling',
     tagged with settlement_id, and return exactly the rows that were
-    flipped (id + amount_wei). PR #2288 review I4 fix: this single
+    flipped (id + amount_usd_micros). PR #2288 review I4 fix: this single
     UPDATE ... WHERE status='accrued' is the race-safety mechanism --
     Postgres applies it as one statement, so a concurrent
     void_earning_for_work (which also only ever matches status='accrued')
@@ -710,6 +723,9 @@ def mark_earnings_settling(provider_id: int, settlement_id: int) -> list[dict]:
             .update({"status": "settling", "settlement_id": settlement_id})
             .eq("provider_id", provider_id)
             .eq("status", "accrued")
+            # Only USD-denominated rows -- legacy WAYZ rows (amount_usd_micros
+            # NULL) are never paid out in ETH.
+            .not_.is_("amount_usd_micros", "null")
             .execute()
         )
         return result.data or []
@@ -853,8 +869,16 @@ def list_stuck_pending_settlements(older_than_iso: str) -> list[dict]:
 
 
 def create_settlement(
-    provider_id: int, period_start_iso: str, period_end_iso: str, amount_wei: int
+    provider_id: int,
+    period_start_iso: str,
+    period_end_iso: str,
+    amount_usd_micros: int,
+    amount_wei: int,
+    eth_usd_price: str,
+    price_updated_at_iso: str,
 ) -> dict | None:
+    """Insert a 'pending' ETH-on-Base settlement row. amount_wei is the ETH
+    amount at eth_usd_price (USD per ETH, decimal string)."""
     try:
         client = get_supabase_client()
         result = (
@@ -864,7 +888,12 @@ def create_settlement(
                     "provider_id": provider_id,
                     "period_start": period_start_iso,
                     "period_end": period_end_iso,
+                    "amount_usd_micros": amount_usd_micros,
                     "amount_wei": str(amount_wei),
+                    "eth_usd_price": eth_usd_price,
+                    "price_updated_at": price_updated_at_iso,
+                    "asset": "ETH",
+                    "chain": "base",
                     "status": "pending",
                 }
             )
@@ -876,16 +905,16 @@ def create_settlement(
         return None
 
 
-def update_settlement_amount(settlement_id: int, amount_wei: int) -> bool:
-    """Persist the authoritative amount_wei once it's known from the
-    atomic mark_earnings_settling() flip -- the row is created with a
-    provisional 0 before that flip happens (a settlement_id is needed to
-    tag the flipped earnings, so the row must exist first)."""
+def update_settlement_amount(settlement_id: int, amount_usd_micros: int, amount_wei: int) -> bool:
+    """Persist the authoritative amounts once known from the atomic
+    mark_earnings_settling() flip -- the row is created with the preview
+    amount before that flip happens (a settlement_id is needed to tag the
+    flipped earnings, so the row must exist first)."""
     try:
         client = get_supabase_client()
-        client.table(_SETTLEMENTS_TABLE).update({"amount_wei": str(amount_wei)}).eq(
-            "id", settlement_id
-        ).execute()
+        client.table(_SETTLEMENTS_TABLE).update(
+            {"amount_usd_micros": amount_usd_micros, "amount_wei": str(amount_wei)}
+        ).eq("id", settlement_id).execute()
         return True
     except Exception as e:
         logger.warning(f"provider_settlements amount update failed for {settlement_id}: {e}")

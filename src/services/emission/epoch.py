@@ -23,6 +23,17 @@ per-row unique indexes are the DB-level backstop -- letting a crash
 mid-run recover cleanly on retry (whatever was already written is a
 no-op 'duplicate'/'skipped' outcome, and whatever wasn't gets created).
 
+**Provider payouts are USD, paid in ETH (2026-09-22):** WAYZ is not
+going public for now, so providers no longer receive the 41% WAYZ
+providers leg. Instead Config.PROVIDER_EMISSION_USD_PER_DAY (integer USD
+micro-dollars internally) is allocated by the SAME 7-day score, written
+as provider_earnings.amount_usd_micros, and paid in native ETH on Base by
+src/services/gpu/settlement.py. The WAYZ 41/41/18 split itself is
+unchanged (stakers still receive their 41% as inference credits); the
+unpaid WAYZ providers leg is recorded as providers_wei=0 and folded into
+treasury_wei, so providers + stakers + treasury == emission_wei still
+holds exactly.
+
 Amounts are Decimal end-to-end via src.services.emission.scoring's pure
 functions; float only appears at the add_credits_to_user() call boundary
 for the staker credits path (same boundary staking_rewards.py already
@@ -67,6 +78,7 @@ from src.services.staking_rewards import (
 logger = logging.getLogger(__name__)
 
 _WEI_PER_WAYZ = Decimal(10) ** 18
+_USD_MICROS = Decimal(1_000_000)
 _CREDITS_DP = Decimal("0.000001")  # 6 dp, matches staking_reward_accruals.credits numeric(18,6)
 _WINDOW_DAYS = 7
 _WINDOW_HOURS = _WINDOW_DAYS * 24
@@ -223,19 +235,22 @@ def _score_row_for_db(epoch_date_str: str, result) -> dict[str, Any]:
         "raw_score": str(result.raw_score),
         "adjusted_score": str(result.adjusted_score),
         "share": str(result.share),
-        "allocation_wei": str(result.allocation_wei),
+        # score_providers is unit-agnostic; the pool handed to it is USD
+        # micros, so its `allocation_wei` field is USD micros here.
+        "allocation_wei": "0",
+        "allocation_usd_micros": result.allocation_wei,
         "tier_multiplier_bps": result.tier_multiplier_bps,
         "details": {},
     }
 
 
 def _score_and_persist_providers(
-    epoch_date_str: str, window_start_iso: str, window_end_iso: str, providers_wei: int
+    epoch_date_str: str, window_start_iso: str, window_end_iso: str, providers_usd_micros: int
 ) -> tuple[list, int]:
     """Score every eligible provider over [window_start_iso, window_end_iso)
     and persist provider_scores + one provider_earnings(source='emission')
-    row per provider with a nonzero allocation. Returns (per-provider
-    score results, dust_wei to fold into treasury_wei)."""
+    row per provider with a nonzero allocation of the day's USD pool.
+    Returns (per-provider score results, unallocated dust in USD micros)."""
     work_rows = list_verified_work_window(window_start_iso, window_end_iso)
     reference_provider_configured = bool(Config.COMMUNITY_SPOTCHECK_REFERENCE_PROVIDER)
     buckets = _aggregate_provider_buckets(work_rows, reference_provider_configured)
@@ -248,18 +263,18 @@ def _score_and_persist_providers(
 
     if not eligible_ids:
         logger.info(
-            "emission_epoch: no eligible providers for %s -- the entire providers_wei "
-            "pool (%s wei) is dust routed to treasury",
+            "emission_epoch: no eligible providers for %s -- the provider USD pool "
+            "(%s USD micros) goes unallocated",
             epoch_date_str,
-            providers_wei,
+            providers_usd_micros,
         )
-        return [], providers_wei
+        return [], providers_usd_micros
 
     metrics = _build_provider_metrics(eligible_ids, buckets)
     tiers = get_payout_tiers()
-    results, dust_wei = score_providers(
+    results, dust_usd_micros = score_providers(
         metrics,
-        providers_wei,
+        providers_usd_micros,
         Config.emission_score_weights_bps(),
         Config.PROVIDER_SCORE_EXPONENT_ABOVE_MEDIAN,
         tier_multiplier_bps,
@@ -282,13 +297,14 @@ def _score_and_persist_providers(
         if outcome == "db_error":
             logger.warning(
                 "emission_epoch: failed to accrue emission earning for provider %s/%s "
-                "(%s wei) -- rerun via POST /admin/emission/run once the DB issue is fixed",
+                "(%s USD micros) -- rerun via POST /admin/emission/run once the DB issue "
+                "is fixed",
                 r.provider_id,
                 epoch_date_str,
                 r.allocation_wei,
             )
 
-    return results, dust_wei
+    return results, dust_usd_micros
 
 
 # ---------------------------------------------------------------------------
@@ -499,18 +515,21 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
     ) + timedelta(days=1)
     window_start = window_end - timedelta(days=_WINDOW_DAYS)
 
-    provider_results, provider_dust_wei = _score_and_persist_providers(
-        epoch_date_str, window_start.isoformat(), window_end.isoformat(), split.providers_wei
+    provider_pool_usd_micros = int(Decimal(str(Config.PROVIDER_EMISSION_USD_PER_DAY)) * _USD_MICROS)
+    provider_results, provider_dust_usd_micros = _score_and_persist_providers(
+        epoch_date_str, window_start.isoformat(), window_end.isoformat(), provider_pool_usd_micros
     )
+    providers_usd_micros = provider_pool_usd_micros - provider_dust_usd_micros
     staker_summary = _pay_stakers(epoch_date_str, split.stakers_wei)
     staker_dust_wei = staker_summary["dust_wei"]
 
-    # Persist the ACTUAL allocated amounts, not the nominal pre-dust split
-    # -- every floor-division remainder (providers' per-provider shares,
-    # stakers' per-wallet shares) is dust that lands in treasury instead,
-    # so providers_wei + stakers_wei + treasury_wei always sums to exactly
-    # emission_wei, never emission_wei + dust.
-    providers_wei = split.providers_wei - provider_dust_wei
+    # Persist the ACTUAL allocated WAYZ amounts. Providers are paid from the
+    # USD pool above, so the WAYZ providers leg is not emitted to anyone:
+    # it's recorded as providers_wei=0 and lands in treasury, alongside the
+    # stakers' floor-division dust, so providers_wei + stakers_wei +
+    # treasury_wei always sums to exactly emission_wei.
+    provider_dust_wei = split.providers_wei
+    providers_wei = 0
     stakers_wei = split.stakers_wei - staker_dust_wei
     treasury_wei = split.treasury_wei + provider_dust_wei + staker_dust_wei
     total_dust_wei = provider_dust_wei + staker_dust_wei
@@ -535,6 +554,10 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
         "dust_wei": str(total_dust_wei),
         "provider_dust_wei": str(provider_dust_wei),
         "staker_dust_wei": str(staker_dust_wei),
+        "provider_payout_asset": "ETH",
+        "provider_pool_usd": str(Config.PROVIDER_EMISSION_USD_PER_DAY),
+        "providers_usd_micros": providers_usd_micros,
+        "provider_dust_usd_micros": provider_dust_usd_micros,
     }
 
     epoch_row = create_epoch(
@@ -547,6 +570,7 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
         staker_summary["paid"],
         status="allocated",
         summary=summary,
+        providers_usd_micros=providers_usd_micros,
     )
     if epoch_row is None:
         logger.warning(
@@ -590,7 +614,12 @@ def get_provider_emission_view(provider_id: int) -> dict[str, Any] | None:
             "adjusted": latest["adjusted_score"],
             "share": latest["share"],
         },
-        "allocation_wayz": str(Decimal(str(latest["allocation_wei"])) / _WEI_PER_WAYZ),
+        "allocation_usd": (
+            str(Decimal(str(latest["allocation_usd_micros"])) / _USD_MICROS)
+            if latest.get("allocation_usd_micros") is not None
+            else None
+        ),
+        "payout_asset": "ETH",
         "rank": rank,
         "providers_scored": len(epoch_scores),
     }
@@ -642,6 +671,8 @@ def get_public_emission_summary() -> dict[str, Any]:
     return {
         "mode": Config.REWARDS_MODE,
         "daily_emission_wayz": str(Config.WAYZ_DAILY_EMISSION),
+        "provider_pool_usd_per_day": str(Config.PROVIDER_EMISSION_USD_PER_DAY),
+        "provider_payout_asset": "ETH",
         "providers_bps": Config.EMISSION_SPLIT_PROVIDERS_BPS,
         "stakers_bps": Config.EMISSION_SPLIT_STAKERS_BPS,
         "treasury_bps": Config.EMISSION_SPLIT_TREASURY_BPS,

@@ -1,6 +1,6 @@
 # GPU Provider Onboarding
 
-Run a GPU and get paid in WAYZ for serving open-weight models to Gatewayz
+Run a GPU and get paid in ETH (on Base) for serving open-weight models to Gatewayz
 users who opt in to community compute. This is the operator-facing guide
 for Milestone 4's compute marketplace (gatewayz-backend #2261-#2267,
 testnet stage). It assumes nothing about your setup beyond "a Linux box
@@ -46,8 +46,10 @@ Gatewayz admin before it serves live traffic (see "Registration" below).
   `offline` and it stops receiving traffic. Repeated offline periods hurt
   your `health_score` and therefore your spot-check pass rate (see
   "Verification").
-- An Avalanche Fuji testnet wallet (any EOA — MetaMask, `cast wallet new`,
-  etc.) to receive payouts and, optionally, to sign attestations.
+- An EVM wallet (any EOA — MetaMask, `cast wallet new`, etc.) to receive
+  ETH payouts on **Base** (chain id `8453`) and, optionally, to sign
+  attestations. The same address works on every EVM chain; just make sure
+  you control its key on Base.
 
 ## 1. Start your inference server
 
@@ -86,7 +88,7 @@ Content-Type: application/json
 
 {
   "display_name": "My GPU Farm",
-  "payout_wallet_address": "0xYourFujiWallet",
+  "payout_wallet_address": "0xYourWallet",
   "contact_email": "you@example.com",
   "region_default": "us-east"
 }
@@ -174,7 +176,7 @@ signing costs you nothing and reduces how often you're re-checked.
 **Keep this file off shared machines and out of version control**, and
 lock down its permissions so only the account running the agent can read
 it: `chmod 600 ~/.gatewayz/payout-key`. It holds your payout wallet's
-key — the same key you'd use to receive WAYZ.
+key — the same key you'd use to receive your ETH payouts.
 
 ### Response attestation (optional, recommended)
 
@@ -212,22 +214,26 @@ first heartbeat lands and it's `active`.
 
 ## Payouts
 
-Payouts are in **WAYZ**, Gatewayz's utility token on **Avalanche Fuji
-testnet** (chain id `43113`), sent to your `payout_wallet_address` — a
-real token address on a real chain, but the network itself is a testnet,
-so it has no monetary value yet.
+Payouts are in **native ETH on Base** (chain id `8453`), sent to your
+`payout_wallet_address`. (Payouts were previously planned in WAYZ; WAYZ is
+not going public for now, so as of 2026-09-22 providers are paid in ETH.)
 
-Every unit of verified work accrues WAYZ per 1k tokens, by model size
-class (seeded rates, `provider_payout_rates`):
+Earnings are **priced in USD** and converted to ETH only when paid: every
+unit of verified work accrues a USD amount per 1k tokens, by model size
+class (seeded rates, `provider_payout_rates.usd_micros_per_1k_tokens`), and
+each daily settlement converts your accrued USD to ETH at the live
+Chainlink ETH/USD price on Base. Your rate is stable in dollars; the
+amount of ETH you receive depends on the ETH price at payout time. The
+price used is recorded on every settlement.
 
-| Class | Model size | Rate (WAYZ / 1k tokens) |
+| Class | Model size | Rate (USD / 1k tokens) |
 |---|---|---|
-| `small` | ≤ 13B params | 0.05 |
-| `medium` | ≤ 34B params | 0.10 |
-| `large` | > 34B params | 0.25 |
+| `small` | ≤ 13B params | $0.02 |
+| `medium` | ≤ 34B params | $0.05 |
+| `large` | > 34B params | $0.10 |
 
-These are testnet values and may change; check your actual accrued/settled
-amounts any time at `GET /gpu/providers/me/earnings`.
+These are **placeholder** values and may change; check your actual
+accrued/settled amounts any time at `GET /gpu/providers/me/earnings`.
 
 **Model class is an exact allow-list, not a guess from your model's
 name.** Only a fixed set of known open-weight model ids is recognized —
@@ -279,14 +285,17 @@ combining into one that reaches a better rate.
 - Earnings accrue only from **verified** work (see "Verification" below)
   — unsampled-and-unresolved, unverified, or failed-verification work is
   unpaid.
-- Settlement runs **daily**: any provider with ≥ 10 WAYZ accrued gets a
-  single on-chain `transfer()` to their payout wallet, capped per run
-  across all providers combined.
+- Settlement runs **daily**: any provider with ≥ $5 accrued gets a
+  single native ETH transfer on Base to their payout wallet, capped per
+  run across all providers combined. If the ETH/USD price feed is stale
+  that day, nobody is paid and your earnings simply roll over to the next
+  run — you are never paid at a stale price.
 - Every settlement gets a transaction hash you can look up on
-  [Snowtrace (Fuji)](https://testnet.snowtrace.io/).
-- `GET /gpu/providers/me/earnings` lists accrued/settled totals, your
-  last 50 work rows (no prompt/response content — see the threat model),
-  and settlement history with Snowtrace links.
+  [Basescan](https://basescan.org/).
+- `GET /gpu/providers/me/earnings` lists accrued/settled totals (USD, plus
+  any legacy WAYZ history), your last 50 work rows (no prompt/response
+  content — see the threat model), and settlement history with the USD
+  amount, ETH amount, ETH/USD price used, and a Basescan link.
 
 ## Verification rules & penalties
 

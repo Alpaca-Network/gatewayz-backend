@@ -816,7 +816,7 @@ async def lifespan(app):
         logger.warning(f"Failed to start GPU spot-check verification scheduler: {e}")
         # Don't fail startup if spot-check verification fails to start
 
-    # Start community GPU WAYZ settlement (gatewayz-backend#2266)
+    # Start community GPU ETH settlement (gatewayz-backend#2266)
     try:
         from src.services.scheduled_sync import start_gpu_settlement_scheduler
 
@@ -1092,7 +1092,7 @@ async def lifespan(app):
     except Exception as e:
         logger.warning(f"GPU spot-check verification shutdown warning: {e}")
 
-    # Stop community GPU WAYZ settlement
+    # Stop community GPU ETH settlement
     try:
         from src.services.scheduled_sync import stop_gpu_settlement_scheduler
 

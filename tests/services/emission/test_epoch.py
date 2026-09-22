@@ -29,6 +29,7 @@ def emission_mode(monkeypatch):
     monkeypatch.setattr(epoch.Config, "EMISSION_SPLIT_STAKERS_BPS", 4100)
     monkeypatch.setattr(epoch.Config, "EMISSION_SPLIT_TREASURY_BPS", 1800)
     monkeypatch.setattr(epoch.Config, "STAKER_REWARD_ASSET", "credits")
+    monkeypatch.setattr(epoch.Config, "PROVIDER_EMISSION_USD_PER_DAY", "100")
     monkeypatch.setattr(epoch.Config, "WAYZ_CREDIT_RATE", "0.001")
     monkeypatch.setattr(epoch.Config, "STAKING_REWARDS_DAILY_CAP_CREDITS", 50.0)
     monkeypatch.setattr(epoch.Config, "STAKING_REWARDS_MIN_CREDITS", 0.0001)
@@ -182,27 +183,34 @@ def test_run_emission_epoch_happy_path(
     assert result["stakers_paid"] == 1
     assert result["credits_paid"] == "1.000000"
 
-    # The sole eligible provider (share=1.0) and sole staker (100% of
-    # stake) each get their full pool exactly -- zero dust either side in
-    # this scenario. HIGH fix-round-1: the persisted/reported split must
-    # be the ACTUAL allocated amounts (post-dust), summing to exactly
-    # emission_wei -- never emission_wei + dust. See the two dedicated
-    # dust tests below for the nonzero-dust and zero-eligible cases.
+    # The sole eligible provider (share=1.0) gets the full USD pool
+    # ($100/day -> 100_000_000 micros), paid later in ETH on Base. The
+    # sole staker (100% of stake) gets the full 41% WAYZ stakers leg as
+    # credits. The WAYZ providers leg is not emitted (providers are paid
+    # in USD/ETH now), so it's recorded as providers_wei=0 and lands in
+    # treasury -- the WAYZ split still sums to exactly emission_wei.
     emission_wei = Decimal(result["emission_wei"])
     providers_wei = Decimal(result["split"]["providers_wei"])
     stakers_wei = Decimal(result["split"]["stakers_wei"])
     treasury_wei = Decimal(result["split"]["treasury_wei"])
     assert providers_wei + stakers_wei + treasury_wei == emission_wei
     assert stakers_wei == Decimal(100000 * 10**18 * 4100 // 10000)
-    assert providers_wei == Decimal(100000 * 10**18 * 4100 // 10000)
-    assert result["provider_dust_wei"] == "0"
+    assert providers_wei == 0
+    assert treasury_wei == Decimal(100000 * 10**18 * (4100 + 1800) // 10000)
     assert result["staker_dust_wei"] == "0"
+    assert result["provider_payout_asset"] == "ETH"
+    assert result["providers_usd_micros"] == 100_000_000
+    assert result["provider_dust_usd_micros"] == 0
 
     mock_create_earning.assert_called_once()
     called_provider_id, called_epoch_date, called_amount = mock_create_earning.call_args[0]
     assert called_provider_id == 1
     assert called_epoch_date == "2026-09-12"
-    assert called_amount == providers_wei
+    assert called_amount == 100_000_000  # USD micros
+
+    rows = mock_create_scores.call_args[0][0]
+    assert rows[0]["allocation_usd_micros"] == 100_000_000
+    assert rows[0]["allocation_wei"] == "0"
 
     mock_create_epoch.assert_called_once()
     args, kwargs = mock_create_epoch.call_args
@@ -212,6 +220,7 @@ def test_run_emission_epoch_happy_path(
     assert args[3] == int(stakers_wei)
     assert args[4] == int(treasury_wei)
     assert kwargs["status"] == "allocated"
+    assert kwargs["providers_usd_micros"] == 100_000_000
 
 
 @patch("src.services.emission.epoch.create_epoch")
@@ -304,6 +313,11 @@ def test_run_emission_epoch_3way_sum_is_exact_with_nonzero_provider_and_staker_d
     assert providers_wei + stakers_wei + treasury_wei == emission_wei
     assert int(result["provider_dust_wei"]) > 0
     assert int(result["staker_dust_wei"]) > 0
+    # Uneven USD shares floor to micros too; allocated + dust == the pool.
+    assert result["provider_dust_usd_micros"] > 0
+    assert result["providers_usd_micros"] + result["provider_dust_usd_micros"] == 100_000_000
+    usd_paid = sum(call.args[2] for call in mock_create_earning.call_args_list)
+    assert usd_paid == result["providers_usd_micros"]
     assert Decimal(result["dust_wei"]) == Decimal(result["provider_dust_wei"]) + Decimal(
         result["staker_dust_wei"]
     )
@@ -431,7 +445,8 @@ def test_get_provider_emission_view_computes_rank(mock_latest, mock_epoch_scores
         "raw_score": "0.6",
         "adjusted_score": "0.65",
         "share": "0.2",
-        "allocation_wei": str(2 * 10**18),
+        "allocation_wei": "0",
+        "allocation_usd_micros": 2_500_000,
     }
     mock_epoch_scores.return_value = [
         {"provider_id": 9, "share": "0.5"},
@@ -441,7 +456,8 @@ def test_get_provider_emission_view_computes_rank(mock_latest, mock_epoch_scores
     view = epoch.get_provider_emission_view(1)
     assert view["rank"] == 2
     assert view["providers_scored"] == 3
-    assert view["allocation_wayz"] == "2"
+    assert view["allocation_usd"] == "2.5"
+    assert view["payout_asset"] == "ETH"
 
 
 @patch("src.services.emission.epoch.get_latest_provider_score")
@@ -480,6 +496,8 @@ def test_get_public_emission_summary_is_aggregate_only(mock_latest_epoch, emissi
     assert set(summary.keys()) == {
         "mode",
         "daily_emission_wayz",
+        "provider_pool_usd_per_day",
+        "provider_payout_asset",
         "providers_bps",
         "stakers_bps",
         "treasury_bps",

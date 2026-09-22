@@ -961,8 +961,9 @@ not `404` — simpler for the dashboard to render.
 
 ### Staking Rewards (WAYZ stakers paid in inference credits)
 
-Stakers are paid in inference credits (providers who offer inference are
-paid in WAYZ instead — a separate, already-shipped system). See
+Stakers are paid in inference credits (GPU providers who offer inference
+are paid in native ETH on Base, USD-denominated — a separate system; see
+`docs/gpu/VERIFICATION_AND_PAYOUTS.md`). See
 `docs/staking/REWARDS.md` for the full design — how the daily job
 computes and pays rewards, idempotency, unlinked-wallet handling, and ops.
 
@@ -1165,8 +1166,9 @@ GET /gpu/providers/me
 ```
 
 Requires auth. Returns the caller's provider row, their nodes, and an
-earnings summary (`{"accrued_wei": "0", "settled_wei": "0", "void_wei": "0"}`, zeros until
-Milestone 4's payout workstream ships). `404` if not yet registered.
+earnings summary (`{"payout_asset": "ETH", "payout_chain": "base", "accrued_usd": "0",
+"accrued_usd_micros": 0, "accrued_wei": "0", ...}` for `accrued`/`settled`/`void`;
+`*_wei` are legacy pre-2026-09-22 WAYZ amounts). `404` if not yet registered.
 
 ### Register a Node
 
@@ -1421,22 +1423,29 @@ tier standing.
 {
   "success": true,
   "data": {
-    "totals": { "accrued_wei": "1000", "settled_wei": "2000", "void_wei": "0" },
+    "totals": {
+      "payout_asset": "ETH", "payout_chain": "base",
+      "accrued_usd": "1.25", "accrued_usd_micros": 1250000, "accrued_wei": "0",
+      "settled_usd": "30", "settled_usd_micros": 30000000, "settled_wei": "0",
+      "void_usd": "0", "void_usd_micros": 0, "void_wei": "0"
+    },
     "work": [
       { "billing_ref": "br-1", "model": "llama-3.1-8b-instruct", "prompt_tokens": 100,
         "completion_tokens": 50, "verification": "verified", "created_at": "2026-09-01T00:00:00Z" }
     ],
     "settlements": [
       { "id": 1, "period_start": "2026-09-01T00:00:00Z", "period_end": "2026-09-02T00:00:00Z",
-        "amount_wei": "2000", "status": "sent", "tx_hash": "0x...",
-        "tx_url": "https://testnet.snowtrace.io/tx/0x...", "error": null, "created_at": "..." }
+        "asset": "ETH", "chain": "base", "amount_usd": "30", "amount_wei": "10000000000000000",
+        "eth_usd_price": "3000.00000000", "status": "sent", "tx_hash": "0x...",
+        "tx_url": "https://basescan.org/tx/0x...", "error": null, "created_at": "..." }
     ],
     "tier": { "current_volume_7d": 150000, "multiplier_bps": 2500, "next_tier_min_tokens_7d": 1000000 },
     "emission": {
       "last_epoch": "2026-09-12",
       "score": { "compute": "1.0", "speed": "0.9", "availability": "1.0", "unique_models": "0.5",
                  "raw": "0.955", "adjusted": "0.942", "share": "0.558" },
-      "allocation_wayz": "22888",
+      "allocation_usd": "55.8",
+      "payout_asset": "ETH",
       "rank": 1,
       "providers_scored": 3
     }
@@ -1690,14 +1699,19 @@ precision loss); all timestamps are ISO-8601 with a `Z`/`+00:00` offset.
         "pending": 12
       },
       "earnings": {
-        "accrued_wei": "0",
-        "settling_wei": "0",
-        "settled_wei": "5000000000000000000",
-        "void_wei": "0"
+        "payout_asset": "ETH", "payout_chain": "base",
+        "accrued_usd": "0", "accrued_usd_micros": 0, "accrued_wei": "0",
+        "settling_usd": "0", "settling_usd_micros": 0, "settling_wei": "0",
+        "settled_usd": "30", "settled_usd_micros": 30000000, "settled_wei": "0",
+        "void_usd": "0", "void_usd_micros": 0, "void_wei": "0"
       },
       "last_settlement": {
         "provider_id": 1,
-        "amount_wei": "5000000000000000000",
+        "amount_wei": "10000000000000000",
+        "amount_usd": "30",
+        "asset": "ETH",
+        "chain": "base",
+        "eth_usd_price": "3000.00000000",
         "status": "sent",
         "tx_hash": "0x...",
         "created_at": "2026-09-09T00:00:00+00:00"

@@ -26,12 +26,12 @@ from src.db.gpu_payouts import (
 from src.security.deps import get_user_id
 from src.services.emission.epoch import get_provider_emission_view
 from src.services.gpu.earnings import next_tier_min_tokens_7d, tier_multiplier_bps
+from src.services.gpu.payout_views import micros_to_usd, tx_url, usd_totals_view
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_SNOWTRACE_TX_URL = "https://testnet.snowtrace.io/tx/{tx_hash}"
 _WORK_HISTORY_LIMIT = 50
 
 
@@ -50,16 +50,25 @@ def _work_view(row: dict) -> dict[str, Any]:
 
 
 def _settlement_view(row: dict) -> dict[str, Any]:
+    """`amount_wei` is in the settlement's own asset (ETH on Base for new
+    rows, WAYZ on Fuji for legacy rows -- see `asset`/`chain`)."""
     tx_hash = row.get("tx_hash")
     amount_wei = row.get("amount_wei")
+    asset = row.get("asset") or "WAYZ"
     return {
         "id": row.get("id"),
         "period_start": row.get("period_start"),
         "period_end": row.get("period_end"),
+        "asset": asset,
+        "chain": row.get("chain"),
         "amount_wei": str(amount_wei) if amount_wei is not None else None,
+        "amount_usd": micros_to_usd(row.get("amount_usd_micros")),
+        "eth_usd_price": (
+            str(row["eth_usd_price"]) if row.get("eth_usd_price") is not None else None
+        ),
         "status": row.get("status"),
         "tx_hash": tx_hash,
-        "tx_url": _SNOWTRACE_TX_URL.format(tx_hash=tx_hash) if tx_hash else None,
+        "tx_url": tx_url(asset, tx_hash),
         "error": row.get("error"),
         "created_at": row.get("created_at"),
     }
@@ -89,11 +98,7 @@ async def get_my_earnings(user_id: int = Depends(get_user_id)) -> dict[str, Any]
     next_min = next_tier_min_tokens_7d(volume_7d, tiers)
 
     data: dict[str, Any] = {
-        "totals": {
-            "accrued_wei": str(totals["accrued"]),
-            "settled_wei": str(totals["settled"]),
-            "void_wei": str(totals["void"]),
-        },
+        "totals": usd_totals_view(totals),
         "work": [_work_view(row) for row in work],
         "settlements": [_settlement_view(row) for row in settlements],
         "tier": {
@@ -103,7 +108,7 @@ async def get_my_earnings(user_id: int = Depends(get_user_id)) -> dict[str, Any]
         },
     }
 
-    # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics) --
+    # Chutes-style emission rewards (gatewayz-backend tokenomics) --
     # present only once this provider has been scored at least once
     # (None while the feature is off, or before the provider's first
     # qualifying epoch).
