@@ -108,11 +108,11 @@ class TestModelAliasResolution:
             assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
 
     def test_z_ai_glm_47_alias(self):
-        """Non-existent z-ai/glm-4.7 maps to z-ai/glm-4-flash"""
+        """z-ai/ spellings of GLM 4.7 resolve to the native Z.AI id"""
         test_cases = [
-            ("z-ai/glm-4.7", "z-ai/glm-4-flash"),
-            ("z-ai/glm-4-7", "z-ai/glm-4-flash"),
-            ("z-ai/glm4.7", "z-ai/glm-4-flash"),
+            ("z-ai/glm-4.7", "zai/glm-4.7"),
+            ("z-ai/glm-4-7", "zai/glm-4.7"),
+            ("z-ai/glm4.7", "zai/glm-4.7"),
         ]
         for model_id, expected in test_cases:
             result = apply_model_alias(model_id)
@@ -209,12 +209,21 @@ class TestProviderDetection:
             assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
 
     def test_z_ai_prefix_models(self):
+        # GLM routes to the native Z.AI adapter, not OpenRouter.
         test_cases = [
-            ("z-ai/glm-4-flash", "openrouter"),
-            ("z-ai/glm-4.5", "openrouter"),
-            ("z-ai/glm-4.6", "openrouter"),
-            ("z-ai/glm-4.7", "openrouter"),
-            ("zai/glm-4-flash", "openrouter"),
+            ("z-ai/glm-4.5", "zai"),
+            ("z-ai/glm-4.6", "zai"),
+            ("zai/glm-4.7", "zai"),
+            ("zai/glm-5.3", "zai"),
+        ]
+        for model_id, expected in test_cases:
+            result = detect_provider_from_model_id(model_id)
+            assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
+
+    def test_meta_prefix_models(self):
+        test_cases = [
+            ("meta/muse-spark-1.3", "meta"),
+            ("meta/muse-spark-1.3-contributor", "meta"),
         ]
         for model_id, expected in test_cases:
             result = detect_provider_from_model_id(model_id)
