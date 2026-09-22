@@ -629,11 +629,15 @@ def detect_provider_from_model_id(
         if org == "morpheus":
             return "morpheus"
 
-        # Z-AI / Zhipu AI GLM models (e.g., "z-ai/glm-4-flash", "z-ai/glm-4.6")
-        # These are hosted on OpenRouter with the z-ai/ prefix
+        # Z-AI / Zhipu AI GLM models (e.g., "zai/glm-5.3", "z-ai/glm-4.6") go to the
+        # native Z.AI adapter. OpenRouter-only variants (":exacto" etc.) are caught
+        # by the suffix rule above.
         if org == "z-ai" or org == "zai":
-            logger.info(f"Detected OpenRouter provider for Zhipu AI model '{model_id}'")
-            return "openrouter"
+            return "zai"
+
+        # Meta Muse models (e.g., "meta/muse-spark-1.3") — native Meta adapter
+        if org == "meta":
+            return "meta"
 
         # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
         if org == "alpaca-network" or org == "alpaca":
