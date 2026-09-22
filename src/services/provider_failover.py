@@ -444,6 +444,38 @@ def _upstream_rate_limit_exception(
     )
 
 
+def _upstream_auth_detail(provider: str) -> str:
+    """Say WHOSE credential failed.
+
+    "anthropic authentication error" beside a 401 reads, to a partner, as "your
+    key is bad" -- so their engineer rotates a key that was never the problem.
+    The failing credential is the one GATEWAYZ holds for the upstream, and the
+    caller cannot do anything about it. Name that, and name it before the SDK's
+    own generic 401 text gets a chance to mislead.
+    """
+    return (
+        f"Gatewayz's own credential for provider '{provider}' was rejected upstream. "
+        "This is not a problem with your API key and retrying will not clear it — "
+        "our team has been alerted."
+    )
+
+
+def _upstream_auth_exception(provider: str, model: str, raw: str) -> HTTPException:
+    """One answer for one condition: the upstream rejected OUR credential.
+
+    Before this there were FIVE paths for that single cause and three different
+    statuses between them -- the typed OpenAI and Cerebras branches said 401,
+    the httpx branch said 500, and an untyped exception carrying "Error code:
+    401" fell through to the generic 502. Only one of the five alerted anybody.
+
+    A caller could therefore be told to re-authenticate, or that we had crashed,
+    or to retry, depending on which SDK happened to be in the path -- for the
+    same expired key.
+    """
+    alert_provider_auth_failure(provider, model, (raw or "")[:500])
+    return HTTPException(status_code=401, detail=_upstream_auth_detail(provider))
+
+
 def map_provider_error(
     provider: str,
     model: str,
@@ -595,10 +627,7 @@ def _map_provider_error_impl(
             err for err in (AuthenticationError, PermissionDeniedError) if err is not None
         )
         if auth_error_classes and isinstance(exc, auth_error_classes):
-            detail = f"{provider} authentication error"
-            # Always map auth errors to 401 for consistency
-            status = 401
-            alert_provider_auth_failure(provider, model, str(exc)[:500])
+            return _upstream_auth_exception(provider, model, str(exc))
         elif NotFoundError and isinstance(exc, NotFoundError):
             detail = f"Model {model} not found or unavailable on {provider}"
             status = 404
@@ -625,8 +654,7 @@ def _map_provider_error_impl(
             )
             status = 400
         elif status == 403:
-            detail = f"{provider} authentication error"
-            status = 401  # Map 403 to 401 for consistency with auth error handling
+            return _upstream_auth_exception(provider, model, str(exc))
         elif status == 404:
             detail = f"Model {model} not found or unavailable on {provider}"
         elif 500 <= status < 600:
@@ -679,9 +707,7 @@ def _map_provider_error_impl(
             if err is not None
         )
         if cerebras_auth_error_classes and isinstance(exc, cerebras_auth_error_classes):
-            detail = f"{provider} authentication error"
-            # Always map auth errors to 401 for consistency
-            status = 401
+            return _upstream_auth_exception(provider, model, str(exc))
         elif CerebrasNotFoundError and isinstance(exc, CerebrasNotFoundError):
             detail = f"Model {model} not found or unavailable on {provider}"
             status = 404
@@ -710,8 +736,7 @@ def _map_provider_error_impl(
             )
             status = 400
         elif status == 403:
-            detail = f"{provider} authentication error"
-            status = 401  # Map 403 to 401 for consistency with auth error handling
+            return _upstream_auth_exception(provider, model, str(exc))
         elif status == 404:
             detail = f"Model {model} not found or unavailable on {provider}"
         elif 500 <= status < 600:
@@ -738,7 +763,9 @@ def _map_provider_error_impl(
         if status == 429:
             return _upstream_rate_limit_exception(provider, model, retry_after)
         if status in (401, 403):
-            return HTTPException(status_code=500, detail=f"{provider} authentication error")
+            # Was 500. Same condition as every branch above; a 500 told the
+            # caller we had crashed, for an expired key of ours.
+            return _upstream_auth_exception(provider, model, str(exc))
         if status == 404:
             return HTTPException(
                 status_code=404,
@@ -800,6 +827,19 @@ def _map_provider_error_impl(
         return HTTPException(
             status_code=404, detail=f"Model {model} not found or unavailable on {provider}"
         )
+    # OUR credential for the upstream is rejected -- expired, revoked or wrong.
+    #
+    # Two things were wrong here. It reached the generic 502 below, which tells
+    # an SDK to retry a condition only a key rotation clears. And it raised no
+    # alert, while the TYPED branch above (openai.AuthenticationError) both
+    # maps to 401 and pages someone -- the same two-paths-disagree-about-one-
+    # cause shape as #2355 and #2354, for the third time.
+    #
+    # Found 2026-09-22: two catalog models returned 502 whose upstream body was
+    # `401 API key expired`. The catalog advertised them throughout, and
+    # nothing anywhere said a credential had lapsed.
+    if parsed_status in (401, 403):
+        return _upstream_auth_exception(provider, model, msg)
     # Provider account/key out of budget (e.g. OpenRouter weekly key limit). Keep the 402
     # status so failover logic still applies, but never surface the raw upstream message
     # (it embeds the key id in a dashboard URL).
