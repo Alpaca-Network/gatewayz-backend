@@ -443,6 +443,21 @@ async def get_user_api_key_usage(
 ):
     """Get usage statistics for all API keys of the user.
 
+    Each key reports TWO counts, because they answer two different questions:
+
+    * ``requests_used`` — what consumed the key's **cap**. A rejected call does
+      not, so a caller that only ever fails leaves this frozen at its old value.
+    * ``arrivals`` / ``failed`` — what actually **reached** the key, read from
+      the request ledger. ``last_arrival_at`` and ``last_failure_at`` come with
+      them.
+
+    Conflating those cost a day of a partner integration: a key showing
+    ``requests_used: 1`` is equally consistent with one call ever and with six
+    days of 503s, and only a hand-run experiment against production settled it.
+
+    ``arrivals_measured: false`` means the rollup could not be read — the
+    arrivals fields are then **absent, not zero**. Unreachable is not absent.
+
     Optional `since` (ISO-8601, epoch seconds, or epoch ms): additionally
     returns `usage_since` — the user's aggregate requests/tokens/cost from
     that moment to now. Aggregation is user-level (activity records carry no

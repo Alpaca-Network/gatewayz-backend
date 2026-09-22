@@ -1146,8 +1146,41 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
         return None
 
 
+def get_arrivals_by_key(user_id: int) -> dict[int, dict[str, Any]] | None:
+    """Per-key arrivals and failures from the request ledger, keyed by api_key_id.
+
+    Returns None on failure rather than {} so the caller can tell "nothing
+    arrived" from "the rollup did not run". Rendering those the same way is how
+    an unread counter becomes a confident zero -- the failure mode this whole
+    feature exists to remove.
+    """
+    try:
+        client = get_supabase_client()
+        result = client.rpc("gatewayz_arrivals_by_key", {"p_user_id": user_id}).execute()
+        return {row["api_key_id"]: row for row in (result.data or []) if row.get("api_key_id")}
+    except Exception as e:
+        logger.error(
+            "arrivals-by-key rollup failed for user %s: %s",
+            sanitize_for_logging(str(user_id)),
+            sanitize_for_logging(str(e)),
+        )
+        return None
+
+
 def get_user_all_api_keys_usage(user_id: int) -> dict[str, Any]:
-    """Get usage statistics for all API keys of a user"""
+    """Get usage statistics for all API keys of a user.
+
+    Each key carries TWO different counts, because they answer two different
+    questions and conflating them cost a day of a partner integration:
+
+      requests_used  -- what consumed the key's CAP. A rejected call does not.
+      arrivals       -- what actually REACHED the key, failures included.
+
+    `arrivals` / `failed` come from the request ledger via
+    gatewayz_arrivals_by_key. When that read fails they are OMITTED and
+    `arrivals_measured` is false -- never reported as 0, which would be the
+    same lie in a new place.
+    """
     try:
         client = get_supabase_client()
 
@@ -1155,7 +1188,10 @@ def get_user_all_api_keys_usage(user_id: int) -> dict[str, Any]:
         keys_result = client.table("api_keys_new").select("*").eq("user_id", user_id).execute()
 
         if not keys_result.data:
-            return {"user_id": user_id, "total_keys": 0, "keys": []}
+            return {"user_id": user_id, "total_keys": 0, "keys": [], "arrivals_measured": True}
+
+        arrivals = get_arrivals_by_key(user_id)
+        measured = arrivals is not None
 
         keys_usage = []
         for key_data in keys_result.data:
@@ -1183,9 +1219,30 @@ def get_user_all_api_keys_usage(user_id: int) -> dict[str, Any]:
                 "created_at": key_data.get("created_at"),
                 "last_used_at": key_data.get("last_used_at"),
             }
+
+            # Arrivals sit beside requests_used rather than replacing it. The cap
+            # counter is correct for what it meters; it is simply not an answer to
+            # "did anything reach this key?". A caller that only ever fails leaves
+            # requests_used frozen forever.
+            if measured:
+                row = arrivals.get(key_data["id"]) or {}
+                key_usage["arrivals"] = int(row.get("arrivals") or 0)
+                key_usage["failed"] = int(row.get("failed") or 0)
+                key_usage["first_arrival_at"] = row.get("first_arrival_at")
+                key_usage["last_arrival_at"] = row.get("last_arrival_at")
+                key_usage["last_failure_at"] = row.get("last_failure_at")
+
             keys_usage.append(key_usage)
 
-        return {"user_id": user_id, "total_keys": len(keys_usage), "keys": keys_usage}
+        return {
+            "user_id": user_id,
+            "total_keys": len(keys_usage),
+            "keys": keys_usage,
+            # False means the arrivals rollup could not be read, and the
+            # arrivals/failed fields are ABSENT rather than zero. UNREACHABLE IS
+            # NOT ABSENT.
+            "arrivals_measured": measured,
+        }
 
     except Exception as e:
         logger.error(
