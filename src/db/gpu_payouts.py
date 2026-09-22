@@ -846,28 +846,6 @@ def get_pending_settlement(provider_id: int) -> dict | None:
         return None
 
 
-def list_stuck_pending_settlements(older_than_iso: str) -> list[dict]:
-    """'pending' provider_settlements rows older than older_than_iso --
-    PR #2288 review I3: the reconciliation input for settlements stuck
-    since before a crash. See src/services/gpu/settlement.py's
-    reconcile_stuck_settlements and docs/gpu/VERIFICATION_AND_PAYOUTS.md's
-    runbook."""
-    try:
-        client = get_supabase_client()
-        result = (
-            client.table(_SETTLEMENTS_TABLE)
-            .select("*")
-            .eq("status", "pending")
-            .lt("created_at", older_than_iso)
-            .limit(_WORK_QUERY_ROW_CAP)
-            .execute()
-        )
-        return result.data or []
-    except Exception as e:
-        logger.warning(f"provider_settlements stuck-pending lookup failed: {e}")
-        return []
-
-
 def create_settlement(
     provider_id: int,
     period_start_iso: str,
@@ -919,6 +897,62 @@ def update_settlement_amount(settlement_id: int, amount_usd_micros: int, amount_
     except Exception as e:
         logger.warning(f"provider_settlements amount update failed for {settlement_id}: {e}")
         return False
+
+
+def record_settlement_tx(settlement_id: int, tx_hash: str, nonce: int, gas_limit: int) -> bool:
+    """Persist a signed-but-not-yet-broadcast transfer's hash/nonce on its
+    'pending' settlement row. Called BEFORE broadcast -- False (write
+    failed) makes the caller abort without sending, so a transfer can
+    never be in flight without a recorded hash."""
+    try:
+        client = get_supabase_client()
+        client.table(_SETTLEMENTS_TABLE).update(
+            {"tx_hash": tx_hash, "tx_nonce": nonce, "gas_limit": gas_limit}
+        ).eq("id", settlement_id).eq("status", "pending").execute()
+        return True
+    except Exception as e:
+        logger.warning(f"provider_settlements record-tx failed for {settlement_id}: {e}")
+        return False
+
+
+def list_pending_settlements() -> list[dict]:
+    """Every 'pending' provider_settlements row (any age) -- the reconcile
+    sweep's input. Rows WITH a tx_hash are resolved by receipt/nonce at any
+    age; rows without one only once older than
+    COMMUNITY_SETTLEMENT_STUCK_HOURS (see settlement.reconcile_stuck_settlements)."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_SETTLEMENTS_TABLE)
+            .select("*")
+            .eq("status", "pending")
+            .limit(_WORK_QUERY_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"provider_settlements pending-list failed: {e}")
+        return []
+
+
+def eth_paid_wei(provider_id: int | None = None) -> int:
+    """Sum of amount_wei over CONFIRMED ('sent') ETH settlements -- actual
+    ETH paid on Base. provider_id=None sums across all providers. 0 on error."""
+    try:
+        client = get_supabase_client()
+        query = (
+            client.table(_SETTLEMENTS_TABLE)
+            .select("amount_wei")
+            .eq("asset", "ETH")
+            .eq("status", "sent")
+        )
+        if provider_id is not None:
+            query = query.eq("provider_id", provider_id)
+        result = query.limit(_WORK_QUERY_ROW_CAP).execute()
+        return sum(int(r.get("amount_wei") or 0) for r in result.data or [])
+    except Exception as e:
+        logger.warning(f"provider_settlements eth-paid sum failed ({provider_id}): {e}")
+        return 0
 
 
 def mark_settlement_sent(settlement_id: int, tx_hash: str) -> bool:

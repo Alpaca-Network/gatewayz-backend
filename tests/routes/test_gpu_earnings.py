@@ -15,6 +15,7 @@ app.dependency_overrides[get_user_id] = lambda: 42
 @patch("src.routes.gpu_earnings.get_provider_verified_volume_7d")
 @patch("src.routes.gpu_earnings.list_settlements_for_provider")
 @patch("src.routes.gpu_earnings.list_recent_work_for_provider")
+@patch("src.routes.gpu_earnings.eth_paid_wei", new=lambda provider_id=None: 10**16)
 @patch("src.routes.gpu_earnings.earnings_totals")
 @patch("src.routes.gpu_earnings.get_provider_for_user")
 def test_earnings_returns_totals_work_and_settlements(
@@ -79,7 +80,8 @@ def test_earnings_returns_totals_work_and_settlements(
     assert data["totals"]["accrued_usd"] == "1"
     assert data["totals"]["settled_usd"] == "2"
     assert data["totals"]["void_usd_micros"] == 300_000
-    assert data["totals"]["settled_wei"] == "2000"  # legacy WAYZ history still exposed
+    assert data["totals"]["legacy_wayz_settled_wei"] == "2000"  # pre-switch WAYZ history
+    assert data["totals"]["settled_wei"] == str(10**16)  # ETH actually paid (confirmed)
     assert data["work"][0]["billing_ref"] == "br-1"
     assert "prompt_hash" not in data["work"][0]
     # legacy WAYZ settlement (no asset column) -> Snowtrace

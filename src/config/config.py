@@ -347,8 +347,23 @@ class Config:
         "BASE_ETH_USD_FEED_ADDRESS", "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
     )
     # A feed answer older than this fails the whole settlement run rather
-    # than paying at a stale price (the feed's heartbeat on Base is 20 min).
-    ETH_USD_PRICE_MAX_AGE_SECONDS = int(_get_env_var("ETH_USD_PRICE_MAX_AGE_SECONDS", "3600"))
+    # than paying at a stale price. ~1.5x the feed's Base heartbeat (1200s,
+    # observed on-chain 2026-09-22).
+    ETH_USD_PRICE_MAX_AGE_SECONDS = int(_get_env_var("ETH_USD_PRICE_MAX_AGE_SECONDS", "1800"))
+    # Chainlink L2 sequencer-uptime feed on Base (verified on-chain
+    # 2026-09-22: description() == "L2 Sequencer Uptime Status Feed").
+    # Empty string disables the check.
+    BASE_SEQUENCER_UPTIME_FEED_ADDRESS = _get_env_var(
+        "BASE_SEQUENCER_UPTIME_FEED_ADDRESS", "0xBCF85224fc0756B9Fa45aA7892530B47e10b6433"
+    )
+    BASE_SEQUENCER_GRACE_PERIOD_SECONDS = int(
+        _get_env_var("BASE_SEQUENCER_GRACE_PERIOD_SECONDS", "3600")
+    )
+    # How long a settlement run waits for each payout's receipt before
+    # leaving it 'pending' for the reconcile sweep to confirm.
+    PROVIDER_PAYOUT_RECEIPT_TIMEOUT_SECONDS = int(
+        _get_env_var("PROVIDER_PAYOUT_RECEIPT_TIMEOUT_SECONDS", "120")
+    )
     # EOA holding the ETH payout float. Unset (the default) = settlement
     # job doesn't start; earnings keep accruing in USD meanwhile.
     PROVIDER_PAYOUT_POOL_PRIVATE_KEY = _get_env_var("PROVIDER_PAYOUT_POOL_PRIVATE_KEY")

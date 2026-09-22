@@ -603,6 +603,21 @@ def get_provider_emission_view(provider_id: int) -> dict[str, Any] | None:
         None,
     )
 
+    allocation_usd_micros = latest.get("allocation_usd_micros")
+    allocation_usd = allocation_eth = legacy_wayz = None
+    if allocation_usd_micros is not None:
+        from src.services.gpu.payout_views import (
+            allocation_eth_equivalent,
+            get_display_eth_usd_price,
+        )
+
+        allocation_usd = str(Decimal(int(allocation_usd_micros)) / _USD_MICROS)
+        allocation_eth = allocation_eth_equivalent(
+            int(allocation_usd_micros), get_display_eth_usd_price()
+        )
+    else:
+        legacy_wayz = str(Decimal(str(latest.get("allocation_wei") or 0)) / _WEI_PER_WAYZ)
+
     return {
         "last_epoch": epoch_date_str,
         "score": {
@@ -614,11 +629,11 @@ def get_provider_emission_view(provider_id: int) -> dict[str, Any] | None:
             "adjusted": latest["adjusted_score"],
             "share": latest["share"],
         },
-        "allocation_usd": (
-            str(Decimal(str(latest["allocation_usd_micros"])) / _USD_MICROS)
-            if latest.get("allocation_usd_micros") is not None
-            else None
-        ),
+        "allocation_usd": allocation_usd,
+        "allocation_eth": allocation_eth,
+        # Deprecated alias kept for existing clients (PR #2364 review):
+        # the ETH equivalent for USD-paid epochs, WAYZ for legacy epochs.
+        "allocation_wayz": allocation_eth if allocation_usd_micros is not None else legacy_wayz,
         "payout_asset": "ETH",
         "rank": rank,
         "providers_scored": len(epoch_scores),

@@ -14,32 +14,47 @@ WAYZ**. Decisions (migration `20260922120000_provider_payouts_eth_base.sql`):
   `provider_payout_rates.usd_micros_per_1k_tokens` →
   `provider_earnings.amount_usd_micros`. Providers get a stable dollar
   rate; the treasury's cost is predictable.
-- **Payout is native ETH on Base** (chain id 8453), a plain value transfer
-  (21000 gas, EIP-1559 fees) from the payout pool EOA
+- **Payout is native ETH on Base** (chain id 8453), a value transfer
+  (EIP-1559 fees) from the payout pool EOA
   (`PROVIDER_PAYOUT_POOL_PRIVATE_KEY`) via
-  `src/services/chain/eth_payout_client.py`.
+  `src/services/chain/eth_payout_client.py`. The gas limit is
+  `eth_estimateGas` × 1.25 (min 21000) -- **never a hard-coded 21000**,
+  because a payout wallet can be a smart-contract wallet (e.g. Coinbase
+  Smart Wallet on Base) whose `receive()` costs more than a plain EOA
+  transfer and would otherwise run out of gas and revert.
+- **Paid means confirmed.** The tx is signed locally and its hash + nonce
+  are written to the settlement row **before** broadcast. A settlement
+  becomes `'sent'` (earnings `'settled'`) only on a receipt with
+  `status == 1`. A receipt with `status == 0` (reverted: no value moved)
+  fails the settlement and reverts the earnings to `'accrued'`. No
+  receipt within `PROVIDER_PAYOUT_RECEIPT_TIMEOUT_SECONDS`, or a
+  broadcast call that errors after the node may have accepted the tx,
+  leaves the row `'pending'` (earnings `'settling'`) for the
+  reconciliation sweep below -- **never reverted while its recorded hash
+  could still land.**
 - **Conversion happens at settlement time**, once per run, at the
   Chainlink ETH/USD aggregator on Base
   (`0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70`, verified on-chain:
   `description()=="ETH / USD"`, 8 decimals). `wei = usd_micros * 1e18 *
   10^decimals // (1e6 * answer)` -- floored, never overpays. If the answer
   is non-positive or older than `ETH_USD_PRICE_MAX_AGE_SECONDS` (default
-  3600; the feed's Base heartbeat is 20 min) or can't be read, **the whole
-  run aborts and nobody is paid** -- earnings stay `'accrued'` and the
+  1800 ≈ 1.5× the feed's 1200s Base heartbeat, observed on-chain), or the
+  **Base L2 sequencer-uptime feed**
+  (`0xBCF85224fc0756B9Fa45aA7892530B47e10b6433`, verified on-chain) reports
+  the sequencer down or back up for less than
+  `BASE_SEQUENCER_GRACE_PERIOD_SECONDS` (default 3600), or anything can't
+  be read, **the whole run aborts and nobody is paid** -- earnings stay `'accrued'` and the
   `gpu_settlement` job run is recorded as failed. The price and its
   `updatedAt` are stored on every `provider_settlements` row
   (`eth_usd_price`, `price_updated_at`, `asset='ETH'`, `chain='base'`).
 - **Legacy WAYZ rows are never paid in ETH.** Rows accrued before the
   switch have `amount_usd_micros IS NULL` (only `amount_wei`); the
   settlement queries only claim rows with a USD amount. The WAYZ/wei
-  columns are kept (nullable) for history and still surfaced as
-  `*_wei` totals on the earnings endpoints.
+  columns are kept (nullable) for history and surfaced as
+  `legacy_wayz_*_wei` on the earnings endpoints.
 - `PROVIDER_PAYOUT_ASSET` (default `ETH`) is the switch; `ETH` is the only
   supported value -- anything else keeps the settlement scheduler from
   starting (logged at ERROR).
-- Not done (yet): no L2 sequencer-uptime feed check. A Base sequencer
-  outage freezes the price feed's `updatedAt`, which the staleness check
-  already catches.
 
 ## Two payout modes: `per_unit` (this doc) vs `emission`
 
@@ -346,32 +361,32 @@ migration since it hadn't merged when this was written).
 
 ### Stuck-pending reconciliation runbook (I3)
 
-Every settlement run first sweeps `provider_settlements` rows stuck
-`'pending'` for longer than `COMMUNITY_SETTLEMENT_STUCK_HOURS` (default
-2h) -- the crash window between `create_settlement`/
-`mark_earnings_settling` and `mark_settlement_sent`/
-`mark_earnings_settled`. For each stuck row:
+Every settlement run first sweeps `'pending'` `provider_settlements`
+rows (`reconcile_stuck_settlements`). Because the tx hash and nonce are
+recorded **before** broadcast, the rules are:
 
-1. **`tx_hash` present AND its on-chain receipt shows success**
-   (`status == 1`) → confirm it: mark `'sent'`, flip its `'settling'`
-   earnings to `'settled'`.
-2. **Everything else** -- no `tx_hash` at all (crashed before `transfer()`
-   even returned), a receipt showing an on-chain revert (`status == 0`),
-   or no receipt found after being stuck this long (very likely
-   dropped/never broadcast on Base's ~2s blocks) -- mark `'failed'` and
-   revert its earnings to `'accrued'` so a future run retries them.
+1. **No `tx_hash`**, older than `COMMUNITY_SETTLEMENT_STUCK_HOURS`
+   (default 2h): the run died before signing/recording, so nothing was
+   ever broadcast → mark `'failed'`, revert earnings to `'accrued'`.
+   Younger no-hash rows are left alone (a run may be in flight).
+2. **Receipt `status == 1`** (any age) → mark `'sent'`, earnings
+   `'settled'`.
+3. **Receipt `status == 0`** (any age) → mined but reverted, no value
+   moved → mark `'failed'`, revert earnings.
+4. **No receipt, and the pool's mined nonce is past `tx_nonce`** →
+   another tx consumed that nonce, so this hash can never land. The
+   receipt is re-checked once (guards a flaky RPC), then `'failed'` +
+   revert.
+5. **No receipt, nonce not yet consumed** (or the receipt lookup errored)
+   → **left `'pending'`**, logged at WARNING with its hash and nonce. The
+   tx could still land, so reverting would risk a double pay. It resolves
+   on its own once the pool mines any later tx (a dropped tx's nonce gets
+   reused). The provider is skipped by settlement while it's pending.
 
-**The one real risk this automatic sweep creates**: if the original
-transaction is somehow still in flight (e.g. a slow/congested RPC) and
-lands on-chain LATER than the 2h threshold, a provider whose earnings
-were reverted-and-retried by the sweep would end up paid twice once both
-transfers land. **Manual check before trusting an automatic-sweep
-outcome you're unsure about**: look up the pool EOA's address on
-[Basescan](https://basescan.org) and search its recent
-transaction history for the swept settlement's `error` field's mention of
-a `tx_hash` (if any) or the timeframe around its `created_at` -- confirm
-nothing landed before manually re-approving further settlement for that
-provider.
+**Operator check** for a long-pending row: look up its `tx_hash` and the
+pool EOA on [Basescan](https://basescan.org). If the tx is truly gone
+from the mempool and you need the nonce freed, send any 0-value tx from
+the pool at that nonce; the next sweep then resolves it via rule 4.
 
 - **No-op until funded**: while `PROVIDER_PAYOUT_POOL_PRIVATE_KEY` is
   unset the scheduler doesn't even start, matching the WAYZ staking
@@ -383,14 +398,28 @@ provider.
 ## Provider-facing endpoint
 
 `GET /gpu/providers/me/earnings` (auth) returns totals as
-`{accrued,settled,void}_usd` (decimal string) and `_usd_micros` (int), plus
-the legacy WAYZ `{accrued,settled,void}_wei` strings for pre-switch
-history, and `payout_asset: "ETH"`, `payout_chain: "base"`; the last 50
-`provider_work` rows (billing_ref, model, token counts, verification -- no
-hashes); settlements with `asset`, `chain`, `amount_usd`, `amount_wei`
-(in the settlement's asset), `eth_usd_price`, and a
-`https://basescan.org/tx/{tx_hash}` link (Snowtrace for legacy WAYZ rows);
-and a `tier`
+`{accrued,settled,void}_usd` (decimal string) and `_usd_micros` (int) --
+the source of truth -- plus ETH amounts that existing clients already
+read, kept meaningful (never zeroed):
+
+- `settled_wei` / `settled_eth`: ETH **actually paid** on Base (sum of
+  confirmed `'sent'` ETH settlements).
+- `accrued_wei` / `void_wei` (and `settling_wei` on the admin endpoint):
+  the USD balance converted at the current trusted ETH/USD price (the
+  same sequencer + staleness gate settlement uses, cached 5 min).
+  `null` only while no trusted price is available.
+- `eth_usd_price` (the display price used), `payout_asset: "ETH"`,
+  `payout_chain: "base"`, and `legacy_wayz_{status}_wei` for pre-switch
+  WAYZ history.
+
+It also returns the last 50 `provider_work` rows (billing_ref, model,
+token counts, verification -- no hashes), and settlements with `asset`,
+`chain`, `amount_usd`, `amount_wei`/`amount_eth` (in the settlement's
+asset), `eth_usd_price`, `confirmed` (true only after a status-1
+receipt), and a `https://basescan.org/tx/{tx_hash}` link (Snowtrace for
+legacy WAYZ rows). The emission block keeps `allocation_wayz` as a
+deprecated alias for `allocation_eth` (the USD allocation's ETH
+equivalent). Finally there's a `tier`
 object so an operator can see where they stand on the sliding scale:
 `{current_volume_7d, multiplier_bps, next_tier_min_tokens_7d}` --
 `next_tier_min_tokens_7d` is `null` once the provider is at (or above) the
@@ -414,7 +443,10 @@ client-supplied `provider_id`.
 | `BASE_RPC_URL` | `https://mainnet.base.org` | Base JSON-RPC (use a paid endpoint in prod) |
 | `BASE_CHAIN_ID` | `8453` | Base mainnet |
 | `BASE_ETH_USD_FEED_ADDRESS` | `0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70` | Chainlink ETH/USD aggregator on Base |
-| `ETH_USD_PRICE_MAX_AGE_SECONDS` | `3600` | older feed answer → run aborts, nobody paid |
+| `ETH_USD_PRICE_MAX_AGE_SECONDS` | `1800` | older feed answer → run aborts, nobody paid (~1.5× the 1200s heartbeat) |
+| `BASE_SEQUENCER_UPTIME_FEED_ADDRESS` | `0xBCF85224fc0756B9Fa45aA7892530B47e10b6433` | Chainlink L2 sequencer-uptime feed; empty disables the check |
+| `BASE_SEQUENCER_GRACE_PERIOD_SECONDS` | `3600` | no payouts until the sequencer has been up this long |
+| `PROVIDER_PAYOUT_RECEIPT_TIMEOUT_SECONDS` | `120` | per-payout receipt wait before leaving it pending for reconcile |
 | `PROVIDER_PAYOUT_GAS_RESERVE_WEI` | `1000000000000000` | ETH always left in the pool for gas |
 | `COMMUNITY_MIN_PAYOUT_USD` | `5` | minimum accrued USD to trigger a payout |
 | `COMMUNITY_MAX_PAYOUT_PER_RUN_USD` | `5000` | cumulative USD cap per settlement run |

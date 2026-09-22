@@ -1121,6 +1121,7 @@ async def run_scheduled_gpu_settlement():
                 "providers_considered": result.providers_considered,
                 "settlements_sent": result.settlements_sent,
                 "settlements_failed": result.settlements_failed,
+                "settlements_unconfirmed": result.settlements_unconfirmed,
                 "total_sent_wei": str(result.total_sent_wei),
                 "total_sent_usd_micros": result.total_sent_usd_micros,
                 "eth_usd_price": result.eth_usd_price,
@@ -1129,6 +1130,7 @@ async def run_scheduled_gpu_settlement():
                 "reconcile": {
                     "checked": reconcile_result.settlements_checked,
                     "confirmed_sent": reconcile_result.settlements_confirmed_sent,
+                    "left_pending": reconcile_result.settlements_left_pending,
                     "marked_failed": reconcile_result.settlements_marked_failed,
                 },
                 "interval_minutes": Config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS * 60,

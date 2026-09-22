@@ -1167,8 +1167,10 @@ GET /gpu/providers/me
 
 Requires auth. Returns the caller's provider row, their nodes, and an
 earnings summary (`{"payout_asset": "ETH", "payout_chain": "base", "accrued_usd": "0",
-"accrued_usd_micros": 0, "accrued_wei": "0", ...}` for `accrued`/`settled`/`void`;
-`*_wei` are legacy pre-2026-09-22 WAYZ amounts). `404` if not yet registered.
+"accrued_usd_micros": 0, "accrued_wei": "0", "accrued_eth": "0", ...}` for
+`accrued`/`settled`/`void` -- same shape as the `totals` block of `GET /gpu/providers/me/earnings`
+below: `settled_wei` is ETH actually paid, other `*_wei` are USD converted at the current price;
+`legacy_wayz_*_wei` hold pre-2026-09-22 WAYZ history). `404` if not yet registered.
 
 ### Register a Node
 
@@ -1425,9 +1427,12 @@ tier standing.
   "data": {
     "totals": {
       "payout_asset": "ETH", "payout_chain": "base",
-      "accrued_usd": "1.25", "accrued_usd_micros": 1250000, "accrued_wei": "0",
-      "settled_usd": "30", "settled_usd_micros": 30000000, "settled_wei": "0",
-      "void_usd": "0", "void_usd_micros": 0, "void_wei": "0"
+      "eth_usd_price": "3000",
+      "accrued_usd": "1.5", "accrued_usd_micros": 1500000,
+      "accrued_wei": "500000000000000", "accrued_eth": "0.0005", "legacy_wayz_accrued_wei": "0",
+      "settled_usd": "30", "settled_usd_micros": 30000000,
+      "settled_wei": "10000000000000000", "settled_eth": "0.01", "legacy_wayz_settled_wei": "0",
+      "void_usd": "0", "void_usd_micros": 0, "void_wei": "0", "void_eth": "0", "legacy_wayz_void_wei": "0"
     },
     "work": [
       { "billing_ref": "br-1", "model": "llama-3.1-8b-instruct", "prompt_tokens": 100,
@@ -1436,7 +1441,8 @@ tier standing.
     "settlements": [
       { "id": 1, "period_start": "2026-09-01T00:00:00Z", "period_end": "2026-09-02T00:00:00Z",
         "asset": "ETH", "chain": "base", "amount_usd": "30", "amount_wei": "10000000000000000",
-        "eth_usd_price": "3000.00000000", "status": "sent", "tx_hash": "0x...",
+        "amount_eth": "0.01", "eth_usd_price": "3000.00000000", "status": "sent", "confirmed": true,
+        "tx_hash": "0x...",
         "tx_url": "https://basescan.org/tx/0x...", "error": null, "created_at": "..." }
     ],
     "tier": { "current_volume_7d": 150000, "multiplier_bps": 2500, "next_tier_min_tokens_7d": 1000000 },
@@ -1445,6 +1451,8 @@ tier standing.
       "score": { "compute": "1.0", "speed": "0.9", "availability": "1.0", "unique_models": "0.5",
                  "raw": "0.955", "adjusted": "0.942", "share": "0.558" },
       "allocation_usd": "55.8",
+      "allocation_eth": "0.0186",
+      "allocation_wayz": "0.0186",
       "payout_asset": "ETH",
       "rank": 1,
       "providers_scored": 3

@@ -293,10 +293,14 @@ def _merge_heartbeat_models(
 def _earnings_summary(provider_id: int) -> dict[str, Any]:
     """Accrued/settled/void totals for a provider -- USD (paid in ETH on
     Base since 2026-09-22) plus the legacy WAYZ wei totals for history."""
-    from src.db.gpu_payouts import earnings_totals
-    from src.services.gpu.payout_views import usd_totals_view
+    from src.db.gpu_payouts import earnings_totals, eth_paid_wei
+    from src.services.gpu.payout_views import get_display_eth_usd_price, usd_totals_view
 
-    return usd_totals_view(earnings_totals(provider_id))
+    return usd_totals_view(
+        earnings_totals(provider_id),
+        price=get_display_eth_usd_price(),
+        paid_wei=eth_paid_wei(provider_id),
+    )
 
 
 # ---------------------------------------------------------------------------

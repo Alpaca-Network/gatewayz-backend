@@ -136,7 +136,13 @@ class TestResponseShape:
         del _json  # unused, kept for readability of the timestamp construction above
 
     def test_amounts_are_decimal_strings(self):
-        response = client.get("/admin/wayz/status")
+        from src.services.chain.eth_payout_client import EthUsdPrice
+
+        with patch(
+            "src.routes.admin_wayz.get_display_eth_usd_price",
+            return_value=EthUsdPrice(answer=3000 * 10**8, decimals=8, updated_at=0),
+        ):
+            response = client.get("/admin/wayz/status")
         data = response.json()["data"]
         staking = data["staking"]
         if "error" not in staking:

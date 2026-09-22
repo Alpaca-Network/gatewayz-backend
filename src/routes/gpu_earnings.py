@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.db.gpu_payouts import (
     earnings_totals,
+    eth_paid_wei,
     get_payout_tiers,
     get_provider_for_user,
     get_provider_verified_volume_7d,
@@ -26,7 +27,13 @@ from src.db.gpu_payouts import (
 from src.security.deps import get_user_id
 from src.services.emission.epoch import get_provider_emission_view
 from src.services.gpu.earnings import next_tier_min_tokens_7d, tier_multiplier_bps
-from src.services.gpu.payout_views import micros_to_usd, tx_url, usd_totals_view
+from src.services.gpu.payout_views import (
+    get_display_eth_usd_price,
+    micros_to_usd,
+    tx_url,
+    usd_totals_view,
+    wei_to_eth,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +70,10 @@ def _settlement_view(row: dict) -> dict[str, Any]:
         "chain": row.get("chain"),
         "amount_wei": str(amount_wei) if amount_wei is not None else None,
         "amount_usd": micros_to_usd(row.get("amount_usd_micros")),
+        "amount_eth": wei_to_eth(amount_wei) if asset == "ETH" else None,
+        # 'sent' only after an on-chain receipt with status 1; a 'pending' row
+        # with a tx_hash is broadcast but not yet confirmed.
+        "confirmed": row.get("status") == "sent",
         "eth_usd_price": (
             str(row["eth_usd_price"]) if row.get("eth_usd_price") is not None else None
         ),
@@ -98,7 +109,9 @@ async def get_my_earnings(user_id: int = Depends(get_user_id)) -> dict[str, Any]
     next_min = next_tier_min_tokens_7d(volume_7d, tiers)
 
     data: dict[str, Any] = {
-        "totals": usd_totals_view(totals),
+        "totals": usd_totals_view(
+            totals, price=get_display_eth_usd_price(), paid_wei=eth_paid_wei(provider_id)
+        ),
         "work": [_work_view(row) for row in work],
         "settlements": [_settlement_view(row) for row in settlements],
         "tier": {

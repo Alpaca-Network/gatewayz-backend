@@ -13,12 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.main import app
 from src.routes.gpu import _earnings_summary, _invalidate_node_adapter
-from src.security.deps import (
-    get_api_key,
-    get_current_user,
-    get_user_id,
-    require_admin_or_env_key,
-)
+from src.security.deps import get_api_key, get_current_user, get_user_id, require_admin_or_env_key
 from src.security.node_auth import get_node as get_auth_node
 
 # create_node's node_token_hash and node_auth's lookup both hash via
@@ -184,44 +179,60 @@ def test_get_my_provider_returns_provider_nodes_and_earnings(
     assert data["earnings"] == {"accrued_wei": "0", "settled_wei": "0", "void_wei": "0"}
 
 
+def _price_3000():
+    from src.services.chain.eth_payout_client import EthUsdPrice
+
+    return EthUsdPrice(answer=3000 * 10**8, decimals=8, updated_at=0)
+
+
+@patch("src.db.gpu_payouts.eth_paid_wei", return_value=10**16)
+@patch("src.services.gpu.payout_views.get_display_eth_usd_price")
 @patch("src.db.gpu_payouts.get_supabase_client")
-def test_earnings_summary_sums_accrued_settled_and_void_separately(mock_get_client):
+def test_earnings_summary_sums_accrued_settled_and_void_separately(
+    mock_get_client, mock_price, _mock_paid
+):
+    """PR #2364 review #3: the legacy `*_wei` keys stay meaningful ETH
+    amounts -- settled = ETH actually paid, accrued/void = USD converted at
+    the current trusted price -- alongside the USD source of truth."""
+    mock_price.return_value = _price_3000()
     fake_client = MagicMock()
     fake_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
         data=[
+            {"amount_usd_micros": 2_000_000, "amount_wei": None, "status": "accrued"},
             {"amount_usd_micros": 1_000_000, "amount_wei": None, "status": "accrued"},
-            {"amount_usd_micros": 400_000, "amount_wei": None, "status": "accrued"},
-            {"amount_usd_micros": 500_000, "amount_wei": None, "status": "settled"},
-            {"amount_usd_micros": 250_000, "amount_wei": None, "status": "void"},
+            {"amount_usd_micros": 30_000_000, "amount_wei": None, "status": "settled"},
+            {"amount_usd_micros": 300_000, "amount_wei": None, "status": "void"},
             {"amount_usd_micros": None, "amount_wei": "25", "status": "settled"},  # legacy WAYZ
         ]
     )
     mock_get_client.return_value = fake_client
 
-    assert _earnings_summary(1) == {
-        "payout_asset": "ETH",
-        "payout_chain": "base",
-        "accrued_usd": "1.4",
-        "accrued_usd_micros": 1_400_000,
-        "accrued_wei": "0",
-        "settled_usd": "0.5",
-        "settled_usd_micros": 500_000,
-        "settled_wei": "25",
-        "void_usd": "0.25",
-        "void_usd_micros": 250_000,
-        "void_wei": "0",
-    }
+    summary = _earnings_summary(1)
+
+    assert summary["payout_asset"] == "ETH"
+    assert summary["eth_usd_price"] == "3000"
+    assert summary["accrued_usd"] == "3"
+    assert summary["accrued_wei"] == str(10**15)  # $3 @ $3000 = 0.001 ETH
+    assert summary["accrued_eth"] == "0.001"
+    assert summary["settled_usd"] == "30"
+    assert summary["settled_wei"] == str(10**16)  # ETH actually paid on Base
+    assert summary["void_usd_micros"] == 300_000
+    assert summary["void_wei"] == str(10**14)
+    assert summary["legacy_wayz_settled_wei"] == "25"
 
 
+@patch("src.db.gpu_payouts.eth_paid_wei", return_value=0)
 @patch("src.db.gpu_payouts.get_supabase_client")
-def test_earnings_summary_zeros_on_lookup_error(mock_get_client):
+def test_earnings_summary_zeros_on_lookup_error(mock_get_client, _mock_paid):
     mock_get_client.side_effect = RuntimeError("boom")
 
     summary = _earnings_summary(1)
     assert summary["accrued_usd_micros"] == 0
     assert summary["settled_usd_micros"] == 0
     assert summary["void_usd_micros"] == 0
-    assert summary["accrued_wei"] == "0"
+    assert summary["settled_wei"] == "0"
+    # No trusted price in tests -> the converted amounts are unknown, not 0.
+    assert summary["accrued_wei"] is None
 
 
 @patch("src.routes.gpu.get_provider_by_user")

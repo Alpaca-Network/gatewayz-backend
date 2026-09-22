@@ -47,20 +47,23 @@ from src.db.gpu_payouts import (
     get_pending_settlement,
     list_accrued_earnings,
     list_approved_providers,
+    list_pending_settlements,
     list_settling_earnings_for_settlement,
-    list_stuck_pending_settlements,
     mark_earnings_accrued,
     mark_earnings_settled,
     mark_earnings_settling,
     mark_settlement_failed,
     mark_settlement_sent,
+    record_settlement_tx,
     update_settlement_amount,
 )
 from src.services.chain.eth_payout_client import (
     EthPayoutClient,
+    SignedTransfer,
     StalePriceError,
+    TransferBroadcastError,
+    TransferNotSentError,
     usd_micros_to_wei,
-    validate_price,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,6 +91,9 @@ class SettlementResult:
     providers_skipped_insufficient_pool: int = 0
     total_sent_wei: int = field(default=0)
     total_sent_usd_micros: int = field(default=0)
+    # Broadcast (or possibly broadcast) but no receipt yet -- left 'pending'
+    # for reconcile_stuck_settlements; earnings stay 'settling'.
+    settlements_unconfirmed: int = 0
     eth_usd_price: str | None = None
     aborted_reason: str | None = None
 
@@ -105,7 +111,15 @@ async def run_settlement_once(client: EthPayoutClient) -> SettlementResult:
     thresholds before any transfer is attempted.
 
     Aborts the whole run (paying no one) if the ETH/USD price can't be
-    read or is stale -- see `aborted_reason`.
+    read or is stale, or the Base sequencer is down / in its grace period
+    -- see `aborted_reason`.
+
+    Money moves to 'sent'/'settled' ONLY on a receipt with status 1. A
+    receipt with status 0 (e.g. out of gas) fails the settlement and
+    reverts the earnings to 'accrued'. No receipt within
+    PROVIDER_PAYOUT_RECEIPT_TIMEOUT_SECONDS, or an ambiguous broadcast
+    error, leaves the settlement 'pending' with its pre-recorded tx_hash for
+    reconcile_stuck_settlements -- never reverted while it could land.
 
     Idempotent: a provider with an already-'pending' settlement (a
     previous run that crashed mid-flight) is skipped entirely rather than
@@ -121,8 +135,7 @@ async def run_settlement_once(client: EthPayoutClient) -> SettlementResult:
     remaining_cap_usd_micros = usd_to_micros(Config.COMMUNITY_MAX_PAYOUT_PER_RUN_USD)
 
     try:
-        price = await asyncio.to_thread(client.eth_usd_price)
-        validate_price(price, Config.ETH_USD_PRICE_MAX_AGE_SECONDS)
+        price = await asyncio.to_thread(client.trusted_eth_usd_price)
     except StalePriceError as e:
         logger.error("settlement: %s -- aborting this run, nobody paid", e)
         result.aborted_reason = f"stale_price: {e}"
@@ -257,22 +270,81 @@ async def run_settlement_once(client: EthPayoutClient) -> SettlementResult:
             result.providers_skipped_insufficient_pool += 1
             continue
 
+        def _record(signed: SignedTransfer, _sid: int = settlement_id) -> bool:
+            return record_settlement_tx(_sid, signed.tx_hash, signed.nonce, signed.gas)
+
         try:
-            tx_hash = await client.transfer(payout_wallet, total_wei)
-        except Exception as e:
-            logger.error("settlement: transfer failed for provider %s: %s", provider_id, e)
+            signed = await client.transfer(payout_wallet, total_wei, _record)
+        except TransferNotSentError as e:
+            # Provably never broadcast -- safe to release the earnings.
+            logger.error("settlement: transfer not sent for provider %s: %s", provider_id, e)
             mark_settlement_failed(settlement_id, str(e))
             mark_earnings_accrued(earning_ids, settlement_id)
             result.settlements_failed += 1
             continue
+        except TransferBroadcastError as e:
+            # The node may have accepted it. The hash is already recorded,
+            # so leave the row 'pending' and let reconcile resolve it by
+            # receipt/nonce. Count the money as spent for this run.
+            logger.error(
+                "settlement: broadcast outcome unknown for provider %s (tx=%s) -- left "
+                "pending for reconciliation: %s",
+                provider_id,
+                e.tx_hash,
+                e.cause,
+            )
+            result.settlements_unconfirmed += 1
+            spendable_wei -= total_wei
+            remaining_cap_usd_micros -= total_usd
+            continue
 
-        mark_settlement_sent(settlement_id, tx_hash)
-        mark_earnings_settled(earning_ids, settlement_id)
-        result.settlements_sent += 1
-        result.total_sent_wei += total_wei
-        result.total_sent_usd_micros += total_usd
+        # Broadcast accepted: from here the ETH may leave the pool.
         spendable_wei -= total_wei
         remaining_cap_usd_micros -= total_usd
+
+        try:
+            receipt = await asyncio.to_thread(
+                client.wait_for_receipt,
+                signed.tx_hash,
+                Config.PROVIDER_PAYOUT_RECEIPT_TIMEOUT_SECONDS,
+            )
+        except Exception as e:
+            logger.warning("settlement: receipt poll failed for tx %s: %s", signed.tx_hash, e)
+            receipt = None
+
+        if receipt is None:
+            logger.warning(
+                "settlement: no receipt yet for provider %s tx %s -- left pending for "
+                "reconciliation",
+                provider_id,
+                signed.tx_hash,
+            )
+            result.settlements_unconfirmed += 1
+            continue
+
+        if receipt.get("status") == 1:
+            mark_settlement_sent(settlement_id, signed.tx_hash)
+            mark_earnings_settled(earning_ids, settlement_id)
+            result.settlements_sent += 1
+            result.total_sent_wei += total_wei
+            result.total_sent_usd_micros += total_usd
+        else:
+            # Mined but reverted: no value moved (only gas), so the money
+            # is still owed -- release it for a future run.
+            logger.error(
+                "settlement: tx %s for provider %s REVERTED on-chain (gas_limit=%s) -- "
+                "earnings reverted to accrued",
+                signed.tx_hash,
+                provider_id,
+                signed.gas,
+            )
+            mark_settlement_failed(
+                settlement_id, f"transaction reverted on-chain: {signed.tx_hash}"
+            )
+            mark_earnings_accrued(earning_ids, settlement_id)
+            result.settlements_failed += 1
+            spendable_wei += total_wei
+            remaining_cap_usd_micros += total_usd
 
     return result
 
@@ -282,59 +354,130 @@ class ReconcileResult:
     settlements_checked: int = 0
     settlements_confirmed_sent: int = 0
     settlements_marked_failed: int = 0
+    settlements_left_pending: int = 0
+
+
+def _older_than(row: dict, cutoff: datetime) -> bool:
+    created = row.get("created_at")
+    if not created:
+        return True
+    try:
+        ts = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts < cutoff
 
 
 async def reconcile_stuck_settlements(client: EthPayoutClient) -> ReconcileResult:
-    """Resolve provider_settlements rows stuck 'pending' for longer than
-    COMMUNITY_SETTLEMENT_STUCK_HOURS (default 2h) -- PR #2288 review I3.
-    Crash-recovery for the window between create_settlement/
-    mark_earnings_settling and mark_settlement_sent/mark_earnings_settled.
-    Call this BEFORE run_settlement_once in the same scheduled run (see
-    src/services/scheduled_sync.py) so a stuck row is freed up in time to
-    be reconsidered the same day, not one day later.
+    """Resolve 'pending' provider_settlements rows (crash recovery, receipt
+    timeouts, ambiguous broadcasts). Call this BEFORE run_settlement_once
+    in the same scheduled run (see src/services/scheduled_sync.py).
 
-    Rule (documented as the runbook in docs/gpu/VERIFICATION_AND_PAYOUTS.md):
-    if tx_hash is present AND the on-chain receipt shows success
-    (status == 1), confirm it (mark sent, flip its earnings to settled).
-    In EVERY other case -- no tx_hash at all (crashed before transfer()
-    even returned), a receipt showing an on-chain revert (status == 0), or
-    no receipt found after being stuck this long (on Base's ~2s blocks,
-    very likely dropped or never broadcast) -- mark the settlement failed
-    and revert its earnings to 'accrued' so a future run retries them.
+    The tx hash is recorded BEFORE broadcast (see EthPayoutClient.transfer),
+    so the rules are (runbook: docs/gpu/VERIFICATION_AND_PAYOUTS.md):
 
-    This deliberately treats "no receipt found after 2h+" as a failure
-    rather than waiting indefinitely. The runbook calls out the one real
-    risk this creates: if the original transaction is somehow still in
-    flight (e.g. a slow/congested RPC) and lands on-chain LATER, a
-    provider whose earnings were reverted-and-retried would be paid
-    twice. Operators should check the pool EOA's transaction history on
-    Basescan for the recorded tx_hash before manually re-enabling
-    settlement for a provider this swept, if that ever looks ambiguous.
+    - **No tx_hash**, and older than COMMUNITY_SETTLEMENT_STUCK_HOURS: the
+      run died before signing/recording, so nothing was ever broadcast --
+      mark failed, revert earnings to 'accrued'. (Younger rows are skipped:
+      a run may still be in flight.)
+    - **Receipt status 1** (any age): confirm -- mark 'sent', earnings
+      'settled'.
+    - **Receipt status 0** (any age): mined but reverted, no value moved --
+      mark failed, revert earnings.
+    - **No receipt, and the pool's MINED nonce is past tx_nonce**: another
+      transaction consumed that nonce, so this hash can never land --
+      re-check the receipt once (guards a flaky RPC), then mark failed and
+      revert.
+    - **No receipt, nonce not yet consumed** (or unknown): the tx could
+      still land -- LEAVE IT PENDING. Never revert while a recorded hash
+      might still be mined; that's the double-pay the old 2h rule allowed.
+      Logged at WARNING with its age so ops can see it. It resolves itself
+      as soon as the pool sends any later transaction (which consumes the
+      nonce if this one was dropped).
+
+    Non-ETH (legacy WAYZ) pending rows are skipped with a warning.
     """
     result = ReconcileResult()
-    stuck_before = (
-        datetime.now(UTC) - timedelta(hours=Config.COMMUNITY_SETTLEMENT_STUCK_HOURS)
-    ).isoformat()
+    stuck_before = datetime.now(UTC) - timedelta(hours=Config.COMMUNITY_SETTLEMENT_STUCK_HOURS)
+    mined_nonce: int | None = None
 
-    for settlement in list_stuck_pending_settlements(stuck_before):
-        result.settlements_checked += 1
+    for settlement in list_pending_settlements():
         settlement_id = settlement["id"]
         tx_hash = settlement.get("tx_hash")
+
+        if (settlement.get("asset") or "ETH") != "ETH":
+            logger.warning(
+                "settlement reconciliation: skipping non-ETH pending settlement %s (asset=%s)",
+                settlement_id,
+                settlement.get("asset"),
+            )
+            continue
+        if not tx_hash and not _older_than(settlement, stuck_before):
+            continue
+
+        result.settlements_checked += 1
         earning_ids = [row["id"] for row in list_settling_earnings_for_settlement(settlement_id)]
 
-        confirmed = False
-        if tx_hash:
-            try:
-                receipt = await asyncio.to_thread(client.get_receipt, tx_hash)
-            except Exception as e:
-                logger.warning(
-                    "settlement reconciliation: get_receipt failed for tx %s: %s", tx_hash, e
-                )
-                receipt = None
-            if receipt is not None and receipt.get("status") == 1:
-                confirmed = True
+        if not tx_hash:
+            mark_settlement_failed(
+                settlement_id,
+                "stuck pending with no recorded tx_hash -- never broadcast; reverted by the "
+                "reconciliation sweep",
+            )
+            mark_earnings_accrued(earning_ids, settlement_id)
+            result.settlements_marked_failed += 1
+            continue
 
-        if confirmed:
+        try:
+            receipt = await asyncio.to_thread(client.get_receipt, tx_hash)
+        except Exception as e:
+            logger.warning(
+                "settlement reconciliation: get_receipt failed for tx %s: %s -- left pending",
+                tx_hash,
+                e,
+            )
+            result.settlements_left_pending += 1
+            continue
+
+        if receipt is None:
+            tx_nonce = settlement.get("tx_nonce")
+            if tx_nonce is not None and mined_nonce is None:
+                try:
+                    mined_nonce = await asyncio.to_thread(client.confirmed_nonce)
+                except Exception as e:
+                    logger.warning("settlement reconciliation: confirmed_nonce failed: %s", e)
+            if tx_nonce is not None and mined_nonce is not None and mined_nonce > int(tx_nonce):
+                try:
+                    receipt = await asyncio.to_thread(client.get_receipt, tx_hash)
+                except Exception:
+                    receipt = None
+                    result.settlements_left_pending += 1
+                    continue
+                if receipt is None:
+                    mark_settlement_failed(
+                        settlement_id,
+                        f"tx {tx_hash} was replaced (pool nonce {tx_nonce} consumed by another "
+                        "transaction) -- can never land; earnings reverted",
+                    )
+                    mark_earnings_accrued(earning_ids, settlement_id)
+                    result.settlements_marked_failed += 1
+                    continue
+            else:
+                logger.warning(
+                    "settlement reconciliation: settlement %s tx %s (nonce %s) has no receipt "
+                    "and its nonce is not yet consumed (pool mined nonce %s) -- left pending; "
+                    "it may still land",
+                    settlement_id,
+                    tx_hash,
+                    tx_nonce,
+                    mined_nonce,
+                )
+                result.settlements_left_pending += 1
+                continue
+
+        if receipt.get("status") == 1:
             mark_settlement_sent(settlement_id, tx_hash)
             mark_earnings_settled(earning_ids, settlement_id)
             result.settlements_confirmed_sent += 1
@@ -344,17 +487,12 @@ async def reconcile_stuck_settlements(client: EthPayoutClient) -> ReconcileResul
                 tx_hash,
             )
         else:
-            mark_settlement_failed(
-                settlement_id,
-                "stuck pending beyond COMMUNITY_SETTLEMENT_STUCK_HOURS with no confirmed "
-                "on-chain success -- reconciled by the automatic sweep; verify manually "
-                "before relying on a retry (see docs/gpu/VERIFICATION_AND_PAYOUTS.md)",
-            )
+            mark_settlement_failed(settlement_id, f"transaction reverted on-chain: {tx_hash}")
             mark_earnings_accrued(earning_ids, settlement_id)
             result.settlements_marked_failed += 1
             logger.warning(
-                "settlement reconciliation: marked settlement %s failed (tx_hash=%s) and "
-                "reverted %s earning(s) to accrued",
+                "settlement reconciliation: settlement %s tx %s reverted on-chain -- %s "
+                "earning(s) back to accrued",
                 settlement_id,
                 tx_hash,
                 len(earning_ids),

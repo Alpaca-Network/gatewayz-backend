@@ -504,3 +504,60 @@ def test_get_public_emission_summary_is_aggregate_only(mock_latest_epoch, emissi
         "last_epoch",
     }
     assert summary["last_epoch"] == "2026-09-12"
+
+
+@patch("src.services.gpu.payout_views.get_display_eth_usd_price")
+@patch("src.services.emission.epoch.list_provider_scores_for_epoch")
+@patch("src.services.emission.epoch.get_latest_provider_score")
+def test_provider_emission_view_keeps_allocation_wayz_as_an_eth_equivalent(
+    mock_latest, mock_epoch_scores, mock_price
+):
+    """PR #2364 review #3: existing clients read `allocation_wayz` -- it
+    stays meaningful (the USD allocation's ETH equivalent at the current
+    trusted price), never zeroed or removed."""
+    from src.services.chain.eth_payout_client import EthUsdPrice
+
+    mock_price.return_value = EthUsdPrice(answer=3000 * 10**8, decimals=8, updated_at=0)
+    mock_latest.return_value = {
+        "epoch_date": "2026-09-22",
+        "compute": "1",
+        "speed": "1",
+        "availability": "1",
+        "unique_models": "1",
+        "raw_score": "1",
+        "adjusted_score": "1",
+        "share": "1",
+        "allocation_wei": "0",
+        "allocation_usd_micros": 30_000_000,
+    }
+    mock_epoch_scores.return_value = [{"provider_id": 1, "share": "1"}]
+
+    view = epoch.get_provider_emission_view(1)
+
+    assert view["allocation_usd"] == "30"
+    assert view["allocation_eth"] == "0.01"
+    assert view["allocation_wayz"] == "0.01"
+
+
+@patch("src.services.emission.epoch.list_provider_scores_for_epoch")
+@patch("src.services.emission.epoch.get_latest_provider_score")
+def test_provider_emission_view_legacy_wayz_epoch_keeps_its_wayz_amount(
+    mock_latest, mock_epoch_scores
+):
+    mock_latest.return_value = {
+        "epoch_date": "2026-09-12",
+        "compute": "1",
+        "speed": "1",
+        "availability": "1",
+        "unique_models": "1",
+        "raw_score": "1",
+        "adjusted_score": "1",
+        "share": "1",
+        "allocation_wei": str(2 * 10**18),
+    }
+    mock_epoch_scores.return_value = [{"provider_id": 1, "share": "1"}]
+
+    view = epoch.get_provider_emission_view(1)
+
+    assert view["allocation_wayz"] == "2"
+    assert view["allocation_usd"] is None

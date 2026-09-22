@@ -71,6 +71,15 @@ alter table public.provider_settlements
     add column if not exists eth_usd_price numeric(38, 8) null;
 alter table public.provider_settlements
     add column if not exists price_updated_at timestamptz null;
+-- Recorded BEFORE broadcast (hash derived from the locally signed tx), so
+-- a crash or RPC error mid-send can never lose track of a transfer that
+-- may still land. 'pending' + tx_hash == broadcast, awaiting a receipt;
+-- 'sent' only after a receipt with status 1. Reconcile resolves by
+-- receipt, or by tx_nonce once the pool's mined nonce has passed it.
+alter table public.provider_settlements
+    add column if not exists tx_nonce bigint null;
+alter table public.provider_settlements
+    add column if not exists gas_limit bigint null;
 
 comment on column public.provider_settlements.amount_wei is
   'Amount transferred in the settlement asset''s smallest unit (wei for both WAYZ and ETH).';

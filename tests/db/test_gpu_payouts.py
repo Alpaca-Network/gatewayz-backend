@@ -538,12 +538,37 @@ def test_get_pending_settlement_returns_none_when_absent(sb):
         assert gpu_payouts.get_pending_settlement(1) is None
 
 
-def test_list_stuck_pending_settlements_returns_rows(sb):
-    rows = [{"id": 1, "status": "pending"}]
+def test_list_pending_settlements_returns_all_pending_rows(sb):
+    rows = [{"id": 1, "status": "pending", "tx_hash": "0xabc"}]
     client, query = _client_with(rows)
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
-        assert gpu_payouts.list_stuck_pending_settlements("2026-09-01T00:00:00Z") == rows
+        assert gpu_payouts.list_pending_settlements() == rows
     query.eq.assert_any_call("status", "pending")
+
+
+def test_record_settlement_tx_saves_hash_and_nonce_on_the_pending_row(sb):
+    client, query = _client_with([{"id": 9}])
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.record_settlement_tx(9, "0xhash", 12, 30000) is True
+    query.update.assert_called_once_with({"tx_hash": "0xhash", "tx_nonce": 12, "gas_limit": 30000})
+    query.eq.assert_any_call("id", 9)
+    query.eq.assert_any_call("status", "pending")
+
+
+def test_record_settlement_tx_returns_false_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.record_settlement_tx(9, "0xhash", 12, 30000) is False
+
+
+def test_eth_paid_wei_sums_confirmed_eth_settlements(sb):
+    client, query = _client_with([{"amount_wei": "100"}, {"amount_wei": "250"}])
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.eth_paid_wei(5) == 350
+    query.eq.assert_any_call("asset", "ETH")
+    query.eq.assert_any_call("status", "sent")
+    query.eq.assert_any_call("provider_id", 5)
 
 
 def test_update_settlement_amount_updates_row(sb):
