@@ -654,9 +654,9 @@ class TestMapProviderErrorHTTPX:
         mapped = map_provider_error("openrouter", "gpt-4", error)
 
         assert mapped.status_code == 401
-        assert mapped.status_code in FAILOVER_STATUS_CODES, (
-            "an expired provider credential must still fail over to another provider"
-        )
+        assert (
+            mapped.status_code in FAILOVER_STATUS_CODES
+        ), "an expired provider credential must still fail over to another provider"
         assert names_our_credential(mapped.detail)
 
     def test_map_httpx_status_error_404(self):
@@ -1244,9 +1244,9 @@ class TestProviderFailoverIntegration:
         for status_code, expected_should_failover in test_cases:
             exc = HTTPException(status_code=status_code, detail="Test")
             result = should_failover(exc)
-            assert result == expected_should_failover, (
-                f"Status {status_code} should {' ' if expected_should_failover else 'not '}failover"
-            )
+            assert (
+                result == expected_should_failover
+            ), f"Status {status_code} should {' ' if expected_should_failover else 'not '}failover"
 
     def test_error_mapping_preserves_provider_context(self):
         """Test error messages include provider and model context"""
