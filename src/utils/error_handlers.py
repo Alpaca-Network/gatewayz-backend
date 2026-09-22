@@ -11,6 +11,7 @@ Usage:
     app.add_exception_handler(HTTPException, detailed_http_exception_handler)
 """
 
+import http
 import logging
 from typing import Any
 
@@ -19,6 +20,28 @@ from fastapi.responses import JSONResponse
 
 from src.schemas.errors import ErrorResponse
 from src.utils.errors import DetailedErrorFactory
+
+# Placeholder used when an HTTPException carried no detail of its own.
+_NO_DETAIL = "An error occurred"
+
+
+def _stated_reason(detail: str, status_code: int) -> str | None:
+    """The cause a route actually named, or None if it named none.
+
+    Starlette fills a detail-less HTTPException with the status phrase, so
+    "Service Unavailable" means the route said nothing -- not that it
+    diagnosed something.
+    """
+    stated = (detail or "").strip()
+    if not stated or stated == _NO_DETAIL:
+        return None
+    try:
+        if stated.casefold() == http.HTTPStatus(status_code).phrase.casefold():
+            return None
+    except ValueError:  # not a standard status code
+        pass
+    return stated
+
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +108,7 @@ def _map_http_exception_to_detailed_error(
         ErrorResponse with detailed error information
     """
     status_code = exc.status_code
-    detail = str(exc.detail) if exc.detail else "An error occurred"
+    detail = str(exc.detail) if exc.detail else _NO_DETAIL
 
     # Extract endpoint info from request if available
     endpoint = None
@@ -195,7 +218,21 @@ def _map_http_exception_to_detailed_error(
                 request_id=request_id,
             )
         elif status_code == 503:
-            return DetailedErrorFactory.service_unavailable(request_id=request_id)
+            # Keep the reason the route gave. These details are written by us,
+            # not copied from an upstream body (that case is the `provider` /
+            # `upstream` branch above, which is already sanitized), so passing
+            # one through leaks nothing -- while discarding it turned
+            # "USAGE_SIGNING_KEY is not set" into "high load, try again
+            # shortly" and hid a one-variable fix behind a claim about traffic.
+            # A bare 503 keeps the generic message rather than starting to
+            # claim a config problem it knows nothing about. Two shapes count
+            # as "named nothing": our sentinel above, and Starlette's default,
+            # which fills `detail` with the status phrase ("Service
+            # Unavailable") whenever a route raises HTTPException(503) alone.
+            return DetailedErrorFactory.service_unavailable(
+                request_id=request_id,
+                reason=_stated_reason(detail, status_code),
+            )
         else:
             # Generic provider error
             return DetailedErrorFactory.provider_error(
