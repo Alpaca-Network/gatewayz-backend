@@ -20,6 +20,7 @@ pre-switch WAYZ history is under `legacy_wayz_<status>_wei`.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from decimal import Decimal
 from typing import Any
@@ -37,6 +38,7 @@ _SNOWTRACE_TX_URL = "https://testnet.snowtrace.io/tx/{tx_hash}"
 _PRICE_TTL_SECONDS = 300
 _PRICE_FAILURE_TTL_SECONDS = 60
 _price_cache: tuple[float, EthUsdPrice | None] | None = None
+_refresh_lock = threading.Lock()
 
 
 def _fetch_price() -> EthUsdPrice:
@@ -45,21 +47,36 @@ def _fetch_price() -> EthUsdPrice:
     return EthPriceReader.from_config().trusted_eth_usd_price()
 
 
-def get_display_eth_usd_price() -> EthUsdPrice | None:
-    """Trusted (sequencer-checked, fresh) ETH/USD price for display, cached.
-    None when it can't be read or isn't trustworthy right now."""
+def _refresh_price() -> None:
     global _price_cache
-    now = time.monotonic()
-    if _price_cache is not None and now < _price_cache[0]:
-        return _price_cache[1]
     try:
         price = _fetch_price()
-        _price_cache = (now + _PRICE_TTL_SECONDS, price)
+        _price_cache = (time.monotonic() + _PRICE_TTL_SECONDS, price)
     except Exception as e:
         logger.info(f"display ETH/USD price unavailable: {e}")
-        price = None
-        _price_cache = (now + _PRICE_FAILURE_TTL_SECONDS, None)
-    return price
+        _price_cache = (time.monotonic() + _PRICE_FAILURE_TTL_SECONDS, None)
+    finally:
+        _refresh_lock.release()
+
+
+def get_display_eth_usd_price() -> EthUsdPrice | None:
+    """Trusted (sequencer-checked, fresh) ETH/USD price for display, cached.
+    None when it can't be read or isn't trustworthy right now.
+
+    Never blocks the caller on RPC: these are called from async routes, and
+    a slow/down Base RPC (up to several 10s timeouts) would stall the event
+    loop. An expired cache returns the last known value while a single
+    background thread refreshes it; a cold cache returns None until the
+    first refresh lands (clients already handle a null `_wei`)."""
+    cached = _price_cache
+    if cached is not None and time.monotonic() < cached[0]:
+        return cached[1]
+    if _refresh_lock.acquire(blocking=False):
+        threading.Thread(target=_refresh_price, name="eth-usd-display", daemon=True).start()
+    if cached is None:
+        return None
+    # Serve a stale-but-previously-trusted price for at most one extra TTL.
+    return cached[1] if time.monotonic() < cached[0] + _PRICE_TTL_SECONDS else None
 
 
 def micros_to_usd(amount: int | str | None) -> str | None:
