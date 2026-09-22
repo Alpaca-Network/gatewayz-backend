@@ -40,3 +40,19 @@ def test_native_org_prefix_routes_to_native_provider(model_id, expected):
 def test_openrouter_suffix_still_wins_for_glm():
     # :exacto is an OpenRouter-only variant and must keep routing there.
     assert mt.detect_provider_from_model_id("z-ai/glm-4.6:exacto") == "openrouter"
+
+
+@pytest.mark.parametrize(
+    ("slug", "catalog_id", "upstream_id"),
+    [
+        ("zai", "zai/glm-5.3", "glm-5.3"),
+        ("moonshot", "moonshot/kimi-k3", "kimi-k3"),
+        ("meta", "meta/muse-spark-1.3", "muse-spark-1.3"),
+    ],
+)
+def test_native_adapter_strips_catalog_prefix(slug, catalog_id, upstream_id):
+    # Catalog ids carry the slug prefix; the upstream APIs only know bare ids.
+    from src.services.providers.adapter_configs import ADAPTER_CONFIGS
+    from src.services.providers.openai_compat import make_adapter
+
+    assert make_adapter(ADAPTER_CONFIGS[slug])._resolve_model(catalog_id) == upstream_id
