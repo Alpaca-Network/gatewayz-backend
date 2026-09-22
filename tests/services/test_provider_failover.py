@@ -31,6 +31,18 @@ from src.services.provider_failover import (
 )
 
 
+def names_our_credential(detail) -> bool:
+    """The upstream-auth message names the provider AND absolves the caller.
+
+    Replaces a bare `"authentication" in detail` check. The old message was
+    "<provider> authentication error", which reads next to a 401 as "your key
+    is bad" -- so a partner's engineer rotates a key that was never the
+    problem. The failing credential is OURS. (2026-09-22)
+    """
+    text = str(detail).lower()
+    return "not a problem with your api key" in text and "gatewayz" in text
+
+
 @pytest.fixture(autouse=True)
 def _pin_full_provider_roster():
     """Test the failover-chain algorithm against the full hardcoded roster.
@@ -619,7 +631,21 @@ class TestMapProviderErrorHTTPX:
         assert "rate limit" in mapped.detail.lower()
 
     def test_map_httpx_status_error_401(self):
-        """Test httpx 401 error maps to 500 (internal auth issue)"""
+        """Test httpx 401 error maps to 401, and stays eligible for failover.
+
+        Changed 2026-09-22. This asserted 500 and defended it as "internal auth
+        issue" -- which is right about whose fault it is and wrong about what
+        should happen next.
+
+        500 is NOT in FAILOVER_STATUS_CODES. So this branch did not merely give
+        a different answer from the four other paths handling the same
+        condition; it silently switched OFF failover for it. A provider whose
+        key had expired took the request down instead of handing it to the next
+        provider, which is the one thing that could still have served it.
+
+        401 keeps the request alive. The message carries what the status cannot
+        -- that the failing credential is ours, not the caller's.
+        """
         response = Mock()
         response.status_code = 401
         response.headers = {}
@@ -627,8 +653,11 @@ class TestMapProviderErrorHTTPX:
         error = httpx.HTTPStatusError("Unauthorized", request=Mock(), response=response)
         mapped = map_provider_error("openrouter", "gpt-4", error)
 
-        assert mapped.status_code == 500
-        assert "authentication" in mapped.detail.lower()
+        assert mapped.status_code == 401
+        assert mapped.status_code in FAILOVER_STATUS_CODES, (
+            "an expired provider credential must still fail over to another provider"
+        )
+        assert names_our_credential(mapped.detail)
 
     def test_map_httpx_status_error_404(self):
         """Test httpx 404 error indicates model not found"""
@@ -734,7 +763,7 @@ class TestMapProviderErrorOpenAI:
         mapped = map_provider_error("openrouter", "gpt-4", error)
 
         assert mapped.status_code == 401
-        assert "authentication" in mapped.detail.lower()
+        assert names_our_credential(mapped.detail)
 
     def test_map_permission_denied_error(self):
         """Test PermissionDeniedError maps to 401"""
@@ -746,7 +775,7 @@ class TestMapProviderErrorOpenAI:
 
         # Should map to 401 (authentication issue)
         assert mapped.status_code == 401
-        assert "authentication" in mapped.detail.lower()
+        assert names_our_credential(mapped.detail)
 
     @patch("src.services.provider_failover.alert_provider_auth_failure")
     def test_auth_error_triggers_alert(self, mock_alert):
@@ -840,7 +869,7 @@ class TestMapProviderErrorOpenAI:
 
         # 403 should be mapped to 401 for auth error consistency
         assert mapped.status_code == 401
-        assert "authentication" in mapped.detail.lower()
+        assert names_our_credential(mapped.detail)
         assert "openrouter" in mapped.detail.lower()
 
 
@@ -899,7 +928,7 @@ class TestMapProviderErrorCerebras:
         mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
 
         assert mapped.status_code == 401
-        assert "authentication" in mapped.detail.lower()
+        assert names_our_credential(mapped.detail)
 
     def test_map_cerebras_permission_denied_error(self):
         """Test Cerebras PermissionDeniedError maps to 401"""
@@ -911,7 +940,7 @@ class TestMapProviderErrorCerebras:
 
         # Should map to 401 (authentication issue)
         assert mapped.status_code == 401
-        assert "authentication" in mapped.detail.lower()
+        assert names_our_credential(mapped.detail)
 
     def test_map_cerebras_not_found_error(self):
         """Test Cerebras NotFoundError indicates model not available"""
@@ -977,7 +1006,7 @@ class TestMapProviderErrorCerebras:
         mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
 
         assert mapped.status_code == 401
-        assert "authentication" in mapped.detail.lower()
+        assert names_our_credential(mapped.detail)
 
     def test_map_cerebras_api_status_error_404_generic(self):
         """Test generic Cerebras APIStatusError with 404 provides proper error message"""
@@ -1048,7 +1077,7 @@ class TestMapProviderErrorCerebras:
         mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
 
         assert mapped.status_code == 401
-        assert "authentication" in mapped.detail.lower()
+        assert names_our_credential(mapped.detail)
 
     def test_map_cerebras_permission_denied_error(self):
         """Test Cerebras PermissionDeniedError maps to 401"""
@@ -1060,7 +1089,7 @@ class TestMapProviderErrorCerebras:
 
         # Should map to 401 (authentication issue)
         assert mapped.status_code == 401
-        assert "authentication" in mapped.detail.lower()
+        assert names_our_credential(mapped.detail)
 
     def test_map_cerebras_not_found_error(self):
         """Test Cerebras NotFoundError indicates model not available"""
@@ -1126,7 +1155,7 @@ class TestMapProviderErrorCerebras:
         mapped = map_provider_error("cerebras", "llama-3.3-70b", error)
 
         assert mapped.status_code == 401
-        assert "authentication" in mapped.detail.lower()
+        assert names_our_credential(mapped.detail)
 
     def test_map_cerebras_api_status_error_404_generic(self):
         """Test generic Cerebras APIStatusError with 404 provides proper error message"""
@@ -1215,9 +1244,9 @@ class TestProviderFailoverIntegration:
         for status_code, expected_should_failover in test_cases:
             exc = HTTPException(status_code=status_code, detail="Test")
             result = should_failover(exc)
-            assert (
-                result == expected_should_failover
-            ), f"Status {status_code} should {' ' if expected_should_failover else 'not '}failover"
+            assert result == expected_should_failover, (
+                f"Status {status_code} should {' ' if expected_should_failover else 'not '}failover"
+            )
 
     def test_error_mapping_preserves_provider_context(self):
         """Test error messages include provider and model context"""
@@ -1236,7 +1265,12 @@ class TestProviderFailoverIntegration:
                 ),
                 "fireworks",
                 "llama-2",
-                500,
+                # Changed 2026-09-22: 401, not 500. An upstream rejecting OUR
+                # credential is not us crashing -- and this was the only one of
+                # five paths for that one condition that said 500; the others
+                # already said 401. The test's stated intent (provider and model
+                # context in the message) is unaffected.
+                401,
             ),
         ]
 
