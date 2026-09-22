@@ -81,6 +81,8 @@ ADAPTER_CONFIGS: dict[str, ProviderConfig] = {
         api_key_env="ZAI_API_KEY",
         display_name="Z.AI",
         client_factory=get_zai_pooled_client,
+        # Catalog ids are "zai/glm-5.3"; Z.AI's API expects the bare "glm-5.3".
+        model_prefix="zai/",
     ),
     # -- Tier-2 providers (Task 18) ---------------------------------------
     # None of these use a pooled client_factory or middleware quirks: parity
