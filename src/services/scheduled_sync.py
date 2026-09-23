@@ -1350,6 +1350,63 @@ def start_pricing_drift_scheduler():
         logger.exception(e)
 
 
+_model_health_sweep_scheduler = None
+
+
+def start_model_health_sweep_scheduler():
+    """Start the scheduled model health sweep (#2367).
+
+    Default OFF. Until this existed, the only thing that could mark a model
+    `down` -- and so the only thing that could stop the catalog advertising a
+    dead model -- ran when a human called an admin endpoint by hand.
+    """
+    global _model_health_sweep_scheduler
+
+    if not Config.MODEL_HEALTH_SWEEP_ENABLED:
+        logger.info(
+            "Model health sweep DISABLED: MODEL_HEALTH_SWEEP_ENABLED=false. "
+            "Nothing will mark a dead model down while this is off (#2367)."
+        )
+        return
+
+    from src.services.monitoring.scheduled_health_sweep import run_scheduled_health_sweep
+
+    minutes = Config.MODEL_HEALTH_SWEEP_INTERVAL_MINUTES
+    mode = "WRITE" if Config.MODEL_HEALTH_SWEEP_WRITE else "RECORD-ONLY"
+    logger.info("Starting model health sweep scheduler (%s, every %s min)", mode, minutes)
+    try:
+        _model_health_sweep_scheduler = AsyncIOScheduler()
+        _model_health_sweep_scheduler.add_job(
+            run_scheduled_health_sweep,
+            trigger=IntervalTrigger(minutes=minutes),
+            id="model_health_sweep",
+            name="Model Health Sweep",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _model_health_sweep_scheduler.start()
+        logger.info("✅ Model health sweep scheduler started (%s)", mode)
+    except Exception as e:
+        logger.error("❌ Failed to start model health sweep scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_model_health_sweep_scheduler():
+    """Stop the model-health-sweep scheduler gracefully (called during shutdown)."""
+    global _model_health_sweep_scheduler
+
+    if _model_health_sweep_scheduler is None:
+        return
+    logger.info("Stopping model health sweep scheduler...")
+    try:
+        _model_health_sweep_scheduler.shutdown(wait=False)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Error stopping model health sweep scheduler: %s", e)
+    finally:
+        _model_health_sweep_scheduler = None
+
+
 def stop_pricing_drift_scheduler():
     """Stop the pricing-drift-monitor APScheduler gracefully (called during shutdown)."""
     global _pricing_drift_scheduler

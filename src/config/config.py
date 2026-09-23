@@ -532,6 +532,28 @@ class Config:
     ).lower() in {"1", "true", "yes"}
     # Default: once every 1440 minutes (24h) — nightly.
     PRICING_DRIFT_INTERVAL_MINUTES = int(os.environ.get("PRICING_DRIFT_INTERVAL_MINUTES", "1440"))
+
+    # Model health sweep (#2367). TWO flags, because running the sweep and
+    # acting on it are two different decisions.
+    #
+    # Until this shipped, the only thing that could mark a model `down` -- and
+    # therefore the only thing that could stop the catalog advertising a dead
+    # model -- ran when a human called an admin endpoint by hand. Measured
+    # 2026-09-23: health_status was `unknown` (never evaluated) on 30 of the 34
+    # advertised models our own status surface published as down.
+    #
+    # Both default FALSE. With ENABLED=true and WRITE=false the sweep runs and
+    # reports exactly what it WOULD have marked down, changing nothing -- real
+    # evidence before anybody lives with the decision. Hiding a model asserts
+    # it does not exist, and that has been got wrong before.
+    MODEL_HEALTH_SWEEP_ENABLED = (
+        os.environ.get("MODEL_HEALTH_SWEEP_ENABLED", "false").lower() == "true"
+    )
+    MODEL_HEALTH_SWEEP_WRITE = os.environ.get("MODEL_HEALTH_SWEEP_WRITE", "false").lower() == "true"
+    MODEL_HEALTH_SWEEP_INTERVAL_MINUTES = int(
+        os.environ.get("MODEL_HEALTH_SWEEP_INTERVAL_MINUTES", "1440")
+    )
+    MODEL_HEALTH_SWEEP_CONCURRENCY = int(os.environ.get("MODEL_HEALTH_SWEEP_CONCURRENCY", "5"))
     # Reject inference requests for models without a row in model_pricing.
     REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {
         "1",

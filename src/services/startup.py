@@ -837,6 +837,18 @@ async def lifespan(app):
         logger.warning(f"Failed to start pricing drift monitor scheduler: {e}")
         # Don't fail startup if the drift monitor fails to start
 
+    # Start the scheduled model health sweep (#2367). Default OFF, and
+    # record-only even when enabled until MODEL_HEALTH_SWEEP_WRITE=true --
+    # running the sweep and acting on it are two separate decisions.
+    try:
+        from src.services.scheduled_sync import start_model_health_sweep_scheduler
+
+        start_model_health_sweep_scheduler()
+        logger.info("Model health sweep service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start model health sweep scheduler: {e}")
+        # Don't fail startup if the sweep fails to start
+
     # Start GPU utilization hourly rollup (gatewayz-backend#2263 #2264).
     # Backfills 7 days on first run once gpu_utilization_hourly exists; a
     # no-op (empty aggregates, nothing upserted) before that migration lands
