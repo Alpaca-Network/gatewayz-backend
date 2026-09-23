@@ -8,7 +8,7 @@ where the spec was silent.
 ## Payout asset: USD-denominated, paid in native ETH on Base (2026-09-22)
 
 WAYZ is not going public for now, so providers are **no longer paid in
-WAYZ**. Decisions (migration `20260922120000_provider_payouts_eth_base.sql`):
+WAYZ**. Decisions (migration `20260922200000_provider_payouts_eth_base.sql`):
 
 - **Accrual is in USD**, as integer micro-dollars (1 USD = 1,000,000):
   `provider_payout_rates.usd_micros_per_1k_tokens` →
