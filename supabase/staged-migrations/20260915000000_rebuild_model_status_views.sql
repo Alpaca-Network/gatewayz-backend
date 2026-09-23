@@ -54,7 +54,26 @@ SELECT
     mht.usage_count_24h,
     mht.is_enabled,
     CASE
-        WHEN mht.circuit_breaker_state = 'open' THEN 'offline'
+        -- #2366: the breaker decides the health verdict only when the
+        -- measurement beside it agrees. This branch used to be unconditional,
+        -- so it short-circuited the ladder below and one trip published
+        -- 'offline' forever. In production on 2026-09-23:
+        --
+        --   openai/gpt-4o   status_indicator = offline   breaker = open
+        --                   uptime_24h = 100.0           uptime_7d = 100.0
+        --                   last_checked = today   last_failure = 7 days ago
+        --
+        -- Twenty-five advertised models were published as down while serving
+        -- every check for a week. The breaker is still published verbatim in
+        -- circuit_breaker_state, so nothing is lost -- it simply no longer
+        -- outranks evidence that contradicts it.
+        --
+        -- COALESCE to 0: no measurement plus an open breaker is offline.
+        -- Absent evidence must not read as healthy evidence. 99.0 rather than
+        -- the ladder's 99.9 so the override releases only on a clearly
+        -- healthy window.
+        WHEN mht.circuit_breaker_state = 'open'
+             AND COALESCE(mht.uptime_percentage_24h, 0) < 99.0 THEN 'offline'
         WHEN mht.uptime_percentage_24h >= 99.9 THEN 'operational'
         WHEN mht.uptime_percentage_24h >= 95.0 THEN 'degraded'
         WHEN mht.uptime_percentage_24h >= 50.0 THEN 'partial_outage'
