@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from src.services.gpu.earnings import (
-    compute_amount_wei,
+    compute_amount_usd_micros,
     effective_model_class,
     model_class_for,
     next_tier_min_tokens_7d,
@@ -180,44 +180,44 @@ def test_next_tier_min_tokens_7d_empty_tiers_is_none(sb):
 
 
 # ---------------------------------------------------------------------------
-# compute_amount_wei
+# compute_amount_usd_micros
 # ---------------------------------------------------------------------------
 
 
-def test_compute_amount_wei_integer_math(sb):
-    assert compute_amount_wei(1000, 500, 1000) == 1500
+def test_compute_amount_usd_micros_integer_math(sb):
+    assert compute_amount_usd_micros(1000, 500, 1000) == 1500
 
 
-def test_compute_amount_wei_floors_the_remainder(sb):
-    assert compute_amount_wei(500, 499, 7) == (999 * 7) // 1000
-    assert compute_amount_wei(500, 499, 7) == 6
+def test_compute_amount_usd_micros_floors_the_remainder(sb):
+    assert compute_amount_usd_micros(500, 499, 7) == (999 * 7) // 1000
+    assert compute_amount_usd_micros(500, 499, 7) == 6
 
 
-def test_compute_amount_wei_handles_wei_scale_rates(sb):
-    rate = 500_000_000_000_000_000  # 0.5 WAYZ (wei) per 1k tokens
-    assert compute_amount_wei(2000, 0, rate) == 1_000_000_000_000_000_000
+def test_compute_amount_usd_micros_handles_realistic_usd_rates(sb):
+    rate = 20_000  # $0.02 per 1k tokens, in USD micros
+    assert compute_amount_usd_micros(2000, 0, rate) == 40_000  # $0.04
 
 
-def test_compute_amount_wei_defaults_to_full_multiplier(sb):
+def test_compute_amount_usd_micros_defaults_to_full_multiplier(sb):
     """No multiplier_bps passed -- behaves exactly like the pre-tier
     signature (1.0x), so every existing caller/test above is unaffected."""
-    assert compute_amount_wei(1000, 500, 1000, multiplier_bps=10000) == 1500
+    assert compute_amount_usd_micros(1000, 500, 1000, multiplier_bps=10000) == 1500
 
 
-def test_compute_amount_wei_applies_a_fractional_multiplier(sb):
+def test_compute_amount_usd_micros_applies_a_fractional_multiplier(sb):
     # base = (1000 * 1000) // 1000 = 1000; 0.25x -> 250
-    assert compute_amount_wei(1000, 0, 1000, multiplier_bps=2500) == 250
+    assert compute_amount_usd_micros(1000, 0, 1000, multiplier_bps=2500) == 250
 
 
-def test_compute_amount_wei_applies_a_bonus_multiplier_above_1x(sb):
+def test_compute_amount_usd_micros_applies_a_bonus_multiplier_above_1x(sb):
     # base = (1000 * 1000) // 1000 = 1000; 1.5x -> 1500
-    assert compute_amount_wei(1000, 0, 1000, multiplier_bps=15000) == 1500
+    assert compute_amount_usd_micros(1000, 0, 1000, multiplier_bps=15000) == 1500
 
 
-def test_compute_amount_wei_floors_the_multiplier_step_too(sb):
-    # base = (999 * 7) // 1000 = 6 (from test_compute_amount_wei_floors_the_remainder);
+def test_compute_amount_usd_micros_floors_the_multiplier_step_too(sb):
+    # base = (999 * 7) // 1000 = 6 (from test_compute_amount_usd_micros_floors_the_remainder);
     # 6 * 500 // 10000 = 0.3 -> floors to 0, not rounded up.
-    assert compute_amount_wei(500, 499, 7, multiplier_bps=500) == 0
+    assert compute_amount_usd_micros(500, 499, 7, multiplier_bps=500) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ def test_compute_amount_wei_floors_the_multiplier_step_too(sb):
 @patch("src.services.gpu.earnings.create_earning")
 @patch("src.services.gpu.earnings.get_payout_tiers")
 @patch("src.services.gpu.earnings.get_provider_verified_volume_7d")
-@patch("src.services.gpu.earnings.get_payout_rate_wei_per_1k")
+@patch("src.services.gpu.earnings.get_payout_rate_usd_micros_per_1k")
 def test_record_earning_computes_and_creates_at_small_rate_by_default(
     mock_get_rate, mock_volume, mock_tiers, mock_create, sb
 ):
@@ -267,7 +267,7 @@ def test_record_earning_computes_and_creates_at_small_rate_by_default(
 @patch("src.services.gpu.earnings.create_earning")
 @patch("src.services.gpu.earnings.get_payout_tiers")
 @patch("src.services.gpu.earnings.get_provider_verified_volume_7d")
-@patch("src.services.gpu.earnings.get_payout_rate_wei_per_1k")
+@patch("src.services.gpu.earnings.get_payout_rate_usd_micros_per_1k")
 def test_record_earning_caps_large_model_to_small_rate_when_unattested(
     mock_get_rate, mock_volume, mock_tiers, mock_create, sb
 ):
@@ -297,7 +297,7 @@ def test_record_earning_caps_large_model_to_small_rate_when_unattested(
 @patch("src.services.gpu.earnings.create_earning")
 @patch("src.services.gpu.earnings.get_payout_tiers")
 @patch("src.services.gpu.earnings.get_provider_verified_volume_7d")
-@patch("src.services.gpu.earnings.get_payout_rate_wei_per_1k")
+@patch("src.services.gpu.earnings.get_payout_rate_usd_micros_per_1k")
 def test_record_earning_pays_large_rate_when_attested_and_referenced(
     mock_get_rate, mock_volume, mock_tiers, mock_create, sb
 ):
@@ -326,7 +326,7 @@ def test_record_earning_pays_large_rate_when_attested_and_referenced(
 @patch("src.services.gpu.earnings.create_earning")
 @patch("src.services.gpu.earnings.get_payout_tiers")
 @patch("src.services.gpu.earnings.get_provider_verified_volume_7d")
-@patch("src.services.gpu.earnings.get_payout_rate_wei_per_1k")
+@patch("src.services.gpu.earnings.get_payout_rate_usd_micros_per_1k")
 def test_record_earning_applies_the_tier_multiplier_for_high_volume_providers(
     mock_get_rate, mock_volume, mock_tiers, mock_create, sb
 ):
@@ -359,7 +359,7 @@ def test_record_earning_applies_the_tier_multiplier_for_high_volume_providers(
 @patch("src.services.gpu.earnings.create_earning")
 @patch("src.services.gpu.earnings.get_payout_tiers")
 @patch("src.services.gpu.earnings.get_provider_verified_volume_7d")
-@patch("src.services.gpu.earnings.get_payout_rate_wei_per_1k")
+@patch("src.services.gpu.earnings.get_payout_rate_usd_micros_per_1k")
 def test_record_earning_volume_lookup_is_scoped_to_provider_not_node(
     mock_get_rate, mock_volume, mock_tiers, mock_create, sb
 ):
@@ -388,7 +388,7 @@ def test_record_earning_volume_lookup_is_scoped_to_provider_not_node(
 
 
 @patch("src.services.gpu.earnings.create_earning")
-@patch("src.services.gpu.earnings.get_payout_rate_wei_per_1k")
+@patch("src.services.gpu.earnings.get_payout_rate_usd_micros_per_1k")
 def test_record_earning_unknown_model_earns_nothing(mock_get_rate, mock_create, sb):
     """C1 regression: '-70b' in the name of an UNKNOWN model id earns
     nothing at all -- not even at the small rate -- and never reaches the
@@ -412,7 +412,7 @@ def test_record_earning_unknown_model_earns_nothing(mock_get_rate, mock_create, 
 
 
 @patch("src.services.gpu.earnings.create_earning")
-@patch("src.services.gpu.earnings.get_payout_rate_wei_per_1k")
+@patch("src.services.gpu.earnings.get_payout_rate_usd_micros_per_1k")
 def test_record_earning_skips_when_rate_unseeded(mock_get_rate, mock_create, sb):
     mock_get_rate.return_value = None
 
@@ -435,7 +435,7 @@ def test_record_earning_skips_when_rate_unseeded(mock_get_rate, mock_create, sb)
 @patch("src.services.gpu.earnings.create_earning")
 @patch("src.services.gpu.earnings.get_payout_tiers")
 @patch("src.services.gpu.earnings.get_provider_verified_volume_7d")
-@patch("src.services.gpu.earnings.get_payout_rate_wei_per_1k")
+@patch("src.services.gpu.earnings.get_payout_rate_usd_micros_per_1k")
 def test_record_earning_treats_missing_token_counts_as_zero(
     mock_get_rate, mock_volume, mock_tiers, mock_create, sb
 ):

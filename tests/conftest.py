@@ -307,3 +307,18 @@ def _no_background_provider_budget_writes(monkeypatch):
     alerts._reset_state_for_tests()
     yield
     alerts._reset_state_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def _no_live_eth_price(monkeypatch):
+    """Earnings endpoints convert USD to ETH at a live Chainlink price
+    (src/services/gpu/payout_views.py). Never hit Base RPC from unit tests:
+    default to "price unavailable"; tests that need a price patch
+    get_display_eth_usd_price / _fetch_price themselves."""
+    from src.services.gpu import payout_views
+
+    def _unavailable():
+        raise RuntimeError("live ETH/USD price disabled in tests")
+
+    monkeypatch.setattr(payout_views, "_fetch_price", _unavailable)
+    monkeypatch.setattr(payout_views, "_price_cache", None)

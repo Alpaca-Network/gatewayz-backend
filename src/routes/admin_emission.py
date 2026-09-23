@@ -112,6 +112,10 @@ def _config_view() -> dict[str, Any]:
         },
         "score_weights_bps": Config.emission_score_weights_bps(),
         "exponent_above_median": str(Config.PROVIDER_SCORE_EXPONENT_ABOVE_MEDIAN),
+        # Providers are paid from a USD/day pool in ETH on Base (2026-09-22);
+        # the WAYZ providers leg of the split is not emitted.
+        "provider_pool_usd_per_day": str(Config.PROVIDER_EMISSION_USD_PER_DAY),
+        "provider_payout_asset": Config.PROVIDER_PAYOUT_ASSET,
         "staker_reward_asset": Config.STAKER_REWARD_ASSET,
         "wayz_credit_rate": str(Config.WAYZ_CREDIT_RATE),
         "cron_utc": f"{Config.EMISSION_EPOCH_CRON_HOUR_UTC:02d}:{Config.EMISSION_EPOCH_CRON_MINUTE_UTC:02d}",

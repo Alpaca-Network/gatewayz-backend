@@ -203,11 +203,17 @@ async def test_gpu_settlement_records_on_success():
         settlements_checked=0, settlements_confirmed_sent=0, settlements_marked_failed=0
     )
     settlement_result = MagicMock(
-        providers_considered=1, settlements_sent=1, settlements_failed=0, total_sent_wei=1000
+        providers_considered=1,
+        settlements_sent=1,
+        settlements_failed=0,
+        total_sent_wei=1000,
+        total_sent_usd_micros=3_000_000,
+        eth_usd_price="3000",
+        aborted_reason=None,
     )
     with (
         patch(
-            "src.services.chain.wayz_rewards_client.WayzProviderRewardsClient.from_config",
+            "src.services.chain.eth_payout_client.EthPayoutClient.from_config",
             return_value=fake_client,
         ),
         patch(
@@ -233,11 +239,44 @@ async def test_gpu_settlement_records_on_success():
 
 
 @pytest.mark.asyncio
+async def test_gpu_settlement_records_failure_when_run_aborts_on_stale_price():
+    """A stale/unreadable ETH/USD price pays nobody -- that must show up as
+    a failed job run for ops, not a quiet 'ok' with zero settlements."""
+    fake_client = MagicMock()
+    reconcile_result = MagicMock(
+        settlements_checked=0, settlements_confirmed_sent=0, settlements_marked_failed=0
+    )
+    settlement_result = MagicMock(aborted_reason="stale_price: answer is 7200s old")
+    with (
+        patch(
+            "src.services.chain.eth_payout_client.EthPayoutClient.from_config",
+            return_value=fake_client,
+        ),
+        patch(
+            "src.services.gpu.settlement.reconcile_stuck_settlements",
+            new_callable=AsyncMock,
+            return_value=reconcile_result,
+        ),
+        patch(
+            "src.services.gpu.settlement.run_settlement_once",
+            new_callable=AsyncMock,
+            return_value=settlement_result,
+        ),
+        patch.object(scheduled_sync, "record_job_run") as mock_record,
+    ):
+        await scheduled_sync.run_scheduled_gpu_settlement()
+
+    mock_record.assert_called_once()
+    assert mock_record.call_args.kwargs["ok"] is False
+    assert "stale_price" in mock_record.call_args.kwargs["error"]
+
+
+@pytest.mark.asyncio
 async def test_gpu_settlement_records_on_exception():
     fake_client = MagicMock()
     with (
         patch(
-            "src.services.chain.wayz_rewards_client.WayzProviderRewardsClient.from_config",
+            "src.services.chain.eth_payout_client.EthPayoutClient.from_config",
             return_value=fake_client,
         ),
         patch(

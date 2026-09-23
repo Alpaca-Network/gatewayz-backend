@@ -1057,11 +1057,11 @@ def stop_gpu_spotcheck_scheduler():
 
 
 # ============================================================================
-# Community GPU WAYZ settlement (gatewayz-backend#2266) — daily payout of
-# accrued provider_earnings from the providerRewardsPool EOA. No-ops with a
-# warning at startup if WAYZ_REWARDS_POOL_PRIVATE_KEY/WAYZ_TOKEN_CONTRACT_ADDRESS
-# aren't set (true today -- nothing is provisioned yet), mirroring the WAYZ
-# staking sync / faucet's "unset config -> scheduler doesn't start" pattern.
+# Community GPU settlement (gatewayz-backend#2266) — daily payout of accrued
+# USD-denominated provider_earnings in native ETH on Base from the payout
+# pool EOA (WAYZ -> ETH switch 2026-09-22). No-ops with a warning at startup
+# if PROVIDER_PAYOUT_POOL_PRIVATE_KEY isn't set, mirroring the WAYZ staking
+# sync / faucet's "unset config -> scheduler doesn't start" pattern.
 # ============================================================================
 _gpu_settlement_scheduler: AsyncIOScheduler | None = None
 _last_gpu_settlement_status: dict[str, Any] = {
@@ -1076,16 +1076,13 @@ async def run_scheduled_gpu_settlement():
     any stuck-pending settlements from a prior crashed run FIRST (PR #2288
     review I3) so they're freed up in time to be reconsidered the same
     run, not left for a whole extra day."""
-    from src.services.chain.wayz_rewards_client import (
-        WayzProviderRewardsClient,
-        WayzProviderRewardsClientError,
-    )
+    from src.services.chain.eth_payout_client import EthPayoutClient, EthPayoutClientError
     from src.services.gpu.settlement import reconcile_stuck_settlements, run_settlement_once
 
     run_started_at = datetime.now(UTC)
     _last_gpu_settlement_status["last_run_time"] = run_started_at
     try:
-        client = WayzProviderRewardsClient.from_config()
+        client = EthPayoutClient.from_config()
 
         reconcile_result = await reconcile_stuck_settlements(client)
         if reconcile_result.settlements_checked:
@@ -1097,14 +1094,21 @@ async def run_scheduled_gpu_settlement():
             )
 
         result = await run_settlement_once(client)
+        if result.aborted_reason:
+            # Stale/unreadable price or pool balance: nobody was paid. Surface
+            # it as a failed job run so ops sees it, not a quiet no-op.
+            raise RuntimeError(result.aborted_reason)
         _last_gpu_settlement_status["last_ok"] = True
         _last_gpu_settlement_status["settlements_sent"] = result.settlements_sent
         logger.info(
-            "✅ GPU settlement OK | considered=%s sent=%s failed=%s total_wei=%s",
+            "✅ GPU settlement OK | considered=%s sent=%s failed=%s total_wei=%s total_usd_micros=%s "
+            "eth_usd=%s",
             result.providers_considered,
             result.settlements_sent,
             result.settlements_failed,
             result.total_sent_wei,
+            result.total_sent_usd_micros,
+            result.eth_usd_price,
         )
         # No separate scheduled pass exists for stuck-settlement reconciliation
         # (it always runs inline, first, in this same job) -- its outcome is
@@ -1117,17 +1121,23 @@ async def run_scheduled_gpu_settlement():
                 "providers_considered": result.providers_considered,
                 "settlements_sent": result.settlements_sent,
                 "settlements_failed": result.settlements_failed,
+                "settlements_unconfirmed": result.settlements_unconfirmed,
                 "total_sent_wei": str(result.total_sent_wei),
+                "total_sent_usd_micros": result.total_sent_usd_micros,
+                "eth_usd_price": result.eth_usd_price,
+                "asset": "ETH",
+                "chain": "base",
                 "reconcile": {
                     "checked": reconcile_result.settlements_checked,
                     "confirmed_sent": reconcile_result.settlements_confirmed_sent,
+                    "left_pending": reconcile_result.settlements_left_pending,
                     "marked_failed": reconcile_result.settlements_marked_failed,
                 },
                 "interval_minutes": Config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS * 60,
             },
             duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
         )
-    except WayzProviderRewardsClientError as e:
+    except EthPayoutClientError as e:
         logger.info("GPU settlement skipped: %s", e)
         record_job_run(
             "gpu_settlement",
@@ -1149,11 +1159,17 @@ async def run_scheduled_gpu_settlement():
 
 
 def start_gpu_settlement_scheduler():
-    """Start the APScheduler for community GPU WAYZ settlement (app lifespan)."""
+    """Start the APScheduler for community GPU ETH settlement (app lifespan)."""
     global _gpu_settlement_scheduler
 
-    if not Config.WAYZ_REWARDS_POOL_PRIVATE_KEY:
-        logger.warning("GPU settlement DISABLED: WAYZ_REWARDS_POOL_PRIVATE_KEY not set")
+    if Config.PROVIDER_PAYOUT_ASSET != "ETH":
+        logger.error(
+            "GPU settlement DISABLED: PROVIDER_PAYOUT_ASSET=%r is not supported (only 'ETH')",
+            Config.PROVIDER_PAYOUT_ASSET,
+        )
+        return
+    if not Config.PROVIDER_PAYOUT_POOL_PRIVATE_KEY:
+        logger.warning("GPU settlement DISABLED: PROVIDER_PAYOUT_POOL_PRIVATE_KEY not set")
         return
 
     interval_hours = Config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS
@@ -1164,7 +1180,7 @@ def start_gpu_settlement_scheduler():
             run_scheduled_gpu_settlement,
             trigger=IntervalTrigger(hours=interval_hours),
             id="gpu_settlement",
-            name="Community GPU WAYZ Settlement Job",
+            name="Community GPU ETH Settlement Job",
             replace_existing=True,
             max_instances=1,
             coalesce=True,

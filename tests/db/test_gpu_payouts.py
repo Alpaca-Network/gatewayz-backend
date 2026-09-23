@@ -27,6 +27,8 @@ def _query_mock(data):
         "update",
     ):
         getattr(query, method).return_value = query
+    # PostgREST negation: .not_.is_(col, "null")
+    query.not_.is_.return_value = query
     query.execute.return_value = MagicMock(data=data)
     return query
 
@@ -44,22 +46,28 @@ def _client_with(data):
 
 
 def test_get_payout_rate_returns_int(sb):
-    client, _ = _client_with([{"wayz_per_1k_tokens": "500000000000000000"}])
+    client, _ = _client_with([{"usd_micros_per_1k_tokens": 20000}])
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
-        assert gpu_payouts.get_payout_rate_wei_per_1k("small") == 500000000000000000
+        assert gpu_payouts.get_payout_rate_usd_micros_per_1k("small") == 20000
 
 
 def test_get_payout_rate_returns_none_when_unseeded(sb):
     client, _ = _client_with([])
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
-        assert gpu_payouts.get_payout_rate_wei_per_1k("small") is None
+        assert gpu_payouts.get_payout_rate_usd_micros_per_1k("small") is None
+
+
+def test_get_payout_rate_returns_none_when_only_a_legacy_wayz_rate_exists(sb):
+    client, _ = _client_with([{"usd_micros_per_1k_tokens": None}])
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.get_payout_rate_usd_micros_per_1k("small") is None
 
 
 def test_get_payout_rate_returns_none_on_error(sb):
     client = MagicMock()
     client.table.side_effect = RuntimeError("boom")
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
-        assert gpu_payouts.get_payout_rate_wei_per_1k("small") is None
+        assert gpu_payouts.get_payout_rate_usd_micros_per_1k("small") is None
 
 
 # ---------------------------------------------------------------------------
@@ -369,7 +377,7 @@ def test_create_earning_inserts_accrued_row(sb):
     assert result == {"id": 1, "status": "accrued"}
     assert outcome == "created"
     query.insert.assert_called_once_with(
-        {"provider_id": 1, "work_id": 10, "amount_wei": "5000", "status": "accrued"}
+        {"provider_id": 1, "work_id": 10, "amount_usd_micros": 5000, "status": "accrued"}
     )
 
 
@@ -385,7 +393,7 @@ def test_create_earning_includes_tier_audit_fields_when_provided(sb):
         {
             "provider_id": 1,
             "work_id": 10,
-            "amount_wei": "5000",
+            "amount_usd_micros": 5000,
             "status": "accrued",
             "multiplier_bps": 2500,
             "volume_7d_at_accrual": 150000,
@@ -422,17 +430,24 @@ def test_void_earning_for_work_updates_status(sb):
     query.update.assert_called_once_with({"status": "void"})
 
 
-def test_earnings_totals_sums_by_status(sb):
+def test_earnings_totals_sums_usd_by_status_and_keeps_legacy_wayz_separate(sb):
     rows = [
-        {"amount_wei": "1000", "status": "accrued"},
-        {"amount_wei": "2000", "status": "accrued"},
-        {"amount_wei": "500", "status": "settled"},
-        {"amount_wei": "300", "status": "void"},
+        {"amount_usd_micros": 1000, "amount_wei": None, "status": "accrued"},
+        {"amount_usd_micros": 2000, "amount_wei": None, "status": "accrued"},
+        {"amount_usd_micros": 500, "amount_wei": None, "status": "settled"},
+        {"amount_usd_micros": 300, "amount_wei": None, "status": "void"},
+        # pre-2026-09-22 WAYZ-denominated row -- never mixed into USD totals
+        {"amount_usd_micros": None, "amount_wei": "7000", "status": "settled"},
     ]
     client, _ = _client_with(rows)
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         totals = gpu_payouts.earnings_totals(1)
-    assert totals == {"accrued": 3000, "settled": 500, "void": 300}
+    assert totals == {
+        "accrued": 3000,
+        "settled": 500,
+        "void": 300,
+        "wayz_wei": {"accrued": 0, "settled": 7000, "void": 0},
+    }
 
 
 def test_earnings_totals_zeroed_on_error(sb):
@@ -443,13 +458,16 @@ def test_earnings_totals_zeroed_on_error(sb):
 
 
 def test_mark_earnings_settling_flips_accrued_rows_for_a_provider(sb):
-    client, query = _client_with([{"id": 1, "amount_wei": "1000"}, {"id": 2, "amount_wei": "2000"}])
+    flipped = [{"id": 1, "amount_usd_micros": 1000}, {"id": 2, "amount_usd_micros": 2000}]
+    client, query = _client_with(flipped)
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         rows = gpu_payouts.mark_earnings_settling(5, 99)
-    assert rows == [{"id": 1, "amount_wei": "1000"}, {"id": 2, "amount_wei": "2000"}]
+    assert rows == flipped
     query.update.assert_called_once_with({"status": "settling", "settlement_id": 99})
     query.eq.assert_any_call("provider_id", 5)
     query.eq.assert_any_call("status", "accrued")
+    # Legacy WAYZ rows (amount_usd_micros NULL) must never be claimed.
+    query.not_.is_.assert_called_once_with("amount_usd_micros", "null")
 
 
 def test_mark_earnings_settling_returns_empty_list_on_error(sb):
@@ -520,26 +538,57 @@ def test_get_pending_settlement_returns_none_when_absent(sb):
         assert gpu_payouts.get_pending_settlement(1) is None
 
 
-def test_list_stuck_pending_settlements_returns_rows(sb):
-    rows = [{"id": 1, "status": "pending"}]
+def test_list_pending_settlements_returns_all_pending_rows(sb):
+    rows = [{"id": 1, "status": "pending", "tx_hash": "0xabc"}]
     client, query = _client_with(rows)
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
-        assert gpu_payouts.list_stuck_pending_settlements("2026-09-01T00:00:00Z") == rows
+        assert gpu_payouts.list_pending_settlements() == rows
     query.eq.assert_any_call("status", "pending")
+
+
+def test_record_settlement_tx_saves_hash_and_nonce_on_the_pending_row(sb):
+    client, query = _client_with([{"id": 9}])
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.record_settlement_tx(9, "0xhash", 12, 30000) is True
+    query.update.assert_called_once_with({"tx_hash": "0xhash", "tx_nonce": 12, "gas_limit": 30000})
+    query.eq.assert_any_call("id", 9)
+    query.eq.assert_any_call("status", "pending")
+
+
+def test_record_settlement_tx_returns_false_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.record_settlement_tx(9, "0xhash", 12, 30000) is False
+
+
+def test_eth_paid_wei_sums_confirmed_eth_settlements(sb):
+    client, query = _client_with([{"amount_wei": "100"}, {"amount_wei": "250"}])
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.eth_paid_wei(5) == 350
+    query.eq.assert_any_call("asset", "ETH")
+    query.eq.assert_any_call("status", "sent")
+    query.eq.assert_any_call("provider_id", 5)
 
 
 def test_update_settlement_amount_updates_row(sb):
     client, query = _client_with([{"id": 1}])
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
-        assert gpu_payouts.update_settlement_amount(1, 5000) is True
-    query.update.assert_called_once_with({"amount_wei": "5000"})
+        assert gpu_payouts.update_settlement_amount(1, 5000, 7000) is True
+    query.update.assert_called_once_with({"amount_usd_micros": 5000, "amount_wei": "7000"})
 
 
 def test_create_settlement_inserts_pending_row(sb):
     client, query = _client_with([{"id": 1, "status": "pending"}])
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         result = gpu_payouts.create_settlement(
-            1, "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z", 12000
+            1,
+            "2026-09-01T00:00:00Z",
+            "2026-09-02T00:00:00Z",
+            30_000_000,
+            10**16,
+            "3000",
+            "2026-09-02T00:00:00+00:00",
         )
     assert result == {"id": 1, "status": "pending"}
     query.insert.assert_called_once_with(
@@ -547,7 +596,12 @@ def test_create_settlement_inserts_pending_row(sb):
             "provider_id": 1,
             "period_start": "2026-09-01T00:00:00Z",
             "period_end": "2026-09-02T00:00:00Z",
-            "amount_wei": "12000",
+            "amount_usd_micros": 30_000_000,
+            "amount_wei": str(10**16),
+            "eth_usd_price": "3000",
+            "price_updated_at": "2026-09-02T00:00:00+00:00",
+            "asset": "ETH",
+            "chain": "base",
             "status": "pending",
         }
     )

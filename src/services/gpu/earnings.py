@@ -1,5 +1,11 @@
-"""WAYZ earnings accrual for verified community-GPU work
+"""USD-denominated earnings accrual for verified community-GPU work
 (gatewayz-backend#2266; m4/spec.md §5; PR #2288 review fix round 1).
+
+**Payout asset (2026-09-22):** earnings accrue in integer USD micro-dollars
+(provider_payout_rates.usd_micros_per_1k_tokens) and are paid out in native
+ETH on Base, converted at the Chainlink ETH/USD price at settlement time
+(src/services/gpu/settlement.py). WAYZ is not going public for now, so it
+is no longer the payout asset.
 
 **Log sliding-scale payout tiers (m4/spec.md §5 follow-up):** on top of
 the model-class rate below, a provider's payout is scaled by a basis-points
@@ -42,7 +48,7 @@ from dataclasses import dataclass
 from src.config.config import Config
 from src.db.gpu_payouts import (
     create_earning,
-    get_payout_rate_wei_per_1k,
+    get_payout_rate_usd_micros_per_1k,
     get_payout_tiers,
     get_provider_verified_volume_7d,
 )
@@ -124,22 +130,19 @@ def next_tier_min_tokens_7d(volume_7d: int, tiers: list[dict]) -> int | None:
     return None
 
 
-def compute_amount_wei(
+def compute_amount_usd_micros(
     prompt_tokens: int,
     completion_tokens: int,
-    rate_wei_per_1k: int,
+    rate_usd_micros_per_1k: int,
     multiplier_bps: int = _FULL_MULTIPLIER_BPS,
 ) -> int:
-    """Integer wei math -- (prompt_tokens + completion_tokens) * rate / 1000,
+    """Integer math -- (prompt_tokens + completion_tokens) * rate / 1000,
     floor division, then scaled by the sliding-scale tier multiplier (also
-    floor division). Never floats: rate_wei_per_1k is wei-scaled
-    (numeric(78,0) in provider_payout_rates), and a float division at this
-    magnitude silently loses precision. multiplier_bps defaults to 1.0x
-    (10000) so callers that don't pass one get the pre-tier behavior
-    unchanged."""
+    floor division). Never floats: money is integer USD micro-dollars.
+    multiplier_bps defaults to 1.0x (10000)."""
     total_tokens = prompt_tokens + completion_tokens
-    base_amount_wei = (total_tokens * rate_wei_per_1k) // 1000
-    return (base_amount_wei * multiplier_bps) // _BPS_DENOMINATOR
+    base_amount = (total_tokens * rate_usd_micros_per_1k) // 1000
+    return (base_amount * multiplier_bps) // _BPS_DENOMINATOR
 
 
 @dataclass
@@ -180,7 +183,7 @@ def record_earning_for_verified_work(work: dict) -> EarningResult:
     """Accrue a provider_earnings row for a provider_work row that just
     passed verification, applying the C1 allow-list + testnet safety cap.
 
-    Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics): when
+    Chutes-style emission rewards (gatewayz-backend tokenomics): when
     Config.REWARDS_MODE == 'emission', provider payouts are made once a
     day by the emission_epoch job instead of per verified work item -- see
     'skipped_emission_mode' in EarningResult's docstring. This check runs
@@ -203,8 +206,8 @@ def record_earning_for_verified_work(work: dict) -> EarningResult:
         )
         return EarningResult(earning=None, outcome="not_payable")
 
-    rate_wei_per_1k = get_payout_rate_wei_per_1k(effective_class)
-    if rate_wei_per_1k is None:
+    rate_usd_micros_per_1k = get_payout_rate_usd_micros_per_1k(effective_class)
+    if rate_usd_micros_per_1k is None:
         logger.warning(
             "record_earning_for_verified_work: no payout rate seeded for class %r "
             "(work_id=%s, model=%r); skipping accrual",
@@ -232,13 +235,13 @@ def record_earning_for_verified_work(work: dict) -> EarningResult:
     )
     multiplier_bps = tier_multiplier_bps(volume_7d, get_payout_tiers())
 
-    amount_wei = compute_amount_wei(
-        prompt_tokens, completion_tokens, rate_wei_per_1k, multiplier_bps
+    amount_usd_micros = compute_amount_usd_micros(
+        prompt_tokens, completion_tokens, rate_usd_micros_per_1k, multiplier_bps
     )
     earning, outcome = create_earning(
         work["provider_id"],
         work["id"],
-        amount_wei,
+        amount_usd_micros,
         multiplier_bps=multiplier_bps,
         volume_7d_at_accrual=volume_7d,
     )

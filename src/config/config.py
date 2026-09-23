@@ -198,7 +198,7 @@ class Config:
     WAYZ_DAILY_INFERENCE_CAPACITY = int(_get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0"))
     # Staking rewards (gatewayz-backend staking rewards, boss's rule: WAYZ
     # stakers are paid in inference credits; providers who offer inference
-    # are paid in WAYZ -- already built, M4 provider earnings/settlement).
+    # are paid in ETH on Base -- see PROVIDER_PAYOUT_ASSET below).
     # Off by default -- flips on in prod once the boss confirms the rate
     # table (see supabase/migrations/20260911120000_staking_rewards.sql's
     # tiny placeholder values) and docs/staking/REWARDS.md.
@@ -329,11 +329,54 @@ class Config:
     # community response, e.g. "together". Unset -- same-node determinism
     # is the only check performed.
     COMMUNITY_SPOTCHECK_REFERENCE_PROVIDER = _get_env_var("COMMUNITY_SPOTCHECK_REFERENCE_PROVIDER")
+    # Legacy (unused by settlement since 2026-09-22 -- see PROVIDER_PAYOUT_ASSET).
     WAYZ_REWARDS_POOL_PRIVATE_KEY = _get_env_var("WAYZ_REWARDS_POOL_PRIVATE_KEY")
-    COMMUNITY_MIN_PAYOUT_WAYZ = int(_get_env_var("COMMUNITY_MIN_PAYOUT_WAYZ", "10"))
-    COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = int(
-        _get_env_var("COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ", "100000")
+    # Provider payouts (product decision 2026-09-22): WAYZ is not going
+    # public for now, so providers are paid in native ETH on Base.
+    # Earnings accrue in USD micro-dollars (provider_payout_rates.
+    # usd_micros_per_1k_tokens) and are converted to ETH at the Chainlink
+    # ETH/USD spot price at settlement time. 'ETH' is the only supported
+    # value today; anything else makes the settlement job refuse to run.
+    # See src/services/gpu/settlement.py, docs/gpu/VERIFICATION_AND_PAYOUTS.md.
+    PROVIDER_PAYOUT_ASSET = (_get_env_var("PROVIDER_PAYOUT_ASSET", "ETH") or "ETH").upper()
+    BASE_RPC_URL = _get_env_var("BASE_RPC_URL", "https://mainnet.base.org")
+    BASE_CHAIN_ID = int(_get_env_var("BASE_CHAIN_ID", "8453"))
+    # Chainlink ETH/USD aggregator on Base mainnet (verified on-chain
+    # 2026-09-22: description() == "ETH / USD", decimals() == 8).
+    BASE_ETH_USD_FEED_ADDRESS = _get_env_var(
+        "BASE_ETH_USD_FEED_ADDRESS", "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
     )
+    # A feed answer older than this fails the whole settlement run rather
+    # than paying at a stale price. ~1.5x the feed's Base heartbeat (1200s,
+    # observed on-chain 2026-09-22).
+    ETH_USD_PRICE_MAX_AGE_SECONDS = int(_get_env_var("ETH_USD_PRICE_MAX_AGE_SECONDS", "1800"))
+    # Chainlink L2 sequencer-uptime feed on Base (verified on-chain
+    # 2026-09-22: description() == "L2 Sequencer Uptime Status Feed").
+    # Empty string disables the check.
+    BASE_SEQUENCER_UPTIME_FEED_ADDRESS = _get_env_var(
+        "BASE_SEQUENCER_UPTIME_FEED_ADDRESS", "0xBCF85224fc0756B9Fa45aA7892530B47e10b6433"
+    )
+    BASE_SEQUENCER_GRACE_PERIOD_SECONDS = int(
+        _get_env_var("BASE_SEQUENCER_GRACE_PERIOD_SECONDS", "3600")
+    )
+    # How long a settlement run waits for each payout's receipt before
+    # leaving it 'pending' for the reconcile sweep to confirm.
+    PROVIDER_PAYOUT_RECEIPT_TIMEOUT_SECONDS = int(
+        _get_env_var("PROVIDER_PAYOUT_RECEIPT_TIMEOUT_SECONDS", "120")
+    )
+    # EOA holding the ETH payout float. Unset (the default) = settlement
+    # job doesn't start; earnings keep accruing in USD meanwhile.
+    PROVIDER_PAYOUT_POOL_PRIVATE_KEY = _get_env_var("PROVIDER_PAYOUT_POOL_PRIVATE_KEY")
+    # Thresholds in whole USD (converted to micros internally).
+    COMMUNITY_MIN_PAYOUT_USD = _get_env_var("COMMUNITY_MIN_PAYOUT_USD", "5")
+    COMMUNITY_MAX_PAYOUT_PER_RUN_USD = _get_env_var("COMMUNITY_MAX_PAYOUT_PER_RUN_USD", "5000")
+    # ETH (wei) always left in the pool to cover gas for the run's transfers.
+    PROVIDER_PAYOUT_GAS_RESERVE_WEI = int(
+        _get_env_var("PROVIDER_PAYOUT_GAS_RESERVE_WEI", str(10**15))  # 0.001 ETH
+    )
+    # Emission mode: USD/day paid to providers by 7-day score (replaces the
+    # providers' 41% WAYZ share -- stakers' credits are unchanged).
+    PROVIDER_EMISSION_USD_PER_DAY = _get_env_var("PROVIDER_EMISSION_USD_PER_DAY", "100")
     COMMUNITY_SETTLEMENT_INTERVAL_HOURS = int(
         _get_env_var("COMMUNITY_SETTLEMENT_INTERVAL_HOURS", "24")
     )
@@ -366,8 +409,9 @@ class Config:
     #     verified work item (src/services/gpu/earnings.py), stakers earn
     #     off the tiered rate table (src/services/staking_rewards.py).
     #     Ships dark; nothing below takes effect until this flips.
-    #   'emission' -- providers earn a daily share of WAYZ_DAILY_EMISSION
-    #     by 7-day rolling score (src/services/emission/), stakers earn
+    #   'emission' -- providers earn a daily share of
+    #     PROVIDER_EMISSION_USD_PER_DAY (paid in ETH) by 7-day rolling
+    #     score (src/services/emission/), stakers earn
     #     pro-rata to stake off the SAME emission pool instead of the rate
     #     table. record_earning_for_verified_work() checks this flag and
     #     stops creating per_unit earnings once it's 'emission' -- the two

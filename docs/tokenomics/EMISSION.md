@@ -9,6 +9,21 @@ vs emission for providers) and `docs/staking/REWARDS.md` (rate-table vs
 emission for stakers) -- both already-shipped systems this mode replaces
 for the day it's live.
 
+> **Providers are paid in USD → ETH on Base, not WAYZ (2026-09-22).** WAYZ
+> is not going public for now. In emission mode the providers' share is a
+> fixed **USD pool per day** (`PROVIDER_EMISSION_USD_PER_DAY`, default
+> `100`), allocated by the same 7-day score below and written as
+> `provider_earnings.amount_usd_micros`; settlement pays it in native ETH
+> on Base at the Chainlink ETH/USD price (see
+> `docs/gpu/VERIFICATION_AND_PAYOUTS.md`). The WAYZ 41/41/18 split is
+> unchanged and still drives the stakers' 41% (inference credits); the
+> WAYZ **providers** leg is no longer emitted to anyone -- it's recorded
+> as `providers_wei=0` and folded into `treasury_wei`, so
+> `providers_wei + stakers_wei + treasury_wei == emission_wei` still holds.
+> The USD-denominated sections below (`allocation_usd_micros`,
+> `providers_usd_micros`) supersede the `allocation_wei`/`providers_wei`
+> wording for providers.
+
 ## Chutes/Bittensor facts this mirrors
 
 Per tempo, a Bittensor subnet's emission splits **41% miners (providers),
@@ -131,9 +146,13 @@ sum to exactly `emission_wei`.
 
 **Persistence:** one `provider_scores` row per (epoch_date, provider_id)
 (all four raw metrics, `raw_score`, `adjusted_score`, `share`,
-`tier_multiplier_bps`, `allocation_wei`), then one
+`tier_multiplier_bps`, `allocation_usd_micros`; `allocation_wei` is `0`
+since the ETH switch), then one
 `provider_earnings(source='emission', work_id=NULL, epoch_date=<date>,
-status='accrued')` row per provider with `allocation_wei > 0`. Settlement
+amount_usd_micros=<allocation>, status='accrued')` row per provider with
+a nonzero allocation. `emission_epochs.providers_usd_micros` records the
+USD actually allocated (pool minus floor dust; the USD dust is simply not
+paid). Settlement
 pays this identically to a per_unit earning (see
 `docs/gpu/VERIFICATION_AND_PAYOUTS.md`'s Settlement section) -- no
 settlement code needed to change for the nullable `work_id`.
@@ -161,8 +180,8 @@ like `run_staking_rewards_once` does today.
   minimum (`STAKING_REWARDS_MIN_CREDITS`, below which the day is
   `skipped` with `skip_reason='below_min'`) as today.
 - **`wayz`**: **not implemented** -- there is no on-chain payout rail for
-  raw WAYZ to a staker's wallet yet (unlike providers, who are paid via
-  the existing `provider_settlements` WAYZ-transfer path). An accrual row
+  raw WAYZ to a staker's wallet yet (providers are paid in ETH on Base
+  via `provider_settlements`). An accrual row
   is still written (`status='pending'`, `skip_reason=
   'wayz_payout_not_implemented'`, `wayz_amount_wei` recorded) so the
   amount owed is never lost -- it's just visibly unpaid until a WAYZ
@@ -239,7 +258,8 @@ All of the above are env vars, no code changes needed to retune:
 
 - `GET /gpu/providers/me/earnings` gains `emission: {last_epoch, score:
   {compute, speed, availability, unique_models, raw, adjusted, share},
-  allocation_wayz, rank, providers_scored}` once a provider has been
+  allocation_usd, payout_asset: "ETH", rank, providers_scored}` once a
+  provider has been
   scored at least once (absent entirely before that, or while the
   feature is off).
 - `GET /staking/rewards` gains `mode` (always) and `emission:
@@ -247,7 +267,8 @@ All of the above are env vars, no code changes needed to retune:
   estimated_credits_per_day}` (once emission mode has run at least one
   epoch), computed from the caller's own linked-wallet stake.
 - `GET /gpu/public/summary` gains an aggregate-only `emission: {mode,
-  daily_emission_wayz, providers_bps, stakers_bps, treasury_bps,
+  daily_emission_wayz, provider_pool_usd_per_day, provider_payout_asset,
+  providers_bps, stakers_bps, treasury_bps,
   last_epoch}` -- no per-provider or per-user data, keeping the endpoint's
   no-envelope, aggregate-only guarantee
   (`tests/security/test_gpu_public_aggregate_only.py`).

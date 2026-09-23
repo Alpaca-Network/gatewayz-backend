@@ -38,6 +38,10 @@ class GpuPublicEmission(BaseModel):
 
     mode: str = Field(description="'per_unit' or 'emission' -- Config.REWARDS_MODE")
     daily_emission_wayz: str
+    provider_pool_usd_per_day: str = Field(
+        default="0", description="USD/day allocated to providers by score, paid in ETH on Base"
+    )
+    provider_payout_asset: str = Field(default="ETH", description="Provider payout asset")
     providers_bps: int
     stakers_bps: int
     treasury_bps: int

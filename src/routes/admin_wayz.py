@@ -25,11 +25,17 @@ from fastapi import APIRouter, Depends
 from src.config.config import Config
 from src.db.faucet import get_claim_stats
 from src.db.gpu import count_nodes_by_status, count_providers_by_status, list_nodes, list_providers
-from src.db.gpu_payouts import earnings_totals_all, get_last_settlement_overall, work_24h_stats
+from src.db.gpu_payouts import (
+    earnings_totals_all,
+    eth_paid_wei,
+    get_last_settlement_overall,
+    work_24h_stats,
+)
 from src.db.user_wallets import count_all_wallets, count_wallets_by_source
 from src.db.wallet_stakes import get_stake_totals, get_sync_cursor_row
 from src.security.deps import require_admin_or_env_key
 from src.security.privy_token import privy_verification_mode
+from src.services.gpu.payout_views import get_display_eth_usd_price, micros_to_usd, usd_totals_view
 from src.services.ops.job_runs import get_job_runs
 
 logger = logging.getLogger(__name__)
@@ -91,6 +97,9 @@ def _build_config_block() -> dict[str, Any]:
         "deploy_block": Config.WAYZ_STAKING_DEPLOY_BLOCK,
         "faucet_configured": bool(Config.WAYZ_FAUCET_MINTER_PRIVATE_KEY),
         "rewards_pool_configured": bool(Config.WAYZ_REWARDS_POOL_PRIVATE_KEY),
+        # Provider payouts are ETH on Base since 2026-09-22.
+        "provider_payout_asset": Config.PROVIDER_PAYOUT_ASSET,
+        "provider_payout_pool_configured": bool(Config.PROVIDER_PAYOUT_POOL_PRIVATE_KEY),
         "privy_verification_mode": privy_verification_mode(),
         "community_routing_enabled": bool(Config.COMMUNITY_ROUTING_ENABLED),
         "upstream_pseudonym_enabled": bool(Config.UPSTREAM_ABUSE_PSEUDONYM),
@@ -222,6 +231,10 @@ def _build_gpu_block(jobs_block: dict[str, Any]) -> dict[str, Any]:
         last_settlement = {
             "provider_id": last_settlement_row.get("provider_id"),
             "amount_wei": str(last_settlement_row.get("amount_wei", "0")),
+            "amount_usd": micros_to_usd(last_settlement_row.get("amount_usd_micros")),
+            "asset": last_settlement_row.get("asset"),
+            "chain": last_settlement_row.get("chain"),
+            "eth_usd_price": last_settlement_row.get("eth_usd_price"),
             "status": last_settlement_row.get("status"),
             "tx_hash": last_settlement_row.get("tx_hash"),
             "created_at": last_settlement_row.get("created_at"),
@@ -234,12 +247,12 @@ def _build_gpu_block(jobs_block: dict[str, Any]) -> dict[str, Any]:
         "providers": count_providers_by_status(),
         "nodes": count_nodes_by_status(),
         "work_24h": work_24h_stats(),
-        "earnings": {
-            "accrued_wei": str(earnings.get("accrued", 0)),
-            "settling_wei": str(earnings.get("settling", 0)),
-            "settled_wei": str(earnings.get("settled", 0)),
-            "void_wei": str(earnings.get("void", 0)),
-        },
+        "earnings": usd_totals_view(
+            earnings,
+            ("accrued", "settling", "settled", "void"),
+            price=get_display_eth_usd_price(),
+            paid_wei=eth_paid_wei(),
+        ),
         "last_settlement": last_settlement,
         "rollup_last_hour": rollup_last_hour,
     }
