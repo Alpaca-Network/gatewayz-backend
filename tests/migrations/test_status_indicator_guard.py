@@ -1,24 +1,32 @@
 """A latched breaker must not outrank the measurement beside it.
 
 #2366. `model_status_current.status_indicator` tested the circuit breaker
-FIRST and unconditionally, so it short-circuited the uptime ladder underneath
-it. One trip published `offline` forever. Measured in production:
+FIRST and unconditionally, short-circuiting the uptime ladder underneath. One
+trip published `offline` forever. Measured in production 2026-09-23:
 
     openai/gpt-4o   status_indicator = offline   circuit_breaker_state = open
                     uptime_24h = 100.0           uptime_7d = 100.0
 
-Twenty-five advertised models were in that state -- published as down while
-serving every check for a week.
+Twenty-five advertised models were in that state.
 
-The verdict itself lives in SQL, so the end-to-end proof is the daily ops
-check (`status_contradicts_uptime`), which reads the live surface and should
-fall to zero once this deploys. What is pinned HERE is the pair of things a
-unit test can actually catch:
+WHY THIS TESTS THE STAGED FILE, NOT AN AUTO-APPLIED MIGRATION
+-------------------------------------------------------------
+I first shipped this as an ordinary migration using CREATE OR REPLACE VIEW.
+It failed on push:
 
-1. the breaker branch is guarded by a measurement, not unconditional
-2. the replacement view exposes exactly the original columns, in order --
-   `CREATE OR REPLACE VIEW` refuses otherwise, and `status_page.py` turns a
-   missing column into a 500 (it has done so before).
+    ERROR: cannot change name of view column "active_incidents"
+           to "active_incidents_count"  (SQLSTATE 42P16)
+
+CREATE OR REPLACE VIEW can only APPEND columns; it fails outright on a rename,
+retype or reorder, and leaves the OLD definition in place. The deployed view
+has drifted from every migration file in the repo -- which is precisely why
+`20260915000000_rebuild_model_status_views.sql` exists in staged-migrations,
+using DROP + CREATE, the only form that converges. The fix belongs there.
+
+And the first version of this test compared the new migration's columns
+against the ORIGINAL 2025-11-28 file. It passed, and proved nothing: the
+original file is not what is deployed. A baseline that is not production is
+not a baseline.
 """
 
 from __future__ import annotations
@@ -26,85 +34,79 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-MIGRATIONS = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
-ORIGINAL = MIGRATIONS / "20251128000000_enhance_model_health_tracking.sql"
-REPLACEMENT = MIGRATIONS / "20260923000000_status_indicator_measurement_beats_latched_breaker.sql"
+ROOT = Path(__file__).resolve().parents[2]
+STAGED = ROOT / "supabase" / "staged-migrations" / "20260915000000_rebuild_model_status_views.sql"
+ROUTE = ROOT / "src" / "routes" / "status_page.py"
 
 
-def _view_sql(path: Path) -> str:
-    text = path.read_text()
-    start = text.index("CREATE OR REPLACE VIEW model_status_current AS")
-    return text[start : text.index(";", start)]
+def _model_status_view_sql() -> str:
+    text = STAGED.read_text()
+    start = text.index("CREATE VIEW model_status_current")
+    return text[start : text.index("FROM model_health_tracking", start)]
 
 
-def _columns(view_sql: str) -> list[str]:
-    """Output column names, in order, as the view exposes them."""
-    body = view_sql[
-        view_sql.index("SELECT") + len("SELECT") : view_sql.index("FROM model_health_tracking")
-    ]
-    cols, depth, current = [], 0, ""
-    for ch in body:
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-        if ch == "," and depth == 0:
-            cols.append(current)
-            current = ""
-        else:
-            current += ch
-    cols.append(current)
-
-    names = []
-    for c in cols:
-        c = " ".join(c.split())
-        if not c:
-            continue
-        m = re.search(r"\bas\s+([A-Za-z_][A-Za-z0-9_]*)\s*$", c, re.IGNORECASE)
-        names.append(m.group(1) if m else c.split(".")[-1])
-    return names
+def _breaker_branch() -> str:
+    m = re.search(
+        r"WHEN\s+mht\.circuit_breaker_state\s*=\s*'open'(.*?)THEN",
+        _model_status_view_sql(),
+        re.S | re.I,
+    )
+    assert m, "the breaker branch disappeared entirely"
+    return m.group(1)
 
 
 def test_the_breaker_branch_is_guarded_by_a_measurement():
-    sql = _view_sql(REPLACEMENT)
-    m = re.search(r"WHEN\s+mht\.circuit_breaker_state\s*=\s*'open'(.*?)THEN", sql, re.S | re.I)
-    assert m, "the breaker branch disappeared entirely"
-    guard = m.group(1)
-    assert "uptime_percentage_24h" in guard, (
+    assert "uptime_percentage_24h" in _breaker_branch(), (
         "the breaker decides the health verdict unconditionally again — one trip "
         "will publish 'offline' forever, whatever the measurement says"
     )
 
 
 def test_absent_measurement_plus_open_breaker_is_still_offline():
-    # The carve-out. No evidence must not read as healthy evidence, so the
-    # guard has to COALESCE rather than let NULL fall through the comparison.
-    guard = re.search(
-        r"WHEN\s+mht\.circuit_breaker_state\s*=\s*'open'(.*?)THEN",
-        _view_sql(REPLACEMENT),
-        re.S | re.I,
-    ).group(1)
-    assert (
-        "COALESCE" in guard.upper()
-    ), "a NULL uptime would slip past the guard and read as healthy"
+    # No evidence must not read as healthy evidence, so the guard has to
+    # COALESCE rather than let a NULL slip past the comparison.
+    assert "COALESCE" in _breaker_branch().upper()
 
 
 def test_the_uptime_ladder_is_still_reachable():
-    sql = _view_sql(REPLACEMENT)
+    sql = _model_status_view_sql()
     for threshold in ("99.9", "95.0", "50.0"):
         assert threshold in sql, f"the {threshold} rung of the ladder went missing"
 
 
-def test_the_replacement_exposes_exactly_the_original_columns():
-    # CREATE OR REPLACE VIEW refuses a changed column list, and status_page.py
-    # turns a missing column into a blanket 500 — it already did that once.
-    assert _columns(_view_sql(REPLACEMENT)) == _columns(_view_sql(ORIGINAL))
+def test_the_rebuild_uses_drop_and_create_not_replace():
+    # CREATE OR REPLACE cannot rename, retype or reorder an existing column --
+    # it fails and silently leaves the old definition in place, which is how
+    # the deployed view drifted from every file in the repo.
+    text = STAGED.read_text()
+    assert "DROP VIEW IF EXISTS model_status_current CASCADE" in text
+    assert "CREATE OR REPLACE VIEW model_status_current" not in text
 
 
-def test_the_original_really_was_unconditional():
-    # Proves this test can tell the two apart, rather than passing on anything
-    # that mentions a breaker.
-    guard = re.search(
-        r"WHEN\s+mht\.circuit_breaker_state\s*=\s*'open'(.*?)THEN", _view_sql(ORIGINAL), re.S | re.I
-    ).group(1)
-    assert "uptime_percentage_24h" not in guard
+def test_no_auto_applied_migration_tries_to_replace_this_view_again():
+    # The trap, pinned so the next person does not re-lay it: an ordinary
+    # migration touching this view WILL fail on push and look like a no-op.
+    auto = ROOT / "supabase" / "migrations"
+    offenders = [
+        p.name
+        for p in auto.glob("*.sql")
+        if "CREATE OR REPLACE VIEW model_status_current" in p.read_text()
+        and p.name > "20260915000000"
+    ]
+    assert not offenders, (
+        f"{offenders} use CREATE OR REPLACE on a view whose deployed shape has drifted; "
+        "put the change in supabase/staged-migrations/ instead"
+    )
+
+
+def test_the_view_column_matches_what_the_route_reads():
+    # The route is the closest thing to production we can read offline: its own
+    # comment records that the live view exposes `active_incidents`. If the
+    # staged rebuild ever disagrees with what status_page.py reads, the endpoint
+    # degrades to nulls.
+    view = _model_status_view_sql()
+    route = ROUTE.read_text()
+    if 'model.get("active_incidents_count")' in route:
+        assert "AS active_incidents_count" in view
+    else:
+        assert 'model.get("active_incidents")' in route, "the route stopped reading this field"
