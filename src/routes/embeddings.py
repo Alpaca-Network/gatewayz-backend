@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field
 
 from src.config import Config
 from src.security.deps import get_api_key
+from src.services.billing.billing_ref import resolve_billing_ref
+from src.services.billing.simple_metering import charge_credits, precheck_credits
 from src.services.connection_pool import get_http_client
 from src.services.upstream.anonymize import scrub_upstream_kwargs
 
@@ -46,6 +48,41 @@ MODEL_PREFIX_ROUTING: tuple[tuple[str, str], ...] = (
     ("BAAI/", "deepinfra"),
     ("sentence-transformers/", "deepinfra"),
 )
+
+
+# USD per 1M input tokens (embeddings have no output tokens). Keyed by the model
+# name with the provider namespace stripped, lower-cased.
+EMBEDDING_PRICE_PER_M_TOKENS: dict[str, float] = {
+    "text-embedding-3-small": 0.02,
+    "text-embedding-3-large": 0.13,
+    "text-embedding-ada-002": 0.10,
+    "baai/bge-large-en-v1.5": 0.01,
+    "baai/bge-base-en-v1.5": 0.005,
+    "sentence-transformers/all-minilm-l6-v2": 0.005,
+}
+# Unknown models bill at the highest known rate: over-charging a little is
+# safer than serving provider spend for free.
+EMBEDDING_FALLBACK_PRICE_PER_M_TOKENS = 0.13
+
+
+def embedding_cost(model: str, input_tokens: int) -> float:
+    """USD cost for ``input_tokens`` of ``model`` (always > 0 for tokens > 0)."""
+    name = (model or "").lower()
+    for prefix in ("openai/", "together/", "deepinfra/"):
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+            break
+    price = EMBEDDING_PRICE_PER_M_TOKENS.get(name, EMBEDDING_FALLBACK_PRICE_PER_M_TOKENS)
+    return max(0, input_tokens) * price / 1_000_000
+
+
+def estimate_input_tokens(value: Any) -> int:
+    """Conservative pre-call token estimate (~4 chars/token, 1 per pre-tokenised id)."""
+    if isinstance(value, str):
+        return max(1, len(value) // 4 + 1)
+    if isinstance(value, list):
+        return max(1, sum(estimate_input_tokens(v) if not isinstance(v, int) else 1 for v in value))
+    return 1
 
 
 class EmbeddingsRequest(BaseModel):
@@ -114,14 +151,8 @@ async def create_embeddings(
     request: Request = None,
     api_key: str = Depends(get_api_key),
 ):
-    """Create embeddings.
-
-    Note: embeddings are billed by the upstream provider and are currently
-    forwarded at cost — they are not metered through the credit ledger. This is
-    deliberate for launch (embedding spend for a repo index is small relative to
-    chat) and is flagged rather than hidden, because an unmetered path is
-    exactly the kind of thing that becomes a surprise later.
-    """
+    """Create embeddings, metered on input tokens through the credit ledger."""
+    billing_ref = resolve_billing_ref(request)
     provider, base_url, provider_key = resolve_provider(req.model)
     upstream_model = strip_provider_prefix(req.model, provider)
 
@@ -135,6 +166,10 @@ async def create_embeddings(
     # this is a no-op today (the dict above never included it) and guards
     # against a future regression that adds it.
     payload = scrub_upstream_kwargs(payload)
+
+    # Pre-check: positive balance covering the estimated cost, before any provider spend.
+    est_tokens = estimate_input_tokens(req.input)
+    user = await precheck_credits(api_key, embedding_cost(req.model, est_tokens))
 
     logger.info("Embeddings request: provider=%s, model=%s", provider, upstream_model)
 
@@ -172,6 +207,20 @@ async def create_embeddings(
         ) from e
 
     data = response.json()
+
+    usage = data.get("usage") or {}
+    billed_tokens = int(usage.get("prompt_tokens") or usage.get("total_tokens") or est_tokens)
+    await charge_credits(
+        api_key=api_key,
+        user=user,
+        cost=embedding_cost(req.model, billed_tokens),
+        description=f"Embeddings - {req.model}",
+        model=req.model,
+        tokens=billed_tokens,
+        billing_ref=billing_ref,
+        metadata={"endpoint": "/v1/embeddings", "input_tokens": billed_tokens},
+    )
+
     data.setdefault("object", "list")
     data.setdefault("model", req.model)
     return data
@@ -192,9 +241,6 @@ async def list_embedding_models():
         "object": "list",
         "providers": available,
         "routing_prefixes": [p for p, _ in MODEL_PREFIX_ROUTING],
-        "note": (
-            "Embeddings are forwarded at cost and are not currently metered through "
-            "the credit ledger."
-        ),
+        "note": ("Embeddings are metered per input token through the credit ledger."),
         "timestamp": int(time.time()),
     }

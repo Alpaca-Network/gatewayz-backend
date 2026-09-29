@@ -292,6 +292,33 @@ def validate_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]
     }
 
 
+def reserve_anonymous_request(ip_address: str, model_id: str = "") -> dict[str, Any]:
+    """Atomically reserve one anonymous request BEFORE inference.
+
+    INCR first, then compare: concurrent requests each get a distinct count, so
+    N parallel requests cannot all pass a stale read, and a client that cancels
+    mid-stream has already been counted. Reservations are not refunded.
+
+    Returns dict with ``allowed``, ``remaining``, ``limit``, ``count``, ``reason``.
+    """
+    new_count = increment_anonymous_usage(ip_address)
+    if new_count > ANONYMOUS_DAILY_LIMIT:
+        return {
+            "allowed": False,
+            "remaining": 0,
+            "limit": ANONYMOUS_DAILY_LIMIT,
+            "count": new_count,
+            "reason": f"Anonymous daily limit exceeded ({ANONYMOUS_DAILY_LIMIT} requests/day). Please sign up for an account to continue.",
+        }
+    return {
+        "allowed": True,
+        "remaining": max(0, ANONYMOUS_DAILY_LIMIT - new_count),
+        "limit": ANONYMOUS_DAILY_LIMIT,
+        "count": new_count,
+        "reason": None,
+    }
+
+
 def record_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]:
     """
     Record a successful anonymous request.

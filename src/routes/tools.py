@@ -11,10 +11,13 @@ This module provides endpoints for:
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from src.security.deps import get_api_key, get_optional_api_key
+from src.config import Config
+from src.security.deps import get_api_key
+from src.services.billing.billing_ref import resolve_billing_ref
+from src.services.billing.simple_metering import charge_credits, precheck_credits
 from src.services.tools import (
     execute_tool,
     get_tool_by_name,
@@ -24,6 +27,29 @@ from src.services.tools import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tools", tags=["tools"])
+
+
+def tool_cost_usd(tool_name: str) -> float:
+    """Flat per-call USD charge for a tool. Always > 0 (unknown tools use the default)."""
+    costs = {
+        "web_search": Config.TOOL_COST_WEB_SEARCH_USD,
+        "text_to_speech": Config.TOOL_COST_TTS_USD,
+    }
+    cost = costs.get(tool_name, Config.TOOL_COST_DEFAULT_USD)
+    return cost if cost > 0 else 0.01
+
+
+async def _charge_tool(api_key: str, user: dict, tool_name: str, request: Request | None) -> None:
+    await charge_credits(
+        api_key=api_key,
+        user=user,
+        cost=tool_cost_usd(tool_name),
+        description=f"Tool call - {tool_name}",
+        model=f"tool/{tool_name}",
+        tokens=1,
+        billing_ref=resolve_billing_ref(request),
+        metadata={"endpoint": "/v1/tools", "tool": tool_name},
+    )
 
 
 class ToolExecuteRequest(BaseModel):
@@ -116,6 +142,7 @@ async def get_tool_info(tool_name: str):
 @router.post("/execute")
 async def execute_tool_endpoint(
     request: ToolExecuteRequest,
+    http_request: Request = None,
     api_key: str = Depends(get_api_key),
 ) -> ToolExecuteResponse:
     """Execute a tool with given parameters.
@@ -139,11 +166,17 @@ async def execute_tool_endpoint(
     if not tool_class:
         raise HTTPException(status_code=404, detail=f"Tool '{request.name}' not found")
 
+    # Pre-check before any provider spend; every tool call is billed.
+    user = await precheck_credits(api_key, tool_cost_usd(request.name))
+
     try:
         logger.info(
             f"Executing tool '{request.name}' with params: {list(request.parameters.keys())}"
         )
         result = await execute_tool(request.name, request.parameters)
+
+        if result.success:
+            await _charge_tool(api_key, user, request.name, http_request)
 
         return ToolExecuteResponse(
             success=result.success,
@@ -151,6 +184,9 @@ async def execute_tool_endpoint(
             error=result.error,
             metadata=result.metadata,
         )
+
+    except HTTPException:
+        raise
 
     except ValueError as e:
         logger.warning(f"Tool execution validation error: {e}")
@@ -164,7 +200,8 @@ async def execute_tool_endpoint(
 @router.post("/search/augment")
 async def search_augment(
     request: SearchAugmentRequest,
-    api_key: str | None = Depends(get_optional_api_key),
+    http_request: Request = None,
+    api_key: str = Depends(get_api_key),
 ) -> SearchAugmentResponse:
     """Perform web search and return formatted context for prompt augmentation.
 
@@ -178,7 +215,7 @@ async def search_augment(
 
     Args:
         request: Search query and options
-        api_key: Optional API key (allows both authenticated and guest usage)
+        api_key: Required API key; each successful search is billed
 
     Returns:
         SearchAugmentResponse with formatted context string
@@ -193,6 +230,8 @@ async def search_augment(
            https://coindesk.com/...
         ...
     """
+    user = await precheck_credits(api_key, tool_cost_usd("web_search"))
+
     try:
         logger.info(f"Search augment request: query='{request.query[:50]}...'")
 
@@ -214,6 +253,8 @@ async def search_augment(
                 error=result.error or "Search failed",
                 results_count=0,
             )
+
+        await _charge_tool(api_key, user, "web_search", http_request)
 
         # Format the results as context text
         search_data = result.result or {}
@@ -266,6 +307,9 @@ async def search_augment(
             context=context,
             results_count=len(results),
         )
+
+    except HTTPException:
+        raise
 
     except Exception as e:
         logger.exception(f"Search augment error: {e}")
