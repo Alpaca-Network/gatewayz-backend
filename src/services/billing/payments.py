@@ -1935,7 +1935,9 @@ class StripeService:
                 }
             ).eq("request_id", request_id).execute()
         except Exception:
-            logger.error("Clawback %s applied but ledger finalize failed", request_id, exc_info=True)
+            logger.error(
+                "Clawback %s applied but ledger finalize failed", request_id, exc_info=True
+            )
         invalidate_user_cache_by_id(user_id)
 
         if shortfall > 0:

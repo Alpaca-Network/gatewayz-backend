@@ -468,7 +468,9 @@ async def create_message(
                 referer=request.headers.get("referer") if request else None,
             )
         except ApiKeyLookupUnavailable as e:
-            raise _anthropic_error(503, "api_error", "Authentication temporarily unavailable") from e
+            raise _anthropic_error(
+                503, "api_error", "Authentication temporarily unavailable"
+            ) from e
         except ValueError as e:
             raise _anthropic_error(401, "authentication_error", str(e)) from e
 

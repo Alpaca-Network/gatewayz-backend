@@ -671,9 +671,7 @@ def test_refund_after_won_dispute_reverses_only_original_grant(fake_db, svc):
 def test_partial_refunds_cumulatively_capped_at_grant(fake_db, svc):
     fake_db.tables["users"][0]["purchased_credits"] = 20.0
     for i in range(3):
-        svc._reverse_purchase_credits(
-            fake_db.tables["payments"][0], 600, f"refund:re_c{i}", "x"
-        )
+        svc._reverse_purchase_credits(fake_db.tables["payments"][0], 600, f"refund:re_c{i}", "x")
     assert _purchased(fake_db) == pytest.approx(10.0)
 
 

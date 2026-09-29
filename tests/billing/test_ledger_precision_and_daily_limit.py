@@ -105,7 +105,10 @@ class TestDeductCreditsTinyCost:
         assert client.rpc.called
         params = client.rpc.call_args[0][1]
         assert params["p_tokens_amount"] > 0
-        assert abs(params["p_from_allowance"] + params["p_from_purchased"] - params["p_tokens_amount"]) < 1e-9
+        assert (
+            abs(params["p_from_allowance"] + params["p_from_purchased"] - params["p_tokens_amount"])
+            < 1e-9
+        )
 
     def test_sub_precision_cost_rounds_up_to_ledger_unit(self):
         client = self._run(1e-10)
@@ -133,7 +136,9 @@ class TestDailyUsageAggregate:
         client = MagicMock()
         client.rpc.return_value.execute.side_effect = Exception("function does not exist")
         pages = [[{"amount": -0.001}] * 1000, [{"amount": -0.001}] * 500, []]
-        q = client.table.return_value.select.return_value.eq.return_value.eq.return_value.gte.return_value.lt.return_value
+        q = (
+            client.table.return_value.select.return_value.eq.return_value.eq.return_value.gte.return_value.lt.return_value
+        )
         q.order.return_value.range.return_value.execute.side_effect = [
             MagicMock(data=p) for p in pages
         ]
