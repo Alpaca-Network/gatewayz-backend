@@ -334,26 +334,6 @@ class ChatInferenceHandler:
             logger.debug("[ChatHandler] Skipping credit check for free model %s", model_id)
             return max_tokens
 
-        # Refuse over-limit users BEFORE spending upstream money (the post-inference
-        # limit check in deduct_credits can only refuse after the tokens are served).
-        from fastapi import HTTPException
-
-        from src.services.billing.daily_usage_limiter import (
-            DailyUsageLimitExceeded,
-            DailyUsageUnavailable,
-            check_daily_limit_preflight,
-        )
-
-        try:
-            await asyncio.to_thread(check_daily_limit_preflight, int(self.user["id"]))
-        except DailyUsageLimitExceeded as e:
-            raise HTTPException(status_code=429, detail=str(e)) from e
-        except DailyUsageUnavailable as e:
-            logger.error("[ChatHandler] Daily usage lookup failed, refusing request: %s", e)
-            raise HTTPException(
-                status_code=503, detail="Usage check temporarily unavailable. Please retry."
-            ) from e
-
         # Perform pre-flight check (now includes affordability capping)
         check_result = estimate_and_check_credits(
             model_id=model_id,

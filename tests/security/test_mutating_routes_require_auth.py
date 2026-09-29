@@ -28,7 +28,6 @@ ALLOWLIST = {
     ("POST", "/v1/chat/completions"): "anonymous chat, optional key",
     ("POST", "/v1/messages"): "anonymous chat (anthropic format), optional key",
     ("POST", "/v1/completions"): "optional key",
-    ("POST", "/v1/tools/search/augment"): "optional key, read-only compute",
     # Login / registration / credential flows (cannot require an existing session)
     ("POST", "/auth"): "Privy login",
     ("POST", "/auth/register"): "registration",

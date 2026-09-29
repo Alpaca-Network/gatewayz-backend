@@ -338,6 +338,25 @@ from src.routes.chat_streaming import stream_generator  # noqa: F401
 logger.info("📍 Registering /chat/completions endpoint")
 
 
+async def _enforce_daily_limit_preflight(user: dict) -> None:
+    """Refuse over-limit users before inference: 429 over limit, 503 if the lookup fails."""
+    from src.services.billing.daily_usage_limiter import (
+        DailyUsageLimitExceeded,
+        DailyUsageUnavailable,
+        check_daily_limit_preflight,
+    )
+
+    try:
+        await asyncio.to_thread(check_daily_limit_preflight, int(user["id"]))
+    except DailyUsageLimitExceeded as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
+    except DailyUsageUnavailable as e:
+        logger.error("Daily usage lookup failed, refusing request: %s", e)
+        raise HTTPException(
+            status_code=503, detail="Usage check temporarily unavailable. Please retry."
+        ) from e
+
+
 @router.post("/chat/completions", tags=["chat"])
 @traced(name="chat_completions", type="llm")
 async def chat_completions(
@@ -658,6 +677,11 @@ async def chat_completions(
             )
             if not _precheck["allowed"] and _precheck.get("capped_max_tokens") is None:
                 raise APIExceptions.payment_required(credits=_user_credits)
+
+        # Daily usage limit: refuse BEFORE any upstream spend. Done once here (not in
+        # the per-provider handler) so provider failover doesn't repeat the lookup.
+        if not is_anonymous and not trial.get("is_trial", False) and not is_free_model(req.model):
+            await _enforce_daily_limit_preflight(user)
 
         # Pricing pre-check: block high-value models without pricing BEFORE
         # hitting any upstream provider. get_model_pricing_async() raises ValueError
