@@ -207,29 +207,26 @@ class TestLayer1IPRateLimiting:
 
     # CM-2.1.5
     @pytest.mark.cm_verified
-    def test_authenticated_users_exempt_from_ip_limits(self):
+    @pytest.mark.asyncio
+    async def test_authenticated_users_exempt_from_ip_limits(self):
         """Authenticated requests (with valid API key/Bearer token) bypass IP limits.
 
         The middleware checks _is_authenticated_request() and skips IP rate limiting
         for authenticated users (they are rate-limited at the API key layer instead).
         """
         mw = self._make_middleware()
-        request = self._make_request(auth_header="Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test")
-
-        # Verify the request is recognized as authenticated
-        assert mw._is_authenticated_request(request) is True
-
-        # Also test with gw_ prefix API key
-        request2 = self._make_request(auth_header="gw_1234567890abcdefghijklmnopqrstuvwxyz")
-        assert mw._is_authenticated_request(request2) is True
-
-        # Non-authenticated request should NOT be exempt
-        request3 = self._make_request(auth_header="")
-        assert mw._is_authenticated_request(request3) is False
-
-        # Short auth header should NOT be exempt
-        request4 = self._make_request(auth_header="short")
-        assert mw._is_authenticated_request(request4) is False
+        good = self._make_request(auth_header="gw_1234567890abcdefghijklmnopqrstuvwxyz")
+        with patch("src.db.users.get_user", return_value={"id": 1}):
+            assert (await mw._is_authenticated_request(good)) is True
+        # Well-formed but unvalidated key must NOT be exempt
+        with patch("src.db.users.get_user", return_value=None):
+            assert (await mw._is_authenticated_request(good)) is False
+            jwt = self._make_request(auth_header="Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test")
+            assert (await mw._is_authenticated_request(jwt)) is False
+        assert (await mw._is_authenticated_request(self._make_request(auth_header=""))) is False
+        assert (
+            await mw._is_authenticated_request(self._make_request(auth_header="short"))
+        ) is False
 
 
 # ===================================================================

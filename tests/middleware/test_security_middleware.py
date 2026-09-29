@@ -232,45 +232,33 @@ class TestRateLimitCalculation:
 class TestAuthenticatedUserExemption:
     """Test authenticated user exemption from IP-based rate limiting"""
 
-    def test_bearer_token_detected(self, security_middleware):
-        """Test that Bearer token format is detected"""
-        mock_request = Mock()
-        mock_request.headers = {"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}
+    def _auth(self, mw, header, user):
+        import asyncio
+        from unittest.mock import patch
 
-        is_auth = security_middleware._is_authenticated_request(mock_request)
-        assert is_auth
+        req = Mock()
+        req.headers = {"Authorization": header} if header else {}
+        with patch("src.db.users.get_user", return_value=user):
+            return asyncio.run(mw._is_authenticated_request(req))
 
-    def test_gw_api_key_detected(self, security_middleware):
-        """Test that Gatewayz API key format is detected"""
-        mock_request = Mock()
-        mock_request.headers = {"Authorization": "gw_1234567890abcdef1234567890abcdef"}
+    def test_valid_gw_key_detected(self, security_middleware):
+        assert self._auth(
+            security_middleware, "Bearer gw_1234567890abcdef1234567890abcdef", {"id": 1}
+        )
 
-        is_auth = security_middleware._is_authenticated_request(mock_request)
-        assert is_auth
+    def test_unknown_key_not_authenticated(self, security_middleware):
+        assert not self._auth(security_middleware, "gw_1234567890abcdef1234567890abcdef", None)
 
-    def test_generic_api_key_detected(self, security_middleware):
-        """Test that generic long API keys are detected"""
-        mock_request = Mock()
-        mock_request.headers = {"Authorization": "sk_test_1234567890abcdefghijk"}
-
-        is_auth = security_middleware._is_authenticated_request(mock_request)
-        assert is_auth
+    def test_long_garbage_bearer_not_authenticated(self, security_middleware):
+        assert not self._auth(
+            security_middleware, "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", None
+        )
 
     def test_no_authorization_header(self, security_middleware):
-        """Test that request without auth header is not authenticated"""
-        mock_request = Mock()
-        mock_request.headers = {}
-
-        is_auth = security_middleware._is_authenticated_request(mock_request)
-        assert not is_auth
+        assert not self._auth(security_middleware, "", None)
 
     def test_short_authorization_header(self, security_middleware):
-        """Test that short auth headers are not considered authenticated"""
-        mock_request = Mock()
-        mock_request.headers = {"Authorization": "short"}
-
-        is_auth = security_middleware._is_authenticated_request(mock_request)
-        assert not is_auth
+        assert not self._auth(security_middleware, "short", None)
 
 
 class TestRequestOutcomeRecording:
@@ -369,8 +357,8 @@ class TestEdgeCases:
         mock_request.client = Mock()
         mock_request.client.host = "10.0.0.1"
 
-        # Should extract first IP from X-Forwarded-For
+        # Rightmost (proxy-appended) hop; leftmost is client-controlled
         import asyncio
 
         ip = asyncio.run(security_middleware._get_client_ip(mock_request))
-        assert ip == "1.2.3.4"
+        assert ip == "5.6.7.8"

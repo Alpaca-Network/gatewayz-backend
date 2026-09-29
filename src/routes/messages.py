@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 from src.schemas.proxy import ProxyRequest
 from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
+from src.security.security import validate_api_key_security
 from src.services.providers.anthropic_transformer import (
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
@@ -426,6 +427,17 @@ async def create_message(
         ANTHROPIC_AUTH_TOKEN=<gatewayz key>
     """
     resolved_key = _resolve_api_key(request, api_key)
+    if resolved_key and not api_key:
+        # x-api-key bypassed the Bearer dependency; apply the same key security
+        # checks (IP allowlist, referrer domains, max_requests).
+        try:
+            validate_api_key_security(
+                resolved_key,
+                client_ip=request.client.host if request and request.client else None,
+                referer=request.headers.get("referer") if request else None,
+            )
+        except ValueError as e:
+            raise _anthropic_error(401, "authentication_error", str(e)) from e
 
     if not req.messages:
         raise _anthropic_error(400, "invalid_request_error", "messages must not be empty")

@@ -687,6 +687,9 @@ class RateLimitManager:
         # admission check (and vice versa).
         use_result_cache = acquire_concurrency and count_request
 
+        # SECURITY: only DENIALS are cached. Caching "allowed" (keyed on
+        # api_key:tokens_used, usually 0) let requests inside the TTL skip
+        # RPM/burst/concurrency counting entirely.
         if use_result_cache and cache_key in self._result_cache:
             cached_result, cached_time = self._result_cache[cache_key]
             if now - cached_time < self._cache_ttl:
@@ -768,8 +771,8 @@ class RateLimitManager:
             count_request=count_request,
         )
 
-        # Cache the result if allowed (only cache successful checks)
-        if use_result_cache and result.allowed:
+        # Cache denials only (see above); allowed requests must always be counted.
+        if use_result_cache and not result.allowed:
             self._result_cache[cache_key] = (result, now)
             # Clean up old cache entries (keep cache size bounded)
             if len(self._result_cache) > 1000:
