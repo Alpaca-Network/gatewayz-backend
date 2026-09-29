@@ -730,6 +730,7 @@ class Config:
 
     # Moonshot AI Configuration (Kimi models)
     MOONSHOT_API_KEY = os.environ.get("MOONSHOT_API_KEY")
+    SAMBANOVA_API_KEY = os.environ.get("SAMBANOVA_API_KEY")
 
     # MiniMax Configuration (MiniMax-M series models)
     MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY")

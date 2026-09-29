@@ -664,9 +664,15 @@ def detect_provider_from_model_id(
             logger.info(f"Routing '{model_id}' to openrouter (mistralai org prefix)")
             return "openrouter"
 
-        # DeepSeek models are primarily on Fireworks in this system
-        # Support both "deepseek-ai/" and "deepseek/" org prefixes
-        if org in ("deepseek-ai", "deepseek") and "deepseek" in model_name.lower():
+        # DeepSeek direct (e.g., "deepseek/deepseek-chat") and SambaNova
+        # (e.g., "sambanova/DeepSeek-V3.1") go to their native adapters.
+        if org == "deepseek":
+            return "deepseek"
+        if org == "sambanova":
+            return "sambanova"
+
+        # HF-style "deepseek-ai/" ids are primarily on Fireworks in this system
+        if org == "deepseek-ai" and "deepseek" in model_name.lower():
             return "fireworks"
 
         # OpenAI models go to native OpenAI provider first
