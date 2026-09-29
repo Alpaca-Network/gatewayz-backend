@@ -699,3 +699,97 @@ def test_tier_downgrade_audit_row_is_not_api_usage(svc):
     kw = log.call_args.kwargs
     assert kw["amount"] < 0
     assert kw["transaction_type"] == "subscription_downgrade"
+
+
+# ===========================================================================
+# 5. Portal tier changes via invoice.paid: independent of event ordering
+# ===========================================================================
+def _proration_invoice(old_product, new_product, paid=4000, inv_id="in_p1"):
+    def line(product, amount):
+        return {"amount": amount, "price": {"id": f"price_{product}", "product": product}}
+
+    return SimpleNamespace(
+        id=inv_id,
+        billing_reason="subscription_update",
+        amount_paid=paid,
+        subscription="sub_1",
+        lines={"data": [line(old_product, -1000), line(new_product, 5000)]},
+    )
+
+
+def _portal_invoice_paid(svc, invoice, user_tier, sub, remaining, new_tier_product="prod_max"):
+    """Run _handle_invoice_paid; returns (final allowance or None, modify mock)."""
+    with (
+        patch(f"{MOD}.get_tier_from_product_id", side_effect=lambda p: TIERS.get(p, "basic")),
+        patch("stripe.Subscription.retrieve", return_value=sub),
+        patch.object(svc, "_extract_user_id_from_subscription", return_value=1),
+        patch(f"{MOD}.get_user_by_id", return_value={"id": 1, "tier": user_tier}),
+        patch(
+            "src.db.subscription_products.get_allowance_from_tier",
+            side_effect=lambda t: ALLOW.get(t, 0.0),
+        ),
+        patch(
+            "src.db.users.get_user_by_id",
+            return_value={"subscription_allowance": remaining, "purchased_credits": 0},
+        ),
+        patch("src.db.users.reset_subscription_allowance", return_value=True) as reset,
+        patch("src.db.credit_transactions.log_credit_transaction"),
+        patch("stripe.Subscription.modify") as modify,
+    ):
+        svc._handle_invoice_paid(invoice)
+    return (reset.call_args.args[1] if reset.called else None), modify
+
+
+def _max_sub(metadata=None):
+    sub = _paid_sub(metadata=metadata)
+    sub["items"] = {"data": [{"id": "si_1", "price": {"id": "price_max", "product": "prod_max"}}]}
+    return sub
+
+
+def test_portal_upgrade_invoice_first_grants_delta(svc):
+    # invoice.paid arrives before subscription.updated: users.tier is still 'pro'
+    target, modify = _portal_invoice_paid(
+        svc, _proration_invoice("prod_cheap", "prod_max"), "pro", _max_sub(), remaining=3.0
+    )
+    assert target == pytest.approx(43.0)
+    assert modify.call_args.kwargs["metadata"]["allowance_last_invoice"] == "in_p1"
+
+
+def test_portal_upgrade_subscription_updated_first_still_grants_delta(svc):
+    # subscription.updated already moved users.tier to 'max'; no allowance_hw metadata
+    target, _ = _portal_invoice_paid(
+        svc, _proration_invoice("prod_cheap", "prod_max"), "max", _max_sub(), remaining=3.0
+    )
+    assert target == pytest.approx(43.0)
+
+
+def test_portal_upgrade_unknown_old_price_never_grants_zero(svc):
+    inv = SimpleNamespace(
+        id="in_p2",
+        billing_reason="subscription_update",
+        amount_paid=4000,
+        subscription="sub_1",
+        lines={"data": []},
+    )
+    target, _ = _portal_invoice_paid(svc, inv, "max", _max_sub(), remaining=0.0)
+    assert target is not None and target > 0
+
+
+def test_portal_upgrade_invoice_replay_is_idempotent(svc):
+    sub = _max_sub(metadata={"allowance_last_invoice": "in_p1"})
+    target, modify = _portal_invoice_paid(
+        svc, _proration_invoice("prod_cheap", "prod_max"), "max", sub, remaining=43.0
+    )
+    assert target is None
+    assert not modify.called
+
+
+def test_portal_downgrade_does_not_refill(svc):
+    sub = _paid_sub(metadata={"allowance_period_start": "1700000000", "allowance_hw": "50.0"})
+    inv = _proration_invoice("prod_max", "prod_cheap", paid=0, inv_id="in_d1")
+    for user_tier in ("max", "pro"):  # either event order
+        target, _ = _portal_invoice_paid(svc, inv, user_tier, sub, remaining=2.0)
+        assert target is None or target <= 2.0
+    # and with no hw metadata at all
+    target, _ = _portal_invoice_paid(svc, inv, "pro", _paid_sub(), remaining=2.0)
+    assert target is None or target <= 2.0

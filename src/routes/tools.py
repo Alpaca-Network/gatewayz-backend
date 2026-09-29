@@ -36,7 +36,7 @@ def tool_cost_usd(tool_name: str) -> float:
         "text_to_speech": Config.TOOL_COST_TTS_USD,
     }
     cost = costs.get(tool_name, Config.TOOL_COST_DEFAULT_USD)
-    return cost if cost > 0 else 0.01
+    return cost if cost > 0 else 0.02
 
 
 async def _charge_tool(api_key: str, user: dict, tool_name: str, request: Request | None) -> None:
