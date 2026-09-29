@@ -714,6 +714,12 @@ class Config:
     # Tavily Web Search Configuration
     TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
 
+    # Flat per-call charge (USD) for paid server-side tools under /v1/tools.
+    # Must stay > 0: an unmetered paid tool is a provider-spend leak.
+    TOOL_COST_WEB_SEARCH_USD = float(os.environ.get("TOOL_COST_WEB_SEARCH_USD", "0.01"))
+    TOOL_COST_TTS_USD = float(os.environ.get("TOOL_COST_TTS_USD", "0.02"))
+    TOOL_COST_DEFAULT_USD = float(os.environ.get("TOOL_COST_DEFAULT_USD", "0.01"))
+
     # Alibaba Cloud Configuration
     ALIBABA_CLOUD_API_KEY = os.environ.get("ALIBABA_CLOUD_API_KEY")
     ALIBABA_CLOUD_API_KEY_INTERNATIONAL = os.environ.get("ALIBABA_CLOUD_API_KEY_INTERNATIONAL")
