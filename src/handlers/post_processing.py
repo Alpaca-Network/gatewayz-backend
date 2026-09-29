@@ -239,6 +239,7 @@ async def _process_stream_completion_background(
     request_id=None,
     client_ip=None,
     api_key_id=None,
+    cancelled=False,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -500,6 +501,7 @@ async def _process_stream_completion_background(
                         model_id=None,
                         api_key_id=api_key_id,
                         is_anonymous=is_anonymous,
+                        **({"metadata": {"cancelled": True}} if cancelled else {}),
                     )
                 except Exception as e:
                     logger.debug(f"Failed to save chat completion request: {e}")

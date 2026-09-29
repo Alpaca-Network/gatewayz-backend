@@ -189,6 +189,37 @@ async def _stream_anthropic_events(
     model: str,
     message_id: str,
 ):
+    """Re-emit an OpenAI SSE stream as Anthropic events, closing the inner
+    stream on every exit path.
+
+    The inner stream is the chat pipeline's generator, which bills after it
+    finishes -- and, on a client abort, in its own cleanup. A client
+    disconnect (CancelledError/GeneratorExit at our ``yield``) never reaches
+    the inner generator on its own, so without this close it would sit
+    suspended and the tokens already generated upstream would go uncharged
+    until garbage collection (or forever).
+    """
+    events = _stream_anthropic_events_impl(openai_stream, model, message_id)
+    try:
+        async for event in events:
+            yield event
+    finally:
+        # Close the inner stream first: that is what triggers its billing.
+        try:
+            await _aclose_stream(openai_stream)
+        except BaseException:  # noqa: BLE001 - never mask the cancellation
+            pass
+        try:
+            await events.aclose()
+        except BaseException:  # noqa: BLE001
+            pass
+
+
+async def _stream_anthropic_events_impl(
+    openai_stream,
+    model: str,
+    message_id: str,
+):
     """Re-emit an OpenAI SSE stream as Anthropic Messages stream events.
 
     Anthropic's event sequence is:
