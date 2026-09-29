@@ -19,6 +19,13 @@ from fastapi import HTTPException
 
 from src.services.providers import community_adapter as ca
 
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """Fake node hostnames don't resolve; the SSRF guard is exercised explicitly elsewhere."""
+    monkeypatch.setattr("src.utils.ssrf_guard.resolve_public_ip", lambda host: "93.184.216.34")
+
+
 NODE = {
     "id": "node-1",
     "provider_id": "provider-1",
@@ -279,7 +286,7 @@ def test_request_decrements_outstanding_on_provider_exception(monkeypatch):
 def test_request_records_receipt_without_content(monkeypatch):
     _install_fake_gpu_module(monkeypatch, nodes=[NODE])
     recorded = _install_fake_db_gpu_work(monkeypatch)
-    _fake_openai_client(monkeypatch, content="the answer", prompt_tokens=3, completion_tokens=4)
+    _fake_openai_client(monkeypatch, content="the answer", prompt_tokens=3, completion_tokens=2)
 
     ca.community_request(
         [{"role": "user", "content": "hi"}],
@@ -294,7 +301,7 @@ def test_request_records_receipt_without_content(monkeypatch):
     assert row["provider_id"] == "provider-1"
     assert row["model"] == "some-model"
     assert row["prompt_tokens"] == 3
-    assert row["completion_tokens"] == 4
+    assert row["completion_tokens"] == 2
     assert row["status"] == "completed"
     assert "prompt" not in row and "content" not in row and "messages" not in row
 
@@ -436,7 +443,7 @@ def test_stream_yields_chunks_and_records_receipt_on_completion(monkeypatch):
     )
     chunk2 = SimpleNamespace(
         choices=[SimpleNamespace(delta=SimpleNamespace(content="lo"))],
-        usage=SimpleNamespace(prompt_tokens=2, completion_tokens=3),
+        usage=SimpleNamespace(prompt_tokens=2, completion_tokens=1),
     )
     _fake_openai_stream_client(monkeypatch, [chunk1, chunk2])
 
@@ -451,7 +458,7 @@ def test_stream_yields_chunks_and_records_receipt_on_completion(monkeypatch):
     row = recorded["work"][0]
     assert row["status"] == "completed"
     assert row["prompt_tokens"] == 2
-    assert row["completion_tokens"] == 3
+    assert row["completion_tokens"] == 1
 
 
 def test_stream_no_node_raises_before_returning_generator(monkeypatch):
@@ -498,3 +505,61 @@ def test_community_process_delegates_to_shared_normalization():
     result = ca.community_process(response)
     assert result["id"] == "chatcmpl-1"
     assert result["choices"][0]["message"]["content"] == "hi"
+
+
+# --- payout token cap + SSRF ---------------------------------------------------
+
+
+def test_inflated_reported_tokens_are_capped_to_gateway_count(monkeypatch):
+    _install_fake_gpu_module(monkeypatch, nodes=[NODE])
+    recorded = _install_fake_db_gpu_work(monkeypatch)
+    _fake_openai_client(
+        monkeypatch, content="the answer", prompt_tokens=100000, completion_tokens=100000
+    )
+    ca.community_request(
+        [{"role": "user", "content": "hi"}], "community/m", _gatewayz_billing_ref="ref-x"
+    )
+    row = recorded["work"][0]
+    assert row["prompt_tokens"] <= 10
+    assert row["completion_tokens"] <= 3
+
+
+def test_cap_never_raises_underreported_tokens():
+    assert ca.cap_reported_tokens(1, 0, [{"role": "user", "content": "hi"}], "the answer") == (
+        1,
+        0,
+    )
+
+
+def test_endpoint_resolving_to_private_ip_is_blocked_before_call(monkeypatch):
+    from src.utils.ssrf_guard import SSRFBlockedError
+
+    def _boom(host):
+        raise SSRFBlockedError("resolves_to_non_public_address")
+
+    _install_fake_gpu_module(monkeypatch, nodes=[NODE])
+    _install_fake_db_gpu_work(monkeypatch)
+    _fake_openai_client(monkeypatch)
+    monkeypatch.setattr("src.utils.ssrf_guard.resolve_public_ip", _boom)
+    with pytest.raises(HTTPException) as ei:
+        ca.community_request(
+            [{"role": "user", "content": "hi"}], "community/m", _gatewayz_billing_ref="r"
+        )
+    assert ei.value.detail == "community_node_endpoint_blocked"
+
+
+def test_client_does_not_follow_redirects(monkeypatch):
+    import httpx
+
+    seen = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ca, "_decrypt_node_key", lambda enc: "k")
+    ca.clear_adapter_cache()
+    ca.adapter_for_node(NODE)._get_client()
+    assert isinstance(seen["http_client"], httpx.Client)
+    assert seen["http_client"].follow_redirects is False

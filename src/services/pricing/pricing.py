@@ -1018,6 +1018,23 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
         return {"prompt": 0.00002, "completion": 0.00002, "found": False, "source": "default"}
 
 
+def _is_genuinely_free(model_id: str | None) -> bool:
+    """True only for ``:free`` models that are in the known-free (OpenRouter) set.
+
+    A bare ``:free`` suffix is user-controlled and proves nothing; ``vendor/model:free``
+    for an arbitrary or paid model must be billed at normal rates.
+    """
+    if not model_id or not model_id.endswith(":free"):
+        return False
+    try:
+        from src.services.cache.model_capabilities_cache import is_free_model
+
+        return bool(is_free_model(model_id))
+    except Exception as e:  # fail closed: charge normally
+        logger.warning(f"free-model membership check failed for {model_id}: {e}")
+        return False
+
+
 def model_has_pricing(model_id: str) -> bool:
     """
     Check whether a model has real pricing data (not fallback defaults).
@@ -1034,14 +1051,9 @@ def model_has_pricing(model_id: str) -> bool:
     if not model_id:
         return False
     if model_id.endswith(":free"):
-        # Mirror calculate_cost: only OpenRouter-shaped IDs are eligible for :free.
-        is_openrouter_model = "/" in model_id or not any(
-            provider in model_id.lower()
-            for provider in ("anthropic", "google", "cohere", "mistral", "deepseek")
-        )
-        if is_openrouter_model:
+        if _is_genuinely_free(model_id):
             return True
-        # Strip and fall through to pricing lookup — caller will be charged normally.
+        # Not in the free set: strip and price normally.
         model_id = model_id[:-5]
     try:
         pricing = get_model_pricing(model_id)
@@ -1122,28 +1134,14 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
         # Check if this is a free model first (OpenRouter free models end with :free)
         # VALIDATION: Only OpenRouter models should have :free suffix to prevent abuse
         if model_id and model_id.endswith(":free"):
-            # Validate that this is actually from OpenRouter
-            # OpenRouter model IDs typically start with provider name (e.g., "openai/gpt-4:free")
-            # or are just model names for OpenRouter-exclusive models
-            is_openrouter_model = (
-                "/" in model_id  # Has provider prefix (OpenRouter format)
-                or not any(
-                    provider in model_id.lower()
-                    for provider in ["anthropic", "google", "cohere", "mistral", "deepseek"]
-                )  # Not obviously from another provider
-            )
-
-            if not is_openrouter_model:
-                # Suspicious :free suffix on non-OpenRouter model
-                logger.warning(
-                    f"PRICING_VALIDATION: Model {model_id} has :free suffix but doesn't appear to be from OpenRouter. "
-                    f"Removing suffix and charging normally to prevent abuse."
-                )
-                # Strip the :free suffix and continue with normal pricing
-                model_id = model_id[:-5]  # Remove ":free"
-            else:
+            if _is_genuinely_free(model_id):
                 logger.info(f"Free model detected: {model_id}, returning $0 cost")
                 return 0.0
+            logger.warning(
+                f"PRICING_VALIDATION: {model_id} has :free suffix but is not a known free "
+                f"model. Removing suffix and charging normally to prevent abuse."
+            )
+            model_id = model_id[:-5]
 
         pricing = get_model_pricing(model_id)
 
@@ -1241,7 +1239,7 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
     except Exception as e:
         logger.error(f"Error calculating cost for {model_id}: {e}")
         # Fallback: Check if free model before applying default pricing
-        if model_id and model_id.endswith(":free"):
+        if _is_genuinely_free(model_id):
             logger.info(f"Free model detected in fallback: {model_id}, returning $0 cost")
             return 0.0
         # Fallback to simple calculation (assuming $0.00002 per token)
@@ -1271,28 +1269,14 @@ async def calculate_cost_async(model_id: str, prompt_tokens: int, completion_tok
         # Check if this is a free model first (OpenRouter free models end with :free)
         # VALIDATION: Only OpenRouter models should have :free suffix to prevent abuse
         if model_id and model_id.endswith(":free"):
-            # Validate that this is actually from OpenRouter
-            # OpenRouter model IDs typically start with provider name (e.g., "openai/gpt-4:free")
-            # or are just model names for OpenRouter-exclusive models
-            is_openrouter_model = (
-                "/" in model_id  # Has provider prefix (OpenRouter format)
-                or not any(
-                    provider in model_id.lower()
-                    for provider in ["anthropic", "google", "cohere", "mistral", "deepseek"]
-                )  # Not obviously from another provider
-            )
-
-            if not is_openrouter_model:
-                # Suspicious :free suffix on non-OpenRouter model
-                logger.warning(
-                    f"PRICING_VALIDATION: Model {model_id} has :free suffix but doesn't appear to be from OpenRouter. "
-                    f"Removing suffix and charging normally to prevent abuse."
-                )
-                # Strip the :free suffix and continue with normal pricing
-                model_id = model_id[:-5]  # Remove ":free"
-            else:
+            if _is_genuinely_free(model_id):
                 logger.info(f"Free model detected: {model_id}, returning $0 cost")
                 return 0.0
+            logger.warning(
+                f"PRICING_VALIDATION: {model_id} has :free suffix but is not a known free "
+                f"model. Removing suffix and charging normally to prevent abuse."
+            )
+            model_id = model_id[:-5]
 
         pricing = await get_model_pricing_async(model_id)
 
@@ -1390,7 +1374,7 @@ async def calculate_cost_async(model_id: str, prompt_tokens: int, completion_tok
     except Exception as e:
         logger.error(f"Error calculating cost for {model_id}: {e}")
         # Fallback: Check if free model before applying default pricing
-        if model_id and model_id.endswith(":free"):
+        if _is_genuinely_free(model_id):
             logger.info(f"Free model detected in fallback: {model_id}, returning $0 cost")
             return 0.0
         # Fallback to simple calculation (assuming $0.00002 per token)

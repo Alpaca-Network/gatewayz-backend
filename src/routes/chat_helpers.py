@@ -57,7 +57,12 @@ def is_free_model(model_id: str) -> bool:
     """
     if not model_id:
         return False
-    return model_id.endswith(":free")
+    if not model_id.endswith(":free"):
+        return False
+    # Membership in the known-free set only; a bare suffix proves nothing.
+    from src.services.cache.model_capabilities_cache import is_free_model as _cached_is_free
+
+    return _cached_is_free(model_id)
 
 
 async def _to_thread(func, *args, **kwargs):
