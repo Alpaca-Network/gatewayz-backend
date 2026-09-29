@@ -107,7 +107,8 @@ async def stripe_webhook(
     - payment_intent.succeeded - Payment succeeded, add credits
     - payment_intent.payment_failed - Payment failed, update status
     - payment_intent.canceled - Payment canceled by user
-    - charge.refunded - Charge was refunded, deduct credits
+    - charge.refunded - Charge was refunded, credits reversed (idempotent per refund id)
+    - charge.dispute.created / charge.dispute.closed - Chargeback: credits reversed; reinstated if won
 
     Subscription Events:
     - customer.subscription.created - Subscription created, upgrade user tier
