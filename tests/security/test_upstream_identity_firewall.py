@@ -41,6 +41,13 @@ from src.services.upstream.anonymize import (
     scrub_upstream_kwargs,
 )
 
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """Fake node hostnames don't resolve; the SSRF guard is exercised elsewhere."""
+    monkeypatch.setattr("src.utils.ssrf_guard.resolve_public_ip", lambda host: "93.184.216.34")
+
+
 CHAT_HANDLER_PY = Path(__file__).resolve().parents[2] / "src" / "handlers" / "chat_handler.py"
 
 MESSAGES = [{"role": "user", "content": "hi"}]

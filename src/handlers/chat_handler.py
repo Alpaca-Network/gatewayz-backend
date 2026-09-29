@@ -97,6 +97,10 @@ def _cache_aware_split(
     )
 
 
+def strip_free_suffix(model_id: str) -> str:
+    return model_id[:-5] if model_id and model_id.lower().endswith(":free") else model_id
+
+
 def _loss_proof_cost_split(
     requested_model: str,
     provider_model_id: str | None,
@@ -128,6 +132,12 @@ def _loss_proof_cost_split(
     ``calculate_cost_split(requested_model, ...)`` and instead enforce
     catalog_price >= max(provider cost) in the pricing data.
     """
+    # A ":free" request that failed over to a non-OpenRouter (paid) provider must be
+    # billed at the paid provider's price, not $0.
+    if provider and provider != "openrouter":
+        requested_model = strip_free_suffix(requested_model)
+        if provider_model_id:
+            provider_model_id = strip_free_suffix(provider_model_id)
     base = _cache_aware_split(
         requested_model,
         prompt_tokens,
@@ -330,7 +340,9 @@ class ChatInferenceHandler:
         )
 
         # Free models cost $0 — always allow regardless of balance
-        if model_id and model_id.endswith(":free"):
+        from src.routes.chat_helpers import is_free_model as _is_known_free
+
+        if _is_known_free(model_id):
             logger.debug("[ChatHandler] Skipping credit check for free model %s", model_id)
             return max_tokens
 

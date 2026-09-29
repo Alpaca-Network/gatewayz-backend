@@ -23,6 +23,7 @@ this module works standalone (tests patch these lazy-import points directly).
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any, Iterator
 
@@ -174,13 +175,21 @@ def adapter_for_node(node: dict) -> OpenAICompatAdapter:
     plaintext_key = _decrypt_node_key(encrypted_key) if encrypted_key else ""
 
     def _client_factory():
-        from openai import OpenAI
-
         # Real key: authenticates to the operator's vLLM server. Never the
         # Config-level placeholder below (that's only there to satisfy
         # OpenAICompatAdapter._get_client()'s pre-client_factory truthiness
         # check -- see Config.COMMUNITY_NODE_API_KEY_PLACEHOLDER).
-        return OpenAI(base_url=endpoint_url, api_key=plaintext_key or "unused")
+        # Redirects disabled: a public-looking endpoint must not be able to 30x the
+        # gateway into an internal address (SSRF). Overrides the SDK default of
+        # follow_redirects=True.
+        import httpx
+        from openai import OpenAI
+
+        return OpenAI(
+            base_url=endpoint_url,
+            api_key=plaintext_key or "unused",
+            http_client=httpx.Client(follow_redirects=False, timeout=httpx.Timeout(600.0)),
+        )
 
     cfg = ProviderConfig(
         slug=f"community:{node_id}",
@@ -197,6 +206,43 @@ def adapter_for_node(node: dict) -> OpenAICompatAdapter:
 # ---------------------------------------------------------------------------
 # The call itself
 # ---------------------------------------------------------------------------
+
+_TOKEN_CAP_FACTOR = 1.1
+
+
+def _assert_endpoint_public(endpoint_url: str) -> None:
+    from src.utils.ssrf_guard import SSRFBlockedError, assert_public_https_url
+
+    try:
+        assert_public_https_url(endpoint_url)
+    except SSRFBlockedError as e:
+        logger.warning("community node endpoint blocked by SSRF guard: %s", e.reason)
+        raise HTTPException(status_code=502, detail="community_node_endpoint_blocked") from e
+
+
+def cap_reported_tokens(
+    reported_prompt: int,
+    reported_completion: int,
+    messages: list[dict[str, Any]],
+    response_text: str,
+) -> tuple[int, int]:
+    """Payout token counts: min(node-reported, gateway_count * 1.1) per side.
+
+    The node is the party being paid, so its self-reported usage is never trusted
+    beyond what the gateway can independently count from the prompt it sent and
+    the completion text it actually received. Under-reporting is left as-is.
+    """
+    from src.utils.token_estimator import count_completion_tokens, count_tokens_messages
+
+    gw_prompt = count_tokens_messages(messages)
+    gw_completion = count_completion_tokens(response_text or "")
+    cap_prompt = math.ceil(gw_prompt * _TOKEN_CAP_FACTOR)
+    cap_completion = math.ceil(gw_completion * _TOKEN_CAP_FACTOR)
+    return (
+        max(0, min(int(reported_prompt or 0), cap_prompt)),
+        max(0, min(int(reported_completion or 0), cap_completion)),
+    )
+
 
 _ATTESTATION_HEADER = "x-gatewayz-attestation"
 _REQUEST_ID_HEADER = "X-Gatewayz-Request-Id"
@@ -225,6 +271,11 @@ def _call_node(
         apply_reasoning_effort,
         normalize_token_limit,
     )
+
+    # Re-validate the endpoint immediately before every call: the cached client
+    # re-resolves DNS at connect time, so a hostname that was public when the
+    # node registered may have been re-pointed at an internal address since.
+    _assert_endpoint_public(adapter.cfg.base_url)
 
     client = adapter._get_client()
     resolved = adapter._resolve_model(model_suffix)
@@ -269,6 +320,20 @@ def _record_receipt(
 
     prompt_hash = hash_prompt(messages)
     response_hash = hash_response(response_text or "")
+    # The attestation signature covers what the node claimed; payout uses the capped values.
+    reported_prompt, reported_completion = prompt_tokens, completion_tokens
+    prompt_tokens, completion_tokens = cap_reported_tokens(
+        reported_prompt, reported_completion, messages, response_text
+    )
+    if (prompt_tokens, completion_tokens) != (reported_prompt, reported_completion):
+        logger.warning(
+            "community node %s: reported tokens (%s, %s) capped to gateway-counted (%s, %s)",
+            node.get("id"),
+            reported_prompt,
+            reported_completion,
+            prompt_tokens,
+            completion_tokens,
+        )
 
     work = record_work(
         billing_ref=billing_ref,
@@ -298,7 +363,7 @@ def _record_receipt(
 
     message = (
         f"{billing_ref}|{model_suffix}|{prompt_hash}|{response_hash}|"
-        f"{prompt_tokens}|{completion_tokens}"
+        f"{reported_prompt}|{reported_completion}"
     )
     if verify_wallet_signature(wallet, message, sig):
         mark_attested(work["id"], sig)

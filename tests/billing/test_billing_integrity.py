@@ -160,11 +160,18 @@ def test_api_keys_uses_config_constants():
 
 
 def test_free_model_zero_cost():
-    """Free models (:free suffix) always cost $0."""
+    """Known-free models (:free suffix AND in the free set) cost $0."""
     from src.services.pricing import calculate_cost
 
-    cost = calculate_cost("openai/gpt-4o:free", 10000, 5000)
+    cost = calculate_cost("google/gemini-2.0-flash-exp:free", 10000, 5000)
     assert cost == 0.0
+
+
+def test_spoofed_free_suffix_is_charged():
+    """A bare :free suffix on a non-free model is billed at the normal rate."""
+    from src.services.pricing import calculate_cost
+
+    assert calculate_cost("openai/gpt-4o:free", 10000, 5000) > 0.0
 
 
 def test_zero_tokens_skip_logic_exists():

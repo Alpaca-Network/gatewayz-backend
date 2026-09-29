@@ -30,6 +30,13 @@ from src.config import Config
 
 # --- Sentinels ---------------------------------------------------------------
 
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """Fake node hostnames don't resolve; the SSRF guard is exercised elsewhere."""
+    monkeypatch.setattr("src.utils.ssrf_guard.resolve_public_ip", lambda host: "93.184.216.34")
+
+
 SENTINEL_USER_ID = 424242
 SENTINEL_EMAIL = "canary-424242@example.test"
 SENTINEL_API_KEY = "gw_live_CANARY424242xyzsentinelkey"
