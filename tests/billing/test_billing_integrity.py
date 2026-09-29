@@ -168,13 +168,11 @@ def test_free_model_zero_cost():
 
 
 def test_zero_tokens_skip_logic_exists():
-    """deduct_credits must skip deduction for near-zero amounts."""
+    """deduct_credits skips only exactly-zero cost; sub-precision costs round up."""
     source = Path("src/db/users.py").read_text()
-    # Check the early return for tiny amounts exists
-    assert (
-        "tokens < 0.000001" in source
-    ), "deduct_credits must skip deduction for amounts below $0.000001"
-    assert "Skipping credit deduction for minimal amount" in source
+    assert "tokens == 0" in source
+    assert "tokens < 0.000001" not in source, "tiny costs must be charged, not skipped"
+    assert "quantize_cost_up(tokens)" in source
 
 
 def test_atomic_rpc_migration_exists():
