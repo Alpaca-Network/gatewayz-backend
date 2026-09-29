@@ -38,46 +38,102 @@ def get_daily_reset_time() -> datetime:
     return next_reset
 
 
+class DailyUsageUnavailable(Exception):
+    """Raised when today's usage cannot be determined (DB/RPC failure)."""
+
+
+_PAGE_SIZE = 1000  # PostgREST default max rows per request
+
+
 def get_daily_usage(user_id: int) -> float:
     """
-    Get the total usage for a user in the current day.
+    Get the total usage for a user in the current UTC day.
 
-    Returns:
-        Total amount spent today (positive number)
+    Uses the ``get_daily_usage_total`` RPC (a single SQL aggregate). If the RPC is
+    not deployed yet, falls back to a PAGINATED sum -- the old un-paginated select
+    silently stopped at PostgREST's 1000-row cap and undercounted heavy users.
+
+    Raises:
+        DailyUsageUnavailable: if usage cannot be determined. Callers choose
+        their own failure policy (see check_daily_limit_preflight and
+        check_daily_usage_limit); this function never reports a false 0.0.
     """
     if not TRACK_DAILY_USAGE:
         return 0.0
 
+    start_of_day = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     try:
         client = get_supabase_client()
+        try:
+            res = client.rpc(
+                "get_daily_usage_total",
+                {"p_user_id": user_id, "p_since": start_of_day.isoformat()},
+            ).execute()
+            data = res.data
+            if isinstance(data, list):
+                data = data[0] if data else 0
+            if isinstance(data, dict):
+                data = next(iter(data.values()), 0)
+            return float(data or 0)
+        except Exception as rpc_exc:
+            logger.info("get_daily_usage_total RPC unavailable (%s); paginating", rpc_exc)
 
-        # Get start of current day (UTC midnight)
-        now = datetime.now(UTC)
-        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        # Query credit transactions for today
-        result = (
-            client.table("credit_transactions")
-            .select("amount")
-            .eq("user_id", user_id)
-            .gte("created_at", start_of_day.isoformat())
-            .lt("amount", 0)
-            .execute()
-        )
-
-        if not result.data:
-            return 0.0
-
-        # Sum up all negative transactions (usage) and convert to positive
-        total_usage = sum(abs(txn.get("amount", 0)) for txn in result.data)
-
-        logger.debug(f"User {user_id} daily usage: ${total_usage:.4f}")
-        return total_usage
-
+        total = 0.0
+        offset = 0
+        while True:
+            page = (
+                client.table("credit_transactions")
+                .select("amount")
+                .eq("user_id", user_id)
+                .gte("created_at", start_of_day.isoformat())
+                .lt("amount", 0)
+                .order("id")
+                .range(offset, offset + _PAGE_SIZE - 1)
+                .execute()
+            ).data or []
+            total += sum(abs(float(t.get("amount") or 0)) for t in page)
+            if len(page) < _PAGE_SIZE:
+                break
+            offset += _PAGE_SIZE
+        return total
     except Exception as e:
         logger.error(f"Failed to get daily usage for user {user_id}: {e}")
-        # Fail open - don't block requests if we can't check usage
-        return 0.0
+        raise DailyUsageUnavailable(str(e)) from e
+
+
+def check_daily_limit_preflight(user_id: int) -> None:
+    """
+    Cheap PRE-inference gate: refuse before spending upstream money.
+
+    Call once per request, before calling the provider (integration point:
+    chat_handler / chat routes, right after auth and before the upstream call).
+
+    Raises:
+        DailyUsageLimitExceeded: today's usage already >= the daily limit.
+        DailyUsageUnavailable: usage lookup failed. POLICY: FAIL CLOSED here.
+            Nothing has been served yet, so refusing costs one retry; failing
+            open would give free unmetered inference whenever the ledger read
+            hiccups. (The post-inference enforce path stays fail-open: a request
+            already served must never lose its charge.) Map to HTTP 503.
+    Admin-tier users bypass, mirroring deduct_credits.
+    """
+    if not ENFORCE_DAILY_LIMITS:
+        return
+    try:
+        from src.db.plans import is_admin_tier_user
+
+        if is_admin_tier_user(user_id):
+            return
+    except Exception as e:  # unknown tier -> treat as normal user
+        logger.warning(f"Admin check failed in daily-limit preflight: {e}")
+
+    used = get_daily_usage(user_id)  # may raise DailyUsageUnavailable (fail closed)
+    if used >= DAILY_USAGE_LIMIT:
+        raise DailyUsageLimitExceeded(
+            f"Daily usage limit exceeded. Used: ${used:.4f}, "
+            f"Limit: ${DAILY_USAGE_LIMIT:.2f}. "
+            f"Resets at: {get_daily_reset_time().isoformat()}"
+        )
 
 
 def check_daily_usage_limit(user_id: int, requested_amount: float) -> dict[str, Any]:
@@ -151,7 +207,8 @@ def check_daily_usage_limit(user_id: int, requested_amount: float) -> dict[str, 
 
     except Exception as e:
         logger.error(f"Error checking daily usage limit for user {user_id}: {e}")
-        # Fail open - allow request if we can't check
+        # Post-inference path: fail OPEN so a served request is never left uncharged.
+        # The pre-inference gate (check_daily_limit_preflight) fails closed.
         return {
             "allowed": True,
             "remaining": DAILY_USAGE_LIMIT,
