@@ -260,8 +260,10 @@ def validate_api_key_security(
             # Re-raise validation errors
             raise
         except Exception as e:
+            # Fail closed: a DB error must not fall through to the legacy
+            # (cached) user path, which would let revoked keys authenticate.
             logger.error(f"Error checking {table_name}: {e}")
-            continue
+            raise ValueError("Unable to validate API key") from e
 
     # Fallback to legacy user table validation
     logger.debug("Attempting legacy user validation")

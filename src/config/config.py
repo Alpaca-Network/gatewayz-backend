@@ -133,7 +133,11 @@ class Config:
     APP_ENV = os.environ.get("APP_ENV", "development")  # development, staging, production
     IS_PRODUCTION = APP_ENV == "production"
     IS_STAGING = APP_ENV == "staging"
-    IS_DEVELOPMENT = APP_ENV == "development"
+    # Dev-only behaviour (keyless $1M dev key) requires APP_ENV to be EXPLICITLY
+    # "development" and the process not to be on Railway; unset => production-safe.
+    IS_DEVELOPMENT = os.environ.get("APP_ENV") == "development" and not os.environ.get(
+        "RAILWAY_ENVIRONMENT"
+    )
     IS_TESTING = APP_ENV in {"testing", "test"} or os.environ.get("TESTING", "").lower() in {
         "1",
         "true",
