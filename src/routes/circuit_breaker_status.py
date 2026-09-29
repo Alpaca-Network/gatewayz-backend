@@ -13,8 +13,9 @@ Related Issues: #1043, #1039
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from src.security.deps import require_admin_or_env_key
 from src.services.circuit_breaker import (
     get_all_circuit_breakers,
     get_circuit_breaker,
@@ -116,7 +117,11 @@ async def get_circuit_breaker_state(provider: str):
         )
 
 
-@router.post("/{provider}/reset", response_model=dict[str, Any])
+@router.post(
+    "/{provider}/reset",
+    response_model=dict[str, Any],
+    dependencies=[Depends(require_admin_or_env_key)],
+)
 async def reset_provider_circuit_breaker(provider: str):
     """
     Manually reset a circuit breaker to CLOSED state.
@@ -174,7 +179,11 @@ async def reset_provider_circuit_breaker(provider: str):
         )
 
 
-@router.post("/reset-all", response_model=dict[str, Any])
+@router.post(
+    "/reset-all",
+    response_model=dict[str, Any],
+    dependencies=[Depends(require_admin_or_env_key)],
+)
 async def reset_all_provider_circuit_breakers():
     """
     Manually reset all circuit breakers to CLOSED state.

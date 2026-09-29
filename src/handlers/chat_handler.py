@@ -173,6 +173,10 @@ def _loss_proof_cost_split(
     return base
 
 
+# Strong refs for detached billing tasks (the loop only keeps weak ones).
+_BILLING_TASKS: set = set()
+
+
 class ChatInferenceHandler:
     """
     Unified handler for chat inference across all endpoints.
@@ -215,6 +219,9 @@ class ChatInferenceHandler:
         # customer's own provider key (BYOK); consumed at billing time to charge a
         # routing fee instead of the full credit cost.
         self.is_byok = False
+        # Set once streaming billing has been claimed (normal completion OR
+        # client cancel) so the two paths can never both charge.
+        self._stream_billed = False
         # Populated by _call_provider(_stream) with any generation params the
         # served provider does not accept. Surfaced to the client as the
         # X-Gatewayz-Dropped-Params response header so that a silently ignored
@@ -954,6 +961,7 @@ class ChatInferenceHandler:
         cost_usd: float = 0.0,
         input_cost_usd: float = 0.0,
         output_cost_usd: float = 0.0,
+        cancelled: bool = False,
     ) -> None:
         """
         Log request metadata to chat_completion_requests table.
@@ -1007,7 +1015,14 @@ class ChatInferenceHandler:
         if tag:
             save_kwargs["metadata"] = {"tag": tag}
 
-        if self.background_tasks:
+        # Client aborted the stream: still a billed, completed row (tokens were
+        # consumed upstream) but flagged so analytics can tell it was partial.
+        if cancelled:
+            save_kwargs["metadata"] = {**save_kwargs.get("metadata", {}), "cancelled": True}
+
+        # Request-scoped BackgroundTasks never run when the response was
+        # cancelled, so a cancelled row is written directly.
+        if self.background_tasks and not cancelled:
             self.background_tasks.add_task(save_chat_completion_request_with_cost, **save_kwargs)
         else:
             save_chat_completion_request_with_cost(**save_kwargs)
@@ -1296,6 +1311,120 @@ class ChatInferenceHandler:
 
             raise
 
+    def _spawn_billing_task(self, coro):
+        """Run ``coro`` as a detached task that outlives request cancellation."""
+        try:
+            task = asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:  # no running loop (generator finalised at shutdown)
+            coro.close()
+            logger.error(
+                "[ChatHandler] Could not schedule stream billing: no running loop "
+                f"(request_id={self.request_id})"
+            )
+            return None
+        _BILLING_TASKS.add(task)
+
+        def _done(t):
+            _BILLING_TASKS.discard(t)
+            if not t.cancelled() and t.exception() is not None:
+                logger.error(
+                    f"[ChatHandler] Detached stream billing failed "
+                    f"(request_id={self.request_id}): {t.exception()}"
+                )
+
+        task.add_done_callback(_done)
+        return task
+
+    async def _run_shielded_billing(self, **kwargs) -> None:
+        """Bill in a detached task and await it shielded from cancellation."""
+        task = self._spawn_billing_task(self._bill_stream(**kwargs))
+        if task is not None:
+            await asyncio.shield(task)
+
+    async def _bill_stream(
+        self,
+        *,
+        model: str,
+        provider_used: str,
+        provider_model_id: str,
+        messages: list[dict],
+        accumulated_content: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cache_read_tokens: int,
+        cache_write_tokens: int,
+        cancelled: bool,
+    ) -> None:
+        """Estimate usage if needed, charge the user and save the request row.
+
+        Idempotent per handler (``_stream_billed``) and, across processes, on
+        the billing_ref passed to ``deduct_credits``. ``cancelled`` marks a
+        client abort: usage is whatever streamed so far (estimated if the
+        provider's usage chunk never arrived).
+        """
+        if self._stream_billed:
+            return
+        self._stream_billed = True
+
+        # Step 6: Token estimation fallback if provider didn't provide usage
+        if prompt_tokens == 0 and completion_tokens == 0:
+            # Estimate tokens from content length (1 token ≈ 4 characters)
+            # A cancelled stream may legitimately have produced no content yet.
+            completion_tokens = (
+                len(accumulated_content) // 4
+                if cancelled
+                else max(1, len(accumulated_content) // 4)
+            )
+            prompt_chars = sum(
+                len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
+                for m in messages
+            )
+            prompt_tokens = max(1, prompt_chars // 4)
+
+            logger.info(
+                f"[ChatHandler] No usage data from provider, estimated "
+                f"{prompt_tokens} prompt + {completion_tokens} completion tokens"
+                f"{' (client cancelled)' if cancelled else ''}"
+            )
+
+        # Step 7: Calculate cost and charge user after stream completes
+        # (loss-proof: never bill below the provider that actually served)
+        cost, input_cost, output_cost = await asyncio.to_thread(
+            _loss_proof_cost_split,
+            model,
+            provider_model_id,
+            prompt_tokens,
+            completion_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            provider_used,
+        )
+
+        logger.debug(f"[ChatHandler] Streaming cost: ${cost:.6f}")
+
+        # BYOK: bill a routing fee instead of the full upstream cost.
+        cost = self._apply_byok_fee(cost)
+
+        await self._charge_user(cost, model, prompt_tokens, completion_tokens)
+
+        # Step 8: Save request record
+        self._save_request_record(
+            model_name=model,
+            provider_name=provider_used,
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            status="completed",
+            cancelled=cancelled,
+            cost_usd=cost,
+            input_cost_usd=input_cost,
+            output_cost_usd=output_cost,
+        )
+
+        logger.info(
+            f"[ChatHandler] Streaming request completed: "
+            f"tokens={prompt_tokens + completion_tokens}, cost=${cost:.6f}"
+        )
+
     async def process_stream(
         self, request: InternalChatRequest
     ) -> AsyncIterator[InternalStreamChunk]:
@@ -1327,6 +1456,11 @@ class ChatInferenceHandler:
         cache_read_tokens = 0
         cache_write_tokens = 0
         provider_used = None
+        provider_model_id = None
+        messages: list[dict] = []
+        accumulated_content = ""  # For token estimation fallback
+        chunk_count = 0
+        stream_started = False  # True once an upstream call may have consumed tokens
 
         try:
             # Step 1: Initialize user context
@@ -1425,9 +1559,9 @@ class ChatInferenceHandler:
                     f"Provider {provider_used} returned None instead of stream for model {provider_model_id}"
                 )
 
+            stream_started = True
+
             # Step 5: Yield normalized chunks
-            accumulated_content = ""  # For token estimation fallback
-            chunk_count = 0
 
             # FREEZE FIX: Set wall-clock deadline before entering the streaming loop.
             # A hung provider that sends headers then goes silent will hold this coroutine
@@ -1539,57 +1673,44 @@ class ChatInferenceHandler:
 
             logger.debug(f"[ChatHandler] Streamed {chunk_count} chunks")
 
-            # Step 6: Token estimation fallback if provider didn't provide usage
-            if prompt_tokens == 0 and completion_tokens == 0:
-                # Estimate tokens from content length (1 token ≈ 4 characters)
-                completion_tokens = max(1, len(accumulated_content) // 4)
-                prompt_chars = sum(
-                    len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
-                    for m in messages
+            # Steps 6-8: estimate usage if needed, charge, save the request record.
+            # Shielded: if the client cancels while the charge is in flight the
+            # deduction still completes (it runs as its own task).
+            await self._run_shielded_billing(
+                model=request.model,
+                provider_used=provider_used,
+                provider_model_id=provider_model_id,
+                messages=messages,
+                accumulated_content=accumulated_content,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                cancelled=False,
+            )
+
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected / task cancelled mid-stream. Neither is an
+            # Exception, so the handler below never sees them -- and without
+            # this the tokens the provider already generated were never charged.
+            # Bill what was accumulated so far, in a task that survives the
+            # cancellation, then let the cancellation continue.
+            if stream_started and not self._stream_billed and not self.is_anonymous:
+                self._spawn_billing_task(
+                    self._bill_stream(
+                        model=request.model,
+                        provider_used=provider_used,
+                        provider_model_id=provider_model_id,
+                        messages=messages,
+                        accumulated_content=accumulated_content,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        cache_read_tokens=cache_read_tokens,
+                        cache_write_tokens=cache_write_tokens,
+                        cancelled=True,
+                    )
                 )
-                prompt_tokens = max(1, prompt_chars // 4)
-
-                logger.info(
-                    f"[ChatHandler] No usage data from provider, estimated "
-                    f"{prompt_tokens} prompt + {completion_tokens} completion tokens"
-                )
-
-            # Step 7: Calculate cost and charge user after stream completes
-            # (loss-proof: never bill below the provider that actually served)
-            cost, input_cost, output_cost = await asyncio.to_thread(
-                _loss_proof_cost_split,
-                request.model,
-                provider_model_id,
-                prompt_tokens,
-                completion_tokens,
-                cache_read_tokens,
-                cache_write_tokens,
-                provider_used,
-            )
-
-            logger.debug(f"[ChatHandler] Streaming cost: ${cost:.6f}")
-
-            # BYOK: bill a routing fee instead of the full upstream cost.
-            cost = self._apply_byok_fee(cost)
-
-            await self._charge_user(cost, request.model, prompt_tokens, completion_tokens)
-
-            # Step 8: Save request record
-            self._save_request_record(
-                model_name=request.model,
-                provider_name=provider_used,
-                input_tokens=prompt_tokens,
-                output_tokens=completion_tokens,
-                status="completed",
-                cost_usd=cost,
-                input_cost_usd=input_cost,
-                output_cost_usd=output_cost,
-            )
-
-            logger.info(
-                f"[ChatHandler] Streaming request completed: "
-                f"tokens={prompt_tokens + completion_tokens}, cost=${cost:.6f}"
-            )
+            raise
 
         except Exception as e:
             # Log error and save failed request

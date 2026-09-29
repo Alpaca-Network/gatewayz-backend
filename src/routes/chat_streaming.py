@@ -40,6 +40,9 @@ import os as _os
 # the per-provider httpx read_timeout it covers the two main hang patterns:
 #   1. Provider sends headers then goes completely silent (httpx read_timeout fires)
 #   2. Provider trickles bytes slowly over many minutes (wall-clock deadline fires between chunks)
+# Strong refs so detached billing tasks aren't garbage-collected mid-flight.
+_CANCEL_BILLING_TASKS: set = set()
+
 MAX_STREAM_DURATION = int(_os.getenv("MAX_STREAM_DURATION_SECONDS", "300"))
 
 
@@ -82,6 +85,9 @@ async def stream_generator(
     chunk_count = 0  # Initialized before try so it's available in except for refund metadata
     dropped_chunks = 0  # Track chunks that failed normalization
     credit_deduction_success = False  # Track whether credits were actually deducted
+    billing_scheduled = False  # Set once post-stream billing has been handed to a task
+    client_cancelled = False  # CancelledError/GeneratorExit: client went away mid-stream
+    inner_stream = None
 
     # Initialize normalizer
     normalizer = StreamNormalizer(provider=provider, model=model)
@@ -149,7 +155,8 @@ async def stream_generator(
         # httpx read_timeout covers the "provider sends headers then goes silent" case.
         _stream_deadline = time.monotonic() + MAX_STREAM_DURATION
 
-        async for chunk in iterate_stream():
+        inner_stream = iterate_stream()
+        async for chunk in inner_stream:
             # CRITICAL: Check for client disconnect to prevent zombie requests (499)
             if request and await request.is_disconnected():
                 logger.warning(f"[StreamGenerator] Client disconnected (request_id={request_id})")
@@ -408,6 +415,7 @@ async def stream_generator(
         yield create_done_sse()
 
         # Schedule background processing (non-blocking)
+        billing_scheduled = True
         asyncio.create_task(
             _process_stream_completion_background(
                 user=user,
@@ -429,6 +437,12 @@ async def stream_generator(
                 api_key_id=api_key_id,
             )
         )
+
+    except (asyncio.CancelledError, GeneratorExit):
+        # Client disconnected / task cancelled. Not an Exception, so nothing below
+        # catches it; the finally block bills whatever streamed so far.
+        client_cancelled = True
+        raise
 
     except Exception as e:
         logger.error(f"Streaming error: {e}", exc_info=True)
@@ -645,3 +659,57 @@ async def stream_generator(
         # Record performance percentages if tracker is provided
         if tracker:
             tracker.record_percentages()
+
+        # Bill for a cancelled stream. Normal completion schedules billing above
+        # (billing_scheduled); a client abort skipped it, so the upstream tokens
+        # already generated would go uncharged. Runs as a detached task so the
+        # cancellation cannot interrupt it; deduction is idempotent on request_id.
+        if client_cancelled and not billing_scheduled and not is_anonymous and user:
+            billing_scheduled = True
+            try:
+                from src.utils.token_estimator import (
+                    count_completion_tokens,
+                    count_tokens_messages,
+                )
+
+                partial_content = normalizer.get_accumulated_content()
+                if total_tokens == 0:
+                    if prompt_tokens > 0 or completion_tokens > 0:
+                        total_tokens = prompt_tokens + completion_tokens
+                    else:
+                        completion_tokens = count_completion_tokens(partial_content)
+                        prompt_tokens = count_tokens_messages(messages)
+                        total_tokens = prompt_tokens + completion_tokens
+                _task = asyncio.get_running_loop().create_task(
+                    _process_stream_completion_background(
+                        user=user,
+                        api_key=api_key,
+                        model=model,
+                        trial=trial,
+                        environment_tag=environment_tag,
+                        session_id=session_id,
+                        messages=messages,
+                        accumulated_content=partial_content,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        elapsed=max(0.001, time.monotonic() - start_time),
+                        provider=provider,
+                        is_anonymous=is_anonymous,
+                        request_id=request_id,
+                        client_ip=client_ip,
+                        api_key_id=api_key_id,
+                        cancelled=True,
+                    )
+                )
+                _CANCEL_BILLING_TASKS.add(_task)
+                _task.add_done_callback(_CANCEL_BILLING_TASKS.discard)
+            except Exception as bill_err:  # never mask the cancellation
+                logger.error(f"Failed to schedule billing for cancelled stream: {bill_err}")
+
+        # Release the upstream iterator (best effort, after billing is scheduled).
+        if inner_stream is not None:
+            try:
+                await inner_stream.aclose()
+            except BaseException:  # noqa: BLE001 - cleanup must not mask cancellation
+                pass

@@ -10,16 +10,14 @@ Catches both:
 - Inline admin paths: @router.get("/admin/users")
 - Prefix-based admin routers: APIRouter(prefix="/admin/model-sync")
 
-The only intentional exception is POST /admin/create (user registration).
+There are no intentional exceptions: POST /create now requires admin auth.
 """
 
 import re
 from pathlib import Path
 
 # Routes intentionally public (documented exceptions)
-INTENTIONAL_PUBLIC_ADMIN_ROUTES = {
-    "/create",  # POST /admin/create - user registration in admin.py
-}
+INTENTIONAL_PUBLIC_ADMIN_ROUTES: set[str] = set()
 
 # Files that use inline admin auth (calling require_admin inside function body
 # rather than via Depends). These are verified by manual inspection.

@@ -17,6 +17,7 @@ from src.db.payments import (
     create_payment,
     get_payment,
     get_payment_by_stripe_intent,
+    update_payment_metadata,
     update_payment_status,
 )
 from src.db.subscription_products import get_tier_from_product_id
@@ -136,6 +137,93 @@ class StripeService:
         credit_transactions.request_id unique index.
         """
         return str(uuid.uuid5(cls._GRANT_ID_NAMESPACE, f"grant:{source}"))
+
+    # ==================== Server-authoritative credit / tier helpers ====================
+
+    # Metadata keys the server owns. Client-supplied metadata may never set or
+    # override these (they drive credit grants and tier assignment in webhooks).
+    RESERVED_METADATA_KEYS = frozenset(
+        {
+            "user_id",
+            "payment_id",
+            "credits_cents",
+            "credits",
+            "tier",
+            "product_id",
+            "price_id",
+            "allowance_handled_at",
+            "allowance_handled_by",
+            "allowance_period_start",
+            "allowance_hw",
+        }
+    )
+
+    # Server-side promo config: amount charged (cents) -> credits granted (cents).
+    # Any amount NOT listed here is granted 1:1. The client-supplied
+    # ``credit_value`` is never trusted; it can only ever select one of these.
+    # Mirrors the frontend package tiers (settings/credits) and get_credit_packages().
+    CREDIT_PACKAGE_CREDITS_CENTS: dict[int, int] = {
+        900: 1000,  # $9   -> $10  (Starter, 10% off)
+        4500: 5000,  # $45  -> $50  (Professional pack, 10% off)
+        7500: 10000,  # $75  -> $100 (Growth, 25% off)
+        17500: 25000,  # $175 -> $250 (Scale, 30% off)
+    }
+
+    @classmethod
+    def _sanitize_client_metadata(cls, metadata: dict[str, Any] | None) -> dict[str, Any]:
+        """Drop server-owned keys from client-supplied metadata."""
+        return {k: v for k, v in (metadata or {}).items() if k not in cls.RESERVED_METADATA_KEYS}
+
+    @classmethod
+    def _credits_for_charge(cls, amount_cents: int) -> int:
+        """Credits (cents) a charge of ``amount_cents`` is entitled to."""
+        return cls.CREDIT_PACKAGE_CREDITS_CENTS.get(int(amount_cents), int(amount_cents))
+
+    @classmethod
+    def _entitled_credits_from_session(
+        cls, amount_total: int | None, amount_subtotal: int | None
+    ) -> int | None:
+        """Credits (cents) Stripe says were actually paid for; None if unknown.
+
+        A package price matches on either the total or the (pre-tax) subtotal so
+        tax-inclusive totals do not shortchange promo packages. Otherwise 1:1
+        against the lower of the two figures.
+        """
+        for figure in (amount_total, amount_subtotal):
+            if figure is not None and figure in cls.CREDIT_PACKAGE_CREDITS_CENTS:
+                return cls.CREDIT_PACKAGE_CREDITS_CENTS[figure]
+        known = [v for v in (amount_total, amount_subtotal) if v is not None]
+        return min(known) if known else None
+
+    def _resolve_price_binding(
+        self, price_id: str, claimed_product_id: str | None
+    ) -> tuple[str, str]:
+        """Return (product_id, tier) for a Stripe price, derived server-side.
+
+        The tier is taken from the product the price actually belongs to; a
+        client-supplied product_id that disagrees is rejected.
+        """
+        price = stripe.Price.retrieve(price_id)
+        if not self._get_stripe_object_value(price, "active"):
+            raise ValueError(f"Price {price_id} is not active")
+        product = self._get_stripe_object_value(price, "product")
+        product_id = (
+            product if isinstance(product, str) else self._get_stripe_object_value(product, "id")
+        )
+        if not product_id:
+            raise ValueError(f"Price {price_id} has no product")
+        if claimed_product_id and claimed_product_id != product_id:
+            logger.error(
+                "Rejected price/product mismatch: price=%s belongs to %s but client sent %s",
+                price_id,
+                product_id,
+                claimed_product_id,
+            )
+            raise ValueError("product_id does not match the supplied price_id")
+        tier = get_tier_from_product_id(product_id)
+        if not tier or tier == "basic":
+            raise ValueError(f"Price {price_id} does not map to a paid tier")
+        return product_id, tier
 
     @staticmethod
     def _apply_topup_fee(amount_dollars: float) -> tuple[float, float, float]:
@@ -328,30 +416,35 @@ class StripeService:
         tier = metadata_tier
         product_id = None
 
-        # If tier is missing or defaulted to basic, try to determine from subscription items
-        if not tier or tier == "basic":
-            items = self._get_stripe_field(subscription, "items")
-            if items:
-                items_data = self._get_stripe_object_value(items, "data")
-                if items_data and len(items_data) > 0:
-                    first_item = items_data[0]
-                    price = self._get_stripe_object_value(first_item, "price")
-                    if price:
-                        item_product_id = self._get_stripe_object_value(price, "product")
-                        if item_product_id:
-                            # Store product_id for logging even if tier lookup fails
-                            product_id = item_product_id
-                            looked_up_tier = get_tier_from_product_id(item_product_id)
-                            if looked_up_tier and looked_up_tier != "basic":
-                                logger.info(
-                                    f"Resolved tier '{looked_up_tier}' from subscription item product_id={item_product_id}"
+        # The tier is derived from the price actually on the subscription. The
+        # metadata tier is only a fallback for when the product is not mapped.
+        items = self._get_stripe_field(subscription, "items")
+        if items:
+            items_data = self._get_stripe_object_value(items, "data")
+            if items_data and len(items_data) > 0:
+                first_item = items_data[0]
+                price = self._get_stripe_object_value(first_item, "price")
+                if price:
+                    item_product_id = self._get_stripe_object_value(price, "product")
+                    if item_product_id:
+                        # Store product_id for logging even if tier lookup fails
+                        product_id = item_product_id
+                        looked_up_tier = get_tier_from_product_id(item_product_id)
+                        if looked_up_tier and looked_up_tier != "basic":
+                            if tier and tier != "basic" and tier != looked_up_tier:
+                                logger.error(
+                                    "Subscription tier metadata %r disagrees with price product "
+                                    "%s (tier %r); using the price-derived tier",
+                                    tier,
+                                    item_product_id,
+                                    looked_up_tier,
                                 )
-                                tier = looked_up_tier
-                            else:
-                                logger.warning(
-                                    f"Product {item_product_id} not found in subscription_products table or mapped to 'basic'. "
-                                    f"Please add this product_id to the subscription_products table with the correct tier."
-                                )
+                            tier = looked_up_tier
+                        elif not tier or tier == "basic":
+                            logger.warning(
+                                f"Product {item_product_id} not found in subscription_products table or mapped to 'basic'. "
+                                f"Please add this product_id to the subscription_products table with the correct tier."
+                            )
 
         # Final fallback to 'pro' for paid subscriptions if tier couldn't be determined
         if not tier or tier == "basic":
@@ -553,7 +646,10 @@ class StripeService:
                 currency=request.currency.value,
                 payment_method="stripe",
                 status="pending",
-                metadata={"description": request.description, **(request.metadata or {})},
+                metadata={
+                    "description": request.description,
+                    **self._sanitize_client_metadata(request.metadata),
+                },
             )
 
             if not payment:
@@ -577,31 +673,29 @@ class StripeService:
             logger.info(f"Final cancel_url being sent to Stripe: {cancel_url}")
             logger.info("=== END URL DEBUG ===")
 
-            # Calculate credits to add:
-            # - If credit_value is provided (for discounted packages), use that
-            # - Otherwise, fall back to amount/100 (converting cents to dollars)
-            # credit_value is in dollars, credits_cents is used for metadata (in cents)
+            # Credits are derived SERVER-SIDE from the amount charged. The client's
+            # ``credit_value`` is never trusted: promo bonuses only come from
+            # CREDIT_PACKAGE_CREDITS_CENTS, everything else is granted 1:1.
+            credits_cents = self._credits_for_charge(request.amount)
+            credits_display = f"${credits_cents / 100:.0f}"
             if request.credit_value is not None:
-                # credit_value is in dollars, convert to cents for metadata
-                # Use Decimal for precise financial calculations
-                credit_value_decimal = Decimal(str(request.credit_value))
-                credits_cents = int(credit_value_decimal * 100)
-                credits_display = f"${request.credit_value:.0f}"
-                logger.info(
-                    f"Using discounted credit_value: ${request.credit_value} "
-                    f"(payment amount: ${request.amount / 100})"
-                )
-            else:
-                # Fall back to payment amount
-                credits_cents = request.amount
-                credits_display = f"${request.amount / 100:.0f}"
+                requested_cents = int(Decimal(str(request.credit_value)) * 100)
+                if requested_cents != credits_cents:
+                    logger.warning(
+                        "Ignoring client credit_value=$%s for user %s (amount=$%.2f); "
+                        "server-derived credits=$%.2f",
+                        request.credit_value,
+                        user_id,
+                        request.amount / 100,
+                        credits_cents / 100,
+                    )
 
             checkout_metadata = {
+                **self._sanitize_client_metadata(request.metadata),
                 "user_id": str(user_id),
                 "payment_id": str(payment["id"]),
                 "credits_cents": str(credits_cents),
                 "credits": str(credits_cents),  # Keep for backward compatibility
-                **(request.metadata or {}),
             }
 
             # Create Stripe checkout session
@@ -839,6 +933,12 @@ class StripeService:
                     self._handle_payment_succeeded(event["data"]["object"])
                 elif event["type"] == "payment_intent.payment_failed":
                     self._handle_payment_failed(event["data"]["object"])
+                elif event["type"] == "charge.refunded":
+                    self._handle_charge_refunded(event["data"]["object"])
+                elif event["type"] == "charge.dispute.created":
+                    self._handle_dispute_created(event["data"]["object"])
+                elif event["type"] == "charge.dispute.closed":
+                    self._handle_dispute_closed(event["data"]["object"])
 
                 # Subscription events
                 elif event["type"] == "customer.subscription.created":
@@ -1080,16 +1180,37 @@ class StripeService:
                 )
                 return
 
-            amount_dollars = float(Decimal(credits_cents) / 100)  # Convert cents to dollars
-
-            # Verify payment amount against known plan pricing
-            # This does NOT block payments -- it only logs and monitors mismatches
+            # ENFORCE amounts: never grant more than Stripe says was paid for,
+            # whatever the (client-influenceable) metadata claims.
+            amount_total = self._coerce_to_int(
+                self._get_stripe_object_value(session, "amount_total")
+            )
+            amount_subtotal = self._coerce_to_int(
+                self._get_stripe_object_value(session, "amount_subtotal")
+            )
+            paid_cents = min(
+                (v for v in (amount_total, amount_subtotal) if v is not None), default=None
+            )
+            if paid_cents is None:
+                logger.warning(
+                    "Checkout session %s has no amount_total/subtotal; cannot cap credits",
+                    session_id,
+                )
+                verification_amount = credits_cents
+            else:
+                verification_amount = paid_cents
             verification_result = self._verify_payment_amount(
-                amount_cents=credits_cents,
+                amount_cents=verification_amount,
                 session_id=session_id,
                 user_id=user_id,
                 metadata=metadata,
+                claimed_credits_cents=credits_cents,
+                entitled_credits_cents=self._entitled_credits_from_session(
+                    amount_total, amount_subtotal
+                ),
             )
+            credits_cents = verification_result.get("allowed_credits_cents", credits_cents)
+            amount_dollars = float(Decimal(credits_cents) / 100)  # Convert cents to dollars
 
             # Credit top-up fee (OpenRouter-style monetization). When
             # CREDIT_TOPUP_FEE_RATE > 0, withhold that fraction of the paid
@@ -1105,6 +1226,7 @@ class StripeService:
                 "topup_fee_rate": fee_rate,
                 "topup_fee": topup_fee,
                 "amount_verification": {
+                    "credits_capped": verification_result.get("credits_capped", False),
                     "verified": verification_result.get("verified", False),
                     "severity": verification_result.get("severity", "unknown"),
                     "matched_package": verification_result.get("matched_package"),
@@ -1286,13 +1408,19 @@ class StripeService:
         session_id: str | None = None,
         user_id: int | None = None,
         metadata: dict | None = None,
+        claimed_credits_cents: int | None = None,
+        entitled_credits_cents: int | None = None,
     ) -> dict:
         """
-        Verify a payment amount against known credit package pricing.
+        Verify a payment amount against known credit package pricing AND enforce
+        that claimed credits never exceed what was actually paid for.
 
-        Compares the actual Stripe charge amount to expected prices for known
-        credit packages. Does NOT block payments -- only logs and records
-        mismatches for monitoring and audit.
+        ``amount_cents`` is the amount Stripe charged. When
+        ``claimed_credits_cents`` (from metadata / payment record) is supplied,
+        the result carries ``allowed_credits_cents = min(claimed, entitled)``
+        where ``entitled`` defaults to the server-side credits for the charge.
+        ``credits_capped`` is True (and an error is raised to Sentry) when the
+        claim exceeded entitlement. Package-price mismatches remain advisory.
 
         Args:
             amount_cents: The amount in cents from the Stripe session.
@@ -1323,7 +1451,43 @@ class StripeService:
             "difference_cents": 0,
             "difference_percent": 0.0,
             "message": "",
+            "allowed_credits_cents": claimed_credits_cents,
+            "credits_capped": False,
         }
+
+        if claimed_credits_cents is not None:
+            entitled = (
+                entitled_credits_cents
+                if entitled_credits_cents is not None
+                else self._credits_for_charge(amount_cents)
+            )
+            if claimed_credits_cents > entitled:
+                result["allowed_credits_cents"] = entitled
+                result["credits_capped"] = True
+                logger.error(
+                    "CREDIT INFLATION BLOCKED: claimed %s credit-cents but only %s paid for "
+                    "(session=%s, user=%s). Granting the entitled amount.",
+                    claimed_credits_cents,
+                    entitled,
+                    session_id,
+                    user_id,
+                )
+                try:
+                    capture_payment_error(
+                        RuntimeError("Checkout credits claim exceeds amount paid"),
+                        operation="payment_amount_enforcement",
+                        user_id=str(user_id) if user_id else None,
+                        amount=amount_cents / 100,
+                        details={
+                            "session_id": session_id,
+                            "claimed_credits_cents": claimed_credits_cents,
+                            "entitled_credits_cents": entitled,
+                        },
+                    )
+                except Exception:
+                    pass
+                if payment_amount_mismatch:
+                    payment_amount_mismatch.labels(severity="over").inc()
 
         # Step 1: Try to match against known credit packages
         # Check for exact match first
@@ -1602,6 +1766,296 @@ class StripeService:
 
         return CreditPackagesResponse(packages=packages, currency=StripeCurrency.USD)
 
+    # ==================== Refund / dispute clawback ====================
+
+    def _payment_credit_position(self, payment_id: int) -> tuple[float, float]:
+        """Return (original grant, cumulative credits already owed back) for a payment.
+
+        Original grant = positive 'purchase' rows that are not dispute reinstatements.
+        Owed back = ``credits_owed`` on every reversal row (claimed or applied), net of
+        the ``reinstated_owed`` recorded by won-dispute reinstatements.
+        """
+        from src.config.supabase_config import get_supabase_client
+
+        rows = (
+            get_supabase_client()
+            .table("credit_transactions")
+            .select("amount, transaction_type, metadata")
+            .eq("payment_id", payment_id)
+            .execute()
+        )
+        granted = 0.0
+        reversed_net = 0.0
+        for r in rows.data or []:
+            md = r.get("metadata") or {}
+            ttype = r.get("transaction_type")
+            amount = float(r.get("amount") or 0)
+            if ttype == "purchase" and amount > 0:
+                if md.get("dispute_reinstatement"):
+                    reversed_net -= float(md.get("reinstated_owed") or amount)
+                else:
+                    granted += amount
+            elif ttype == "refund" and md.get("credits_owed") is not None:
+                reversed_net += float(md.get("credits_owed") or 0)
+        return granted, max(0.0, reversed_net)
+
+    @staticmethod
+    def _payment_paid_cents(payment: dict[str, Any]) -> int:
+        cents = payment.get("amount_cents")
+        if cents is not None:
+            return int(cents)
+        usd = payment.get("amount_usd", payment.get("amount"))
+        return int(round(float(usd or 0) * 100))
+
+    def _reverse_purchase_credits(
+        self,
+        payment: dict[str, Any],
+        amount_cents: int,
+        idempotency_source: str,
+        reason: str,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Claw back the credits granted for (part of) a payment.
+
+        Idempotent on ``idempotency_source`` via the ledger request_id. The
+        reversal is proportional to ``amount_cents`` / amount paid. Balances are
+        never driven negative: whatever cannot be recovered is recorded as
+        ``clawback_shortfall`` on the ledger row, the payment is flagged
+        ``needs_review`` and Sentry is notified.
+        """
+        from src.config.supabase_config import get_supabase_client
+        from src.db.credit_transactions import (
+            TransactionType,
+            log_credit_transaction,
+        )
+        from src.db.users import invalidate_user_cache_by_id
+
+        request_id = self._grant_idempotency_key(idempotency_source)
+        client = get_supabase_client()
+        payment_id = payment["id"]
+        user_id = payment["user_id"]
+
+        def _claim_exists() -> bool:
+            res = (
+                client.table("credit_transactions")
+                .select("request_id")
+                .eq("request_id", request_id)
+                .execute()
+            )
+            return bool(res.data)
+
+        granted, already_reversed = self._payment_credit_position(payment_id)
+        if granted <= 0:
+            logger.warning(
+                "No purchase grant found for payment %s (%s); nothing to reverse",
+                payment_id,
+                idempotency_source,
+            )
+            update_payment_metadata(
+                payment_id, {"needs_review": True, "clawback_note": "no purchase grant found"}
+            )
+            return {"status": "no_grant"}
+
+        paid_cents = self._payment_paid_cents(payment)
+        fraction = 1.0 if paid_cents <= 0 else min(1.0, max(0, amount_cents) / paid_cents)
+        # Never reverse more than this payment's remaining (net) grant.
+        to_reverse = round(min(granted * fraction, max(0.0, granted - already_reversed)), 6)
+
+        base_meta = {**(extra_metadata or {}), "credits_owed": to_reverse}
+        # Claim idempotency FIRST: the unique request_id insert arbitrates concurrent
+        # callers (route + webhook); only the winner touches the balance.
+        claim = log_credit_transaction(
+            user_id=user_id,
+            amount=0.0,
+            transaction_type=TransactionType.REFUND,
+            description=f"Credits reversed: {reason}",
+            balance_before=0.0,
+            balance_after=0.0,
+            payment_id=payment_id,
+            metadata={**base_meta, "credits_reversed": 0.0},
+            created_by="system:stripe_clawback",
+            request_id=request_id,
+        )
+        if not claim:
+            if _claim_exists():
+                logger.info("Clawback %s already applied; skipping", idempotency_source)
+                return {"status": "duplicate"}
+            raise RuntimeError(f"Could not record clawback {idempotency_source}; retry")
+
+        def _release_claim() -> None:
+            try:
+                client.table("credit_transactions").delete().eq("request_id", request_id).execute()
+            except Exception:
+                logger.error("Could not release clawback claim %s", request_id, exc_info=True)
+
+        deducted = 0.0
+        allowance = 0.0
+        purchased_before = 0.0
+        try:
+            for _ in range(3):  # optimistic-lock retry
+                row = (
+                    client.table("users")
+                    .select("purchased_credits, subscription_allowance")
+                    .eq("id", user_id)
+                    .execute()
+                )
+                if not row.data:
+                    raise ValueError(f"User {user_id} not found for clawback")
+                purchased_before = float(row.data[0].get("purchased_credits") or 0)
+                allowance = float(row.data[0].get("subscription_allowance") or 0)
+                deducted = min(to_reverse, max(0.0, purchased_before))
+                updated = (
+                    client.table("users")
+                    .update({"purchased_credits": purchased_before - deducted})
+                    .eq("id", user_id)
+                    .eq("purchased_credits", row.data[0].get("purchased_credits"))
+                    .execute()
+                )
+                if updated.data:
+                    break
+            else:
+                raise RuntimeError(f"Clawback for user {user_id} lost the balance race; retry")
+        except Exception:
+            # Nothing was deducted: release the claim so a retry can re-apply it.
+            _release_claim()
+            raise
+
+        shortfall = round(to_reverse - deducted, 6)
+        try:
+            client.table("credit_transactions").update(
+                {
+                    "amount": -deducted,
+                    "balance_before": allowance + purchased_before,
+                    "balance_after": allowance + purchased_before - deducted,
+                    "metadata": {
+                        **base_meta,
+                        "credits_reversed": deducted,
+                        "clawback_shortfall": shortfall,
+                    },
+                }
+            ).eq("request_id", request_id).execute()
+        except Exception:
+            logger.error(
+                "Clawback %s applied but ledger finalize failed", request_id, exc_info=True
+            )
+        invalidate_user_cache_by_id(user_id)
+
+        if shortfall > 0:
+            logger.error(
+                "CLAWBACK SHORTFALL: user %s payment %s owes %s credits after %s",
+                user_id,
+                payment_id,
+                shortfall,
+                reason,
+            )
+            update_payment_metadata(
+                payment_id,
+                {"needs_review": True, "clawback_shortfall": shortfall, "clawback_reason": reason},
+            )
+            try:
+                capture_payment_error(
+                    RuntimeError("Credit clawback shortfall"),
+                    operation="credit_clawback",
+                    user_id=str(user_id),
+                    amount=shortfall,
+                    details={"payment_id": payment_id, "reason": reason},
+                )
+            except Exception:
+                pass
+        return {"status": "reversed", "reversed": deducted, "shortfall": shortfall}
+
+    def _payment_for_intent(self, payment_intent_id: str | None) -> dict[str, Any] | None:
+        if not payment_intent_id:
+            return None
+        return get_payment_by_stripe_intent(payment_intent_id)
+
+    def _handle_charge_refunded(self, charge):
+        """charge.refunded: reverse credits for each refund on the charge (per refund id)."""
+        charge_id = self._get_stripe_object_value(charge, "id")
+        payment = self._payment_for_intent(self._get_stripe_object_value(charge, "payment_intent"))
+        if not payment:
+            logger.warning("charge.refunded for %s: no local payment found", charge_id)
+            return
+        refunds = self._get_stripe_object_value(charge, "refunds")
+        refund_list = self._get_stripe_object_value(refunds, "data") if refunds else None
+        if not refund_list:
+            refund_list = stripe.Refund.list(charge=charge_id, limit=100).data
+        for refund in refund_list:
+            if self._get_stripe_object_value(refund, "status") in ("failed", "canceled"):
+                continue
+            refund_id = self._get_stripe_object_value(refund, "id")
+            self._reverse_purchase_credits(
+                payment,
+                int(self._get_stripe_object_value(refund, "amount") or 0),
+                f"refund:{refund_id}",
+                f"Stripe refund {refund_id}",
+                {"stripe_charge_id": charge_id, "stripe_refund_id": refund_id},
+            )
+
+    def _dispute_payment(self, dispute) -> dict[str, Any] | None:
+        pi = self._get_stripe_object_value(dispute, "payment_intent")
+        if not pi:
+            charge_id = self._get_stripe_object_value(dispute, "charge")
+            if charge_id:
+                pi = self._get_stripe_object_value(
+                    stripe.Charge.retrieve(charge_id), "payment_intent"
+                )
+        return self._payment_for_intent(pi)
+
+    def _handle_dispute_created(self, dispute):
+        """charge.dispute.created: claw credits back immediately (funds are withdrawn)."""
+        dispute_id = self._get_stripe_object_value(dispute, "id")
+        payment = self._dispute_payment(dispute)
+        if not payment:
+            logger.warning("Dispute %s: no local payment found", dispute_id)
+            return
+        self._reverse_purchase_credits(
+            payment,
+            int(self._get_stripe_object_value(dispute, "amount") or 0),
+            f"dispute:{dispute_id}",
+            f"Stripe dispute {dispute_id}",
+            {"stripe_dispute_id": dispute_id},
+        )
+
+    def _handle_dispute_closed(self, dispute):
+        """charge.dispute.closed: lost -> ensure reversed (idempotent); won -> reinstate."""
+        dispute_id = self._get_stripe_object_value(dispute, "id")
+        status = self._get_stripe_object_value(dispute, "status")
+        payment = self._dispute_payment(dispute)
+        if not payment:
+            logger.warning("Dispute %s closed: no local payment found", dispute_id)
+            return
+        if status == "lost":
+            self._reverse_purchase_credits(
+                payment,
+                int(self._get_stripe_object_value(dispute, "amount") or 0),
+                f"dispute:{dispute_id}",
+                f"Stripe dispute {dispute_id} lost",
+                {"stripe_dispute_id": dispute_id},
+            )
+        elif status == "won":
+            from src.db.credit_transactions import get_transaction_by_request_id
+
+            original = get_transaction_by_request_id(
+                self._grant_idempotency_key(f"dispute:{dispute_id}")
+            )
+            restored = abs(float(original.get("amount") or 0)) if original else 0.0
+            owed = float(((original or {}).get("metadata") or {}).get("credits_owed") or restored)
+            if restored > 0:
+                add_credits_to_user(
+                    user_id=payment["user_id"],
+                    credits=restored,
+                    transaction_type="purchase",
+                    description=f"Credits reinstated: dispute {dispute_id} won",
+                    payment_id=payment["id"],
+                    metadata={
+                        "stripe_dispute_id": dispute_id,
+                        "dispute_reinstatement": True,
+                        "reinstated_owed": owed,
+                    },
+                    request_id=self._grant_idempotency_key(f"dispute-won:{dispute_id}"),
+                )
+
     # ==================== Refunds ====================
 
     def create_refund(self, request: CreateRefundRequest) -> RefundResponse:
@@ -1612,6 +2066,31 @@ class StripeService:
                 amount=request.amount,
                 reason=request.reason,
             )
+
+            # Reverse the credits for this refund (idempotent with the later
+            # charge.refunded webhook, which uses the same refund-id key).
+            try:
+                payment = self._payment_for_intent(request.payment_intent_id)
+                if payment:
+                    self._reverse_purchase_credits(
+                        payment,
+                        int(refund.amount or 0),
+                        f"refund:{refund.id}",
+                        f"Stripe refund {refund.id}",
+                        {"stripe_refund_id": refund.id},
+                    )
+            except Exception as clawback_error:
+                logger.error(
+                    "Refund %s succeeded but credit reversal failed: %s",
+                    refund.id,
+                    clawback_error,
+                    exc_info=True,
+                )
+                capture_payment_error(
+                    clawback_error,
+                    operation="refund_clawback",
+                    details={"payment_intent_id": request.payment_intent_id},
+                )
 
             return RefundResponse(
                 refund_id=refund.id,
@@ -1703,8 +2182,10 @@ class StripeService:
 
                 logger.info(f"Stripe customer created: {stripe_customer_id} for user {user_id}")
 
-            # Determine tier from product_id using database configuration
-            tier = get_tier_from_product_id(request.product_id)
+            # Bind tier to the Stripe price actually being purchased. The client's
+            # product_id is only a claim: it must match the price's real product,
+            # and the tier is derived from that product (server-side mapping).
+            product_id, tier = self._resolve_price_binding(request.price_id, request.product_id)
 
             logger.info(
                 f"Creating subscription checkout for user {user_id}, tier: {tier}, price_id: {request.price_id}"
@@ -1724,10 +2205,11 @@ class StripeService:
                 "success_url": request.success_url,
                 "cancel_url": request.cancel_url,
                 "metadata": {
+                    **self._sanitize_client_metadata(request.metadata),
                     "user_id": str(user_id),
-                    "product_id": request.product_id,
+                    "product_id": product_id,
+                    "price_id": request.price_id,
                     "tier": tier,
-                    **(request.metadata or {}),
                 },
             }
 
@@ -1736,7 +2218,8 @@ class StripeService:
                 session_params["subscription_data"] = {
                     "metadata": {
                         "user_id": str(user_id),
-                        "product_id": request.product_id,
+                        "product_id": product_id,
+                        "price_id": request.price_id,
                         "tier": tier,
                     }
                 }
@@ -2083,60 +2566,11 @@ class StripeService:
                 ).eq("user_id", user_id).execute()
                 logger.info(f"User {user_id} trial status cleared on subscription update to active")
 
-                # Update subscription allowance when tier changes (for upgrades/downgrades)
-                # IMPORTANT: Check if allowance was already handled by the upgrade/downgrade
-                # endpoint to prevent double-resetting. The endpoint sets 'allowance_handled_at'
-                # in the subscription metadata when it resets the allowance.
-                allowance_handled_at = metadata.get("allowance_handled_at") if metadata else None
-                allowance_handled_by = metadata.get("allowance_handled_by") if metadata else None
-                should_skip_allowance_reset = False
-
-                if allowance_handled_at:
-                    try:
-                        handled_time = datetime.fromisoformat(allowance_handled_at)
-                        seconds_since_handled = (datetime.now(UTC) - handled_time).total_seconds()
-                        # If allowance was handled within the last 120 seconds by the upgrade/downgrade
-                        # endpoint, skip re-resetting to avoid double-crediting
-                        if seconds_since_handled < 120:
-                            should_skip_allowance_reset = True
-                            logger.info(
-                                f"Skipping allowance reset in subscription.updated webhook for user {user_id}: "
-                                f"allowance was already handled {seconds_since_handled:.1f}s ago "
-                                f"by {allowance_handled_by or 'unknown'}. "
-                                f"This prevents double-crediting on upgrade/downgrade."
-                            )
-                        else:
-                            logger.info(
-                                f"allowance_handled_at is stale ({seconds_since_handled:.1f}s ago) "
-                                f"for user {user_id}. Proceeding with allowance reset in webhook."
-                            )
-                    except (ValueError, TypeError) as e:
-                        logger.warning(
-                            f"Could not parse allowance_handled_at '{allowance_handled_at}' "
-                            f"for user {user_id}: {e}. Proceeding with allowance reset."
-                        )
-
-                if not should_skip_allowance_reset:
-                    from src.db.subscription_products import get_allowance_from_tier
-                    from src.db.users import reset_subscription_allowance
-
-                    new_allowance = get_allowance_from_tier(tier)
-                    if new_allowance > 0:
-                        # Reset allowance to new tier's amount on tier change
-                        reset_result = reset_subscription_allowance(user_id, new_allowance, tier)
-                        if not reset_result:
-                            logger.error(
-                                f"Failed to reset allowance for user {user_id} during subscription update webhook. "
-                                f"Tier: {tier}, allowance: ${new_allowance}. "
-                                f"Raising exception to trigger Stripe retry."
-                            )
-                            raise Exception(
-                                f"Failed to update subscription allowance for user {user_id}"
-                            )
-                        logger.info(
-                            f"Updated allowance to ${new_allowance} for user {user_id} ({tier} tier) "
-                            f"on subscription update webhook"
-                        )
+                # NOTE: the allowance is deliberately NOT touched here. Resetting it on
+                # every subscription.updated (any update, not just tier changes) let
+                # users refill their allowance at will. Renewals reset it via
+                # invoice.paid (subscription_cycle); tier changes grant only a
+                # once-per-period delta via invoice.paid (subscription_update).
 
             # CRITICAL: Invalidate user cache so profile API returns fresh data
             # This ensures the credits page and header show updated tier immediately
@@ -2303,15 +2737,24 @@ class StripeService:
                 f"billing_reason={billing_reason}, subscription={invoice_subscription_id}"
             )
 
-            # Skip allowance reset for proration invoices from upgrades/downgrades.
-            # When a user upgrades/downgrades, Stripe fires an invoice.paid event for the
-            # proration charge/credit. The upgrade/downgrade endpoint already reset the
-            # allowance, so we must NOT reset it again here.
+            # Proration invoices (tier changes) never reset the allowance; they may
+            # grant only the delta above what was already granted this period, and
+            # only now that the invoice is actually paid.
             if billing_reason == "subscription_update":
-                logger.info(
-                    f"Invoice {invoice.id} is a proration invoice (billing_reason=subscription_update). "
-                    f"Skipping allowance reset - it was already handled by the upgrade/downgrade endpoint. "
-                    f"This prevents double-crediting."
+                subscription = stripe.Subscription.retrieve(invoice_subscription_id)
+                user_id = self._extract_user_id_from_subscription(subscription)
+                if user_id is None:
+                    raise ValueError(
+                        f"Missing user_id for proration invoice {invoice.id} "
+                        f"(subscription_id={invoice_subscription_id})"
+                    )
+                meta = self._metadata_to_dict(
+                    self._get_stripe_object_value(subscription, "metadata")
+                )
+                tier, _ = self._resolve_tier_from_subscription(subscription, meta.get("tier"))
+                user = get_user_by_id(user_id) or {}
+                self._apply_tier_change_allowance(
+                    user_id, subscription, user.get("tier") or tier, tier
                 )
                 return
 
@@ -2538,6 +2981,124 @@ class StripeService:
             logger.error(f"Error getting subscription for user {user_id}: {e}")
             raise
 
+    # ==================== Tier-change allowance (delta, once per period) ====================
+
+    def _allowance_baseline(self, subscription: Any, from_tier: str) -> tuple[str, float]:
+        """(period_start, high_water_mark) of allowance already granted this period.
+
+        The high-water mark is the largest tier allowance granted in the current
+        billing period. It lives in the Stripe subscription metadata so it
+        survives across requests and resets automatically when the period rolls.
+        """
+        from src.db.subscription_products import get_allowance_from_tier
+
+        metadata = self._metadata_to_dict(self._get_stripe_object_value(subscription, "metadata"))
+        period_start = str(self._get_subscription_period_start(subscription) or "")
+        hw_raw = metadata.get("allowance_hw")
+        if hw_raw is not None and metadata.get("allowance_period_start") == period_start:
+            try:
+                return period_start, float(hw_raw)
+            except (TypeError, ValueError):
+                pass
+        # New period (or first change): the user received the current tier's allowance.
+        return period_start, float(get_allowance_from_tier(from_tier) or 0.0)
+
+    def _allowance_baseline_metadata(self, subscription: Any, from_tier: str) -> dict[str, str]:
+        period_start, hw = self._allowance_baseline(subscription, from_tier)
+        return {"allowance_period_start": period_start, "allowance_hw": str(hw)}
+
+    def _proration_settled(self, subscription: Any) -> bool:
+        """True when the subscription's latest (proration) invoice is paid/void."""
+        invoice = self._get_stripe_object_value(subscription, "latest_invoice")
+        if isinstance(invoice, str):
+            try:
+                invoice = stripe.Invoice.retrieve(invoice)
+            except stripe.StripeError as exc:
+                logger.warning("Could not retrieve latest invoice %s: %s", invoice, exc)
+                return False
+        if not invoice:
+            return False
+        return self._get_stripe_object_value(invoice, "status") in ("paid", "void")
+
+    def _apply_tier_change_allowance(
+        self, user_id: int, subscription: Any, from_tier: str, to_tier: str
+    ) -> None:
+        """Adjust subscription_allowance for a settled tier change.
+
+        - Upgrade: grant only ``new_allowance - high_water_mark`` (never the full
+          new allowance), so flipping tiers cannot refill the allowance.
+        - Downgrade / re-upgrade within the same period: no grant; remaining is
+          clipped to the new tier's allowance.
+        Idempotent: the high-water mark is persisted before returning.
+        """
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
+        from src.db.subscription_products import get_allowance_from_tier
+        from src.db.users import get_user_by_id as get_user_fresh
+        from src.db.users import reset_subscription_allowance
+
+        new_allowance = float(get_allowance_from_tier(to_tier) or 0.0)
+        if new_allowance <= 0:
+            return
+        period_start, hw = self._allowance_baseline(subscription, from_tier)
+
+        user_fresh = get_user_fresh(user_id) or {}
+        remaining = float(user_fresh.get("subscription_allowance") or 0)
+        purchased = float(user_fresh.get("purchased_credits") or 0)
+
+        if new_allowance > hw:
+            grant = new_allowance - hw
+            target = remaining + grant
+            new_hw = new_allowance
+        else:
+            grant = 0.0
+            target = min(remaining, new_allowance)
+            new_hw = hw
+
+        if abs(target - remaining) > 1e-9:
+            if not reset_subscription_allowance(user_id, target, to_tier):
+                raise Exception("Failed to update subscription allowance")
+            is_upgrade = new_allowance > float(get_allowance_from_tier(from_tier) or 0.0)
+            log_credit_transaction(
+                user_id=user_id,
+                amount=target - remaining,
+                transaction_type=(
+                    TransactionType.SUBSCRIPTION_UPGRADE
+                    if is_upgrade
+                    else TransactionType.SUBSCRIPTION_DOWNGRADE
+                ),
+                description=(
+                    f"Subscription {from_tier} -> {to_tier}. Allowance delta ${grant} granted "
+                    f"(once per billing period); allowance now ${target}."
+                ),
+                balance_before=remaining + purchased,
+                balance_after=target + purchased,
+                metadata={
+                    "from_tier": from_tier,
+                    "to_tier": to_tier,
+                    "old_remaining_allowance": remaining,
+                    "proration_method": "delta_once_per_period",
+                    "subscription_id": self._get_stripe_object_value(subscription, "id"),
+                },
+                created_by="system:subscription_tier_change",
+            )
+        logger.info(
+            "Tier change allowance for user %s (%s -> %s): remaining=%s hw=%s grant=%s target=%s",
+            user_id,
+            from_tier,
+            to_tier,
+            remaining,
+            hw,
+            grant,
+            target,
+        )
+
+        sub_id = self._get_stripe_object_value(subscription, "id")
+        if sub_id:
+            stripe.Subscription.modify(
+                sub_id,
+                metadata={"allowance_period_start": period_start, "allowance_hw": str(new_hw)},
+            )
+
     def _get_stripe_proration_amount(
         self, subscription_id: str, new_price_id: str, subscription_item_id: str
     ) -> float | None:
@@ -2637,12 +3198,16 @@ class StripeService:
 
             subscription_item_id = items_data[0].id
 
-            # Determine the new tier from product ID
-            new_tier = get_tier_from_product_id(request.new_product_id)
-            if not new_tier or new_tier == "basic":
-                raise ValueError(
-                    f"Invalid product ID for upgrade: {request.new_product_id}. "
-                    "Cannot resolve to a valid paid tier."
+            # Bind the tier to the Stripe price being switched to (server-side):
+            # the client's product_id must match the price's real product.
+            new_product_id, new_tier = self._resolve_price_binding(
+                request.new_price_id, request.new_product_id
+            )
+            if request.proration_behavior != "always_invoice":
+                logger.info(
+                    "Ignoring client proration_behavior=%r for user %s; forcing always_invoice",
+                    request.proration_behavior,
+                    user_id,
                 )
 
             # Get current tier for audit logging
@@ -2681,11 +3246,17 @@ class StripeService:
                         "price": request.new_price_id,
                     }
                 ],
-                proration_behavior=request.proration_behavior,
+                # Always invoice the proration immediately and fail the change if it
+                # cannot be paid: no free tier changes via proration_behavior='none'.
+                proration_behavior="always_invoice",
+                payment_behavior="error_if_incomplete",
+                expand=["latest_invoice"],
                 metadata={
                     "user_id": str(user_id),
-                    "product_id": request.new_product_id,
+                    "product_id": new_product_id,
+                    "price_id": request.new_price_id,
                     "tier": new_tier,
+                    **self._allowance_baseline_metadata(subscription, current_tier),
                     # Signal to webhook handlers that allowance was already reset by this endpoint.
                     # The webhook handler checks this timestamp and skips allowance reset if it
                     # was set within the last 120 seconds.
@@ -2703,7 +3274,7 @@ class StripeService:
             client.table("users").update(
                 {
                     "tier": new_tier,
-                    "stripe_product_id": request.new_product_id,
+                    "stripe_product_id": new_product_id,
                     "updated_at": datetime.now(UTC).isoformat(),
                 }
             ).eq("id", user_id).execute()
@@ -2741,94 +3312,18 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
-            # =====================================================================
-            # PRORATION FIX: SET allowance to new tier level, do NOT add difference
-            # =====================================================================
-            # On upgrade, subscription_allowance is REPLACED with the new tier's
-            # allowance. The user's remaining old allowance is forfeited because:
-            #   1. Stripe charges the prorated price difference for the upgrade
-            #   2. The new tier's full allowance replaces the old one
-            #   3. purchased_credits remain untouched
-            # This prevents double-crediting where users would get old remaining + new full.
-            from src.db.credit_transactions import TransactionType, log_credit_transaction
-            from src.db.subscription_products import get_allowance_from_tier
-            from src.db.users import get_user_by_id as get_user_fresh
-            from src.db.users import reset_subscription_allowance
-
-            new_allowance = get_allowance_from_tier(new_tier)
-            old_tier_allowance = get_allowance_from_tier(current_tier)
-
-            if new_allowance > 0:
-                # Get current balance for audit logging (this is what the user has remaining)
-                user_fresh = get_user_fresh(user_id)
-                old_remaining_allowance = (
-                    float(user_fresh.get("subscription_allowance", 0)) if user_fresh else 0.0
+            # Allowance: grant only the delta above what was already granted this
+            # billing period, and only once the proration invoice is settled.
+            if self._proration_settled(updated_subscription):
+                self._apply_tier_change_allowance(
+                    user_id, updated_subscription, current_tier, new_tier
                 )
-                purchased_credits = (
-                    float(user_fresh.get("purchased_credits", 0)) if user_fresh else 0.0
-                )
-
-                # Calculate how much of the old allowance was used
-                old_used = max(0.0, old_tier_allowance - old_remaining_allowance)
-
-                # Calculate what is being forfeited (unused old allowance that won't carry over)
-                forfeited_allowance = old_remaining_allowance
-
-                logger.info(
-                    f"Proration calculation for user {user_id} upgrade {current_tier} -> {new_tier}: "
-                    f"old_tier_allowance=${old_tier_allowance}, "
-                    f"old_remaining=${old_remaining_allowance}, "
-                    f"old_used=${old_used}, "
-                    f"forfeited=${forfeited_allowance}, "
-                    f"new_allowance=${new_allowance}, "
-                    f"purchased_credits=${purchased_credits} (unchanged), "
-                    f"stripe_proration=${stripe_proration_amount}"
-                )
-
-                # Reset allowance to new tier's full amount
-                # This REPLACES the old allowance (does not add to it)
-                reset_result = reset_subscription_allowance(user_id, new_allowance, new_tier)
-                if not reset_result:
-                    logger.error(f"Failed to reset allowance for user {user_id} during upgrade")
-                    raise Exception("Failed to update subscription allowance")
-
-                logger.info(
-                    f"Allowance SET to ${new_allowance} for user {user_id} ({new_tier} tier). "
-                    f"Previous remaining ${old_remaining_allowance} was replaced (not added)."
-                )
-
-                # Log detailed audit trail for subscription upgrade
-                # NOTE: reset_subscription_allowance() already logs a SUBSCRIPTION_RENEWAL
-                # transaction internally. This additional SUBSCRIPTION_UPGRADE transaction
-                # captures the upgrade-specific context (tier change, proration details).
-                log_credit_transaction(
-                    user_id=user_id,
-                    amount=new_allowance - old_remaining_allowance,
-                    transaction_type=TransactionType.SUBSCRIPTION_UPGRADE,
-                    description=(
-                        f"Subscription upgraded from {current_tier} to {new_tier}. "
-                        f"Allowance SET to ${new_allowance} (not incremented). "
-                        f"Forfeited ${forfeited_allowance} unused from old tier."
-                    ),
-                    balance_before=old_remaining_allowance + purchased_credits,
-                    balance_after=new_allowance + purchased_credits,
-                    metadata={
-                        "from_tier": current_tier,
-                        "to_tier": new_tier,
-                        "old_tier_allowance": old_tier_allowance,
-                        "old_remaining_allowance": old_remaining_allowance,
-                        "old_used_allowance": old_used,
-                        "forfeited_allowance": forfeited_allowance,
-                        "new_allowance": new_allowance,
-                        "purchased_credits_unchanged": purchased_credits,
-                        "proration_method": "set_not_increment",
-                        "stripe_proration_amount": stripe_proration_amount,
-                        "subscription_id": updated_subscription.id,
-                        "product_id": request.new_product_id,
-                        "price_id": request.new_price_id,
-                        "allowance_handled_at": allowance_handled_at,
-                    },
-                    created_by="system:subscription_upgrade",
+            else:
+                logger.warning(
+                    "Proration invoice for subscription %s is not paid yet; deferring the "
+                    "%s allowance change to the invoice.paid webhook",
+                    stripe_subscription_id,
+                    "upgrade",
                 )
 
             # Invalidate user cache
@@ -2918,12 +3413,16 @@ class StripeService:
 
             subscription_item_id = items_data[0].id
 
-            # Determine the new tier from product ID
-            new_tier = get_tier_from_product_id(request.new_product_id)
-            if not new_tier or new_tier == "basic":
-                raise ValueError(
-                    f"Invalid product ID for downgrade: {request.new_product_id}. "
-                    "Cannot resolve to a valid paid tier."
+            # Bind the tier to the Stripe price being switched to (server-side):
+            # the client's product_id must match the price's real product.
+            new_product_id, new_tier = self._resolve_price_binding(
+                request.new_price_id, request.new_product_id
+            )
+            if request.proration_behavior != "always_invoice":
+                logger.info(
+                    "Ignoring client proration_behavior=%r for user %s; forcing always_invoice",
+                    request.proration_behavior,
+                    user_id,
                 )
 
             # Get current tier for audit logging
@@ -2948,11 +3447,17 @@ class StripeService:
                         "price": request.new_price_id,
                     }
                 ],
-                proration_behavior=request.proration_behavior,
+                # Always invoice the proration immediately and fail the change if it
+                # cannot be paid: no free tier changes via proration_behavior='none'.
+                proration_behavior="always_invoice",
+                payment_behavior="error_if_incomplete",
+                expand=["latest_invoice"],
                 metadata={
                     "user_id": str(user_id),
-                    "product_id": request.new_product_id,
+                    "product_id": new_product_id,
+                    "price_id": request.new_price_id,
                     "tier": new_tier,
+                    **self._allowance_baseline_metadata(subscription, current_tier),
                     # Signal to webhook handlers that allowance was already reset by this endpoint.
                     "allowance_handled_at": allowance_handled_at,
                     "allowance_handled_by": "downgrade_subscription",
@@ -2968,7 +3473,7 @@ class StripeService:
             client.table("users").update(
                 {
                     "tier": new_tier,
-                    "stripe_product_id": request.new_product_id,
+                    "stripe_product_id": new_product_id,
                     "updated_at": datetime.now(UTC).isoformat(),
                 }
             ).eq("id", user_id).execute()
@@ -3006,89 +3511,18 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
-            # =====================================================================
-            # PRORATION FIX: SET allowance to new tier level, do NOT add difference
-            # =====================================================================
-            # On downgrade, subscription_allowance is REPLACED with the new tier's
-            # (lower) allowance. Stripe credits the monetary difference; we reset
-            # the credit allowance to match the new tier.
-            from src.db.credit_transactions import TransactionType, log_credit_transaction
-            from src.db.subscription_products import get_allowance_from_tier
-            from src.db.users import get_user_by_id as get_user_fresh
-            from src.db.users import reset_subscription_allowance
-
-            new_allowance = get_allowance_from_tier(new_tier)
-            old_tier_allowance = get_allowance_from_tier(current_tier)
-
-            if new_allowance > 0:
-                # Get current balance for audit logging (this is what the user has remaining)
-                user_fresh = get_user_fresh(user_id)
-                old_remaining_allowance = (
-                    float(user_fresh.get("subscription_allowance", 0)) if user_fresh else 0.0
+            # Allowance: grant only the delta above what was already granted this
+            # billing period, and only once the proration invoice is settled.
+            if self._proration_settled(updated_subscription):
+                self._apply_tier_change_allowance(
+                    user_id, updated_subscription, current_tier, new_tier
                 )
-                purchased_credits = (
-                    float(user_fresh.get("purchased_credits", 0)) if user_fresh else 0.0
-                )
-
-                # Calculate how much of the old allowance was used
-                old_used = max(0.0, old_tier_allowance - old_remaining_allowance)
-
-                # Calculate what is being forfeited (unused old allowance exceeding new tier).
-                # Design decision: on downgrade, we only forfeit the excess above the new
-                # tier's allowance. The user keeps the new tier's full capacity as their
-                # starting balance, so they are never worse off than a fresh subscriber on
-                # the lower tier. Purchased credits are never touched by this calculation.
-                forfeited_allowance = max(0.0, old_remaining_allowance - new_allowance)
-
-                logger.info(
-                    f"Proration calculation for user {user_id} downgrade {current_tier} -> {new_tier}: "
-                    f"old_tier_allowance=${old_tier_allowance}, "
-                    f"old_remaining=${old_remaining_allowance}, "
-                    f"old_used=${old_used}, "
-                    f"forfeited=${forfeited_allowance}, "
-                    f"new_allowance=${new_allowance}, "
-                    f"purchased_credits=${purchased_credits} (unchanged)"
-                )
-
-                # Reset allowance to new tier's amount (matches what user is now paying for)
-                reset_result = reset_subscription_allowance(user_id, new_allowance, new_tier)
-                if not reset_result:
-                    logger.error(f"Failed to reset allowance for user {user_id} during downgrade")
-                    raise Exception("Failed to update subscription allowance")
-
-                logger.info(
-                    f"Allowance SET to ${new_allowance} for user {user_id} ({new_tier} tier). "
-                    f"Previous remaining ${old_remaining_allowance} was replaced (not carried over)."
-                )
-
-                # Log detailed audit trail for subscription downgrade
-                log_credit_transaction(
-                    user_id=user_id,
-                    amount=new_allowance - old_remaining_allowance,
-                    transaction_type=TransactionType.SUBSCRIPTION_DOWNGRADE,
-                    description=(
-                        f"Subscription downgraded from {current_tier} to {new_tier}. "
-                        f"Allowance SET to ${new_allowance} (not incremented). "
-                        f"Forfeited ${forfeited_allowance} unused from old tier."
-                    ),
-                    balance_before=old_remaining_allowance + purchased_credits,
-                    balance_after=new_allowance + purchased_credits,
-                    metadata={
-                        "from_tier": current_tier,
-                        "to_tier": new_tier,
-                        "old_tier_allowance": old_tier_allowance,
-                        "old_remaining_allowance": old_remaining_allowance,
-                        "old_used_allowance": old_used,
-                        "forfeited_allowance": forfeited_allowance,
-                        "new_allowance": new_allowance,
-                        "purchased_credits_unchanged": purchased_credits,
-                        "proration_method": "set_not_increment",
-                        "subscription_id": updated_subscription.id,
-                        "product_id": request.new_product_id,
-                        "price_id": request.new_price_id,
-                        "allowance_handled_at": allowance_handled_at,
-                    },
-                    created_by="system:subscription_downgrade",
+            else:
+                logger.warning(
+                    "Proration invoice for subscription %s is not paid yet; deferring the "
+                    "%s allowance change to the invoice.paid webhook",
+                    stripe_subscription_id,
+                    "downgrade",
                 )
 
             # Invalidate user cache

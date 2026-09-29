@@ -112,39 +112,38 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         logger.info("🛡️ SecurityMiddleware initialized with behavioral protection + velocity mode")
 
     async def _get_client_ip(self, request: Request) -> str:
-        """Extract client IP with support for proxies."""
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        """Extract client IP using the trusted-hop helper (never the spoofable leftmost XFF)."""
+        from src.services.auth_rate_limiting import get_client_ip
 
-    def _is_authenticated_request(self, request: Request) -> bool:
-        """
-        Check if request has valid authentication (API key or Bearer token).
-        Authenticated users should bypass IP-based rate limiting since they're
-        already rate-limited by their API key in the application layer.
+        return get_client_ip(request)
 
-        Returns:
-            True if request appears to have authentication credentials
+    async def _get_validated_user(self, request: Request) -> dict | None:
+        """Return the user for a *validated* Gatewayz key, else None.
+
+        A merely well-formed Authorization header proves nothing; only a key
+        that resolves to a real user may bypass IP-based rate limiting.
         """
         auth_header = request.headers.get("Authorization", "")
         if not auth_header:
-            return False
+            return None
+        api_key = auth_header.replace("Bearer ", "").strip()
+        if not api_key.startswith("gw_"):
+            return None
+        try:
+            from src.db.users import get_user
 
-        # Check for Bearer token format (JWT tokens, etc.)
-        if auth_header.startswith("Bearer ") and len(auth_header) > 20:
-            return True
+            return await asyncio.to_thread(get_user, api_key)
+        except Exception as e:
+            logger.warning(f"Key validation lookup failed for IP-limit exemption: {e}")
+            return None
 
-        # Check for API key format (gw_ prefix for Gatewayz keys)
-        if auth_header.startswith("gw_") and len(auth_header) > 30:
-            return True
+    async def _is_authenticated_request(self, request: Request) -> bool:
+        """True only if the request carries a key that resolves to a real user.
 
-        # Check for other API key formats (raw key without Bearer)
-        # Most API keys are at least 20 characters
-        if len(auth_header) > 20 and not auth_header.startswith("Bearer "):
-            return True
-
-        return False
+        Authenticated users bypass IP-based rate limiting (they are limited per
+        API key). Header shape/length alone no longer qualifies.
+        """
+        return await self._get_validated_user(request) is not None
 
     async def _get_user_tier_from_request(self, request: Request) -> str:
         """
@@ -567,7 +566,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         velocity_active = self._is_velocity_mode_active()
 
         # Check if request is authenticated (has API key or Bearer token)
-        is_authenticated = self._is_authenticated_request(request)
+        is_authenticated = await self._is_authenticated_request(request)
 
         # Get user tier for tiered velocity mode (basic, pro, max, admin)
         user_tier = await self._get_user_tier_from_request(request)

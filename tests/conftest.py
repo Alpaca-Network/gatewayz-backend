@@ -322,3 +322,16 @@ def _no_live_eth_price(monkeypatch):
 
     monkeypatch.setattr(payout_views, "_fetch_price", _unavailable)
     monkeypatch.setattr(payout_views, "_price_cache", None)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_daily_limit_preflight(monkeypatch):
+    """The chat route's daily-limit preflight reads today's usage from the database
+    and fails CLOSED (503) when it can't. Unit tests have no database, so stub it out
+    by default; tests/routes/test_chat_daily_preflight.py exercises the real helper."""
+    import src.routes.chat as chat_route
+
+    async def _allow(user):
+        return None
+
+    monkeypatch.setattr(chat_route, "_enforce_daily_limit_preflight", _allow)

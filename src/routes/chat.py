@@ -25,8 +25,10 @@ from src.services.anonymous_rate_limiter import (
     ANONYMOUS_DAILY_LIMIT,
     get_anonymous_allowed_models_sample,
     get_anonymous_rate_limit_headers,
+    reserve_anonymous_request,
     validate_anonymous_request,
 )
+from src.services.auth_rate_limiting import get_client_ip
 from src.services.passive_health_monitor import capture_model_health
 from src.services.prometheus_metrics import record_free_model_usage
 from src.utils.errors import APIExceptions
@@ -101,6 +103,21 @@ from src.security.inference_gates import (
 )
 from src.services.pricing import calculate_cost_async, get_model_pricing_async
 from src.utils.token_estimator import estimate_message_tokens
+
+
+def resolve_anonymous_client_ip(request: Request | None) -> str:
+    """Client IP for the anonymous limit, via the shared spoof-resistant helper.
+
+    The leftmost X-Forwarded-For entry is client-controlled, so it must never
+    key a rate limit; auth_rate_limiting.get_client_ip uses X-Real-IP / the
+    rightmost (proxy-appended) entry.
+    """
+    if request is None:
+        return "unknown"
+    try:
+        return get_client_ip(request) or "unknown"
+    except Exception:
+        return "unknown"
 
 
 # Backwards compatibility wrappers for test patches
@@ -321,6 +338,25 @@ from src.routes.chat_streaming import stream_generator  # noqa: F401
 logger.info("📍 Registering /chat/completions endpoint")
 
 
+async def _enforce_daily_limit_preflight(user: dict) -> None:
+    """Refuse over-limit users before inference: 429 over limit, 503 if the lookup fails."""
+    from src.services.billing.daily_usage_limiter import (
+        DailyUsageLimitExceeded,
+        DailyUsageUnavailable,
+        check_daily_limit_preflight,
+    )
+
+    try:
+        await asyncio.to_thread(check_daily_limit_preflight, int(user["id"]))
+    except DailyUsageLimitExceeded as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
+    except DailyUsageUnavailable as e:
+        logger.error("Daily usage lookup failed, refusing request: %s", e)
+        raise HTTPException(
+            status_code=503, detail="Usage check temporarily unavailable. Please retry."
+        ) from e
+
+
 @router.post("/chat/completions", tags=["chat"])
 @traced(name="chat_completions", type="llm")
 async def chat_completions(
@@ -417,18 +453,7 @@ async def chat_completions(
             # set inside the `is_anonymous` branch, so authenticated streaming
             # requests hit `UnboundLocalError: client_ip` in dispatch_streaming and
             # every streamed chat returned a 500.
-            client_ip = "unknown"
-            if request:
-                # Parse X-Forwarded-For header with defensive bounds checking
-                forwarded_for = request.headers.get("X-Forwarded-For", "")
-                if forwarded_for:
-                    parts = forwarded_for.split(",")
-                    if parts:  # Defensive check (split always returns at least [''])
-                        client_ip = parts[0].strip()
-                if not client_ip:
-                    client_ip = request.headers.get("X-Real-IP", "")
-                if not client_ip and hasattr(request, "client") and request.client:
-                    client_ip = request.client.host or "unknown"
+            client_ip = resolve_anonymous_client_ip(request)
 
             if is_anonymous:
                 # Anonymous user - validate model whitelist and rate limits
@@ -470,6 +495,24 @@ async def chat_completions(
                                 remaining=0,
                             ),
                         )
+
+                # Reserve the slot atomically BEFORE inference (INCR-then-compare) so
+                # concurrent or client-cancelled requests cannot bypass the limit.
+                reservation = await _to_thread(reserve_anonymous_request, client_ip, req.model)
+                if not reservation["allowed"]:
+                    raise HTTPException(
+                        status_code=429,
+                        detail={
+                            "error": {
+                                "message": reservation["reason"],
+                                "type": "rate_limit_exceeded",
+                                "code": "anonymous_daily_limit",
+                            }
+                        },
+                        headers=get_anonymous_rate_limit_headers(
+                            limit=ANONYMOUS_DAILY_LIMIT, remaining=0
+                        ),
+                    )
 
                 user = None
                 api_key_id = None
@@ -634,6 +677,11 @@ async def chat_completions(
             )
             if not _precheck["allowed"] and _precheck.get("capped_max_tokens") is None:
                 raise APIExceptions.payment_required(credits=_user_credits)
+
+        # Daily usage limit: refuse BEFORE any upstream spend. Done once here (not in
+        # the per-provider handler) so provider failover doesn't repeat the lookup.
+        if not is_anonymous and not trial.get("is_trial", False) and not is_free_model(req.model):
+            await _enforce_daily_limit_preflight(user)
 
         # Pricing pre-check: block high-value models without pricing BEFORE
         # hitting any upstream provider. get_model_pricing_async() raises ValueError

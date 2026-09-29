@@ -2,6 +2,7 @@ import logging
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_CEILING, Decimal
 from typing import Any
 
 from src.config.config import Config
@@ -997,6 +998,24 @@ def log_api_usage_transaction(
         logger.error(f"Failed to log API usage transaction: {e}", exc_info=True)
 
 
+LEDGER_UNIT = Decimal("0.00000001")  # numeric(14,8) in credit_transactions / users balances
+
+
+def quantize_cost_up(cost: float) -> Decimal:
+    """Round a positive cost UP to the smallest representable ledger unit (1e-8).
+
+    Float noise above the unit is trimmed first (12 significant decimals) so
+    0.1+0.2 does not ceil to an extra unit; anything genuinely below the unit
+    becomes one unit instead of being dropped.
+    """
+    if cost <= 0:
+        return Decimal(0)
+    d = Decimal(repr(float(cost))).quantize(Decimal("1e-12"))
+    if d <= 0:
+        return LEDGER_UNIT
+    return d.quantize(LEDGER_UNIT, rounding=ROUND_CEILING)
+
+
 def deduct_credits(
     api_key: str,
     tokens: float,
@@ -1022,13 +1041,13 @@ def deduct_credits(
     if tokens < 0:
         raise ValueError("Credits cannot be negative")
 
-    # If tokens is 0 or very small (less than $0.000001), skip deduction but log usage
-    if tokens < 0.000001:
-        logger.info(
-            "Skipping credit deduction for minimal amount: $%s",
-            sanitize_for_logging(f"{tokens:.10f}"),
-        )
+    # Exactly zero cost (e.g. free models) has nothing to deduct. Anything above
+    # zero is charged: sub-precision costs round UP to the ledger unit so cheap
+    # requests are never free.
+    if tokens == 0:
+        logger.info("Skipping credit deduction for zero-cost request")
         return
+    tokens = float(quantize_cost_up(tokens))
 
     try:
         from src.db.credit_transactions import (

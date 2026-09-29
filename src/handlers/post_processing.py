@@ -8,7 +8,6 @@ from src.db.api_keys import increment_api_key_usage
 from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.db.chat_history import get_chat_session, save_chat_message
 from src.db.plans import enforce_plan_limits
-from src.services.anonymous_rate_limiter import record_anonymous_request
 from src.services.passive_health_monitor import capture_model_health
 from src.services.pricing import calculate_cost_async
 from src.services.prometheus_metrics import (
@@ -239,6 +238,7 @@ async def _process_stream_completion_background(
     request_id=None,
     client_ip=None,
     api_key_id=None,
+    cancelled=False,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -293,12 +293,8 @@ async def _process_stream_completion_background(
             if is_anonymous:
                 logger.info("Skipping user-specific post-processing for anonymous request")
 
-                # Record anonymous usage for rate limiting (IMPORTANT: prevents abuse)
-                if client_ip:
-                    try:
-                        await _to_thread(record_anonymous_request, client_ip, model)
-                    except Exception as e:
-                        logger.warning(f"Failed to record anonymous request: {e}")
+                # NOTE: the anonymous rate-limit slot is reserved (atomic INCR) in
+                # routes/chat.py BEFORE inference; do not count it again here.
 
                 # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
                 cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
@@ -500,6 +496,7 @@ async def _process_stream_completion_background(
                         model_id=None,
                         api_key_id=api_key_id,
                         is_anonymous=is_anonymous,
+                        **({"metadata": {"cancelled": True}} if cancelled else {}),
                     )
                 except Exception as e:
                     logger.debug(f"Failed to save chat completion request: {e}")

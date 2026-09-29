@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 from src.schemas.proxy import ProxyRequest
 from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
+from src.security.security import ApiKeyLookupUnavailable, validate_api_key_security
 from src.services.providers.anthropic_transformer import (
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
@@ -185,6 +186,37 @@ async def _aclose_stream(openai_stream) -> None:
 
 
 async def _stream_anthropic_events(
+    openai_stream,
+    model: str,
+    message_id: str,
+):
+    """Re-emit an OpenAI SSE stream as Anthropic events, closing the inner
+    stream on every exit path.
+
+    The inner stream is the chat pipeline's generator, which bills after it
+    finishes -- and, on a client abort, in its own cleanup. A client
+    disconnect (CancelledError/GeneratorExit at our ``yield``) never reaches
+    the inner generator on its own, so without this close it would sit
+    suspended and the tokens already generated upstream would go uncharged
+    until garbage collection (or forever).
+    """
+    events = _stream_anthropic_events_impl(openai_stream, model, message_id)
+    try:
+        async for event in events:
+            yield event
+    finally:
+        # Close the inner stream first: that is what triggers its billing.
+        try:
+            await _aclose_stream(openai_stream)
+        except BaseException:  # noqa: BLE001 - never mask the cancellation
+            pass
+        try:
+            await events.aclose()
+        except BaseException:  # noqa: BLE001
+            pass
+
+
+async def _stream_anthropic_events_impl(
     openai_stream,
     model: str,
     message_id: str,
@@ -426,6 +458,21 @@ async def create_message(
         ANTHROPIC_AUTH_TOKEN=<gatewayz key>
     """
     resolved_key = _resolve_api_key(request, api_key)
+    if resolved_key and not api_key:
+        # x-api-key bypassed the Bearer dependency; apply the same key security
+        # checks (IP allowlist, referrer domains, max_requests).
+        try:
+            validate_api_key_security(
+                resolved_key,
+                client_ip=request.client.host if request and request.client else None,
+                referer=request.headers.get("referer") if request else None,
+            )
+        except ApiKeyLookupUnavailable as e:
+            raise _anthropic_error(
+                503, "api_error", "Authentication temporarily unavailable"
+            ) from e
+        except ValueError as e:
+            raise _anthropic_error(401, "authentication_error", str(e)) from e
 
     if not req.messages:
         raise _anthropic_error(400, "invalid_request_error", "messages must not be empty")

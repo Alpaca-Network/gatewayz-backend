@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
-from src.security.deps import require_admin
+from src.security.deps import require_admin, require_admin_or_env_key
 from src.services.model_catalog_cache import (
     clear_models_cache,
     clear_providers_cache,
@@ -1036,7 +1036,11 @@ async def _run_single_gateway_check(gateway: str, auto_fix: bool) -> tuple[dict[
     return results, buffer.getvalue()
 
 
-@router.post("/health/gateways/{gateway}/fix", tags=["health"])
+@router.post(
+    "/health/gateways/{gateway}/fix",
+    tags=["health"],
+    dependencies=[Depends(require_admin_or_env_key)],
+)
 async def trigger_gateway_fix(
     gateway: str,
     auto_fix: bool = Query(

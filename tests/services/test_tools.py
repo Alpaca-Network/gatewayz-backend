@@ -505,6 +505,22 @@ class TestGenerateSpeech:
 class TestToolsRoute:
     """Tests for tools API routes."""
 
+    @pytest.fixture(autouse=True)
+    def _billing(self):
+        """Funded user; deduction mocked (metering itself is tested in tests/routes)."""
+        from src.db import users as users_module
+
+        with (
+            patch.object(
+                users_module,
+                "get_user",
+                return_value={"id": 1, "subscription_allowance": 0, "purchased_credits": 10},
+            ),
+            patch.object(users_module, "deduct_credits"),
+            patch.object(users_module, "record_usage"),
+        ):
+            yield
+
     @pytest.fixture
     def client(self):
         """Create test client with mocked auth."""
@@ -627,6 +643,22 @@ class TestToolIntegration:
 class TestSearchAugmentRoute:
     """Tests for the search augmentation endpoint."""
 
+    @pytest.fixture(autouse=True)
+    def _billing(self):
+        """Funded user; deduction mocked (metering itself is tested in tests/routes)."""
+        from src.db import users as users_module
+
+        with (
+            patch.object(
+                users_module,
+                "get_user",
+                return_value={"id": 1, "subscription_allowance": 0, "purchased_credits": 10},
+            ),
+            patch.object(users_module, "deduct_credits"),
+            patch.object(users_module, "record_usage"),
+        ):
+            yield
+
     @pytest.fixture
     def client(self):
         """Create test client with mocked auth."""
@@ -639,9 +671,9 @@ class TestSearchAugmentRoute:
         app.include_router(router)
 
         # Override auth dependency for testing
-        from src.security.deps import get_optional_api_key
+        from src.security.deps import get_api_key
 
-        app.dependency_overrides[get_optional_api_key] = lambda: None
+        app.dependency_overrides[get_api_key] = lambda: "test-api-key"
 
         return TestClient(app)
 

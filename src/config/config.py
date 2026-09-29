@@ -133,7 +133,11 @@ class Config:
     APP_ENV = os.environ.get("APP_ENV", "development")  # development, staging, production
     IS_PRODUCTION = APP_ENV == "production"
     IS_STAGING = APP_ENV == "staging"
-    IS_DEVELOPMENT = APP_ENV == "development"
+    # Dev-only behaviour (keyless $1M dev key) requires APP_ENV to be EXPLICITLY
+    # "development" and the process not to be on Railway; unset => production-safe.
+    IS_DEVELOPMENT = os.environ.get("APP_ENV") == "development" and not os.environ.get(
+        "RAILWAY_ENVIRONMENT"
+    )
     IS_TESTING = APP_ENV in {"testing", "test"} or os.environ.get("TESTING", "").lower() in {
         "1",
         "true",
@@ -709,6 +713,12 @@ class Config:
 
     # Tavily Web Search Configuration
     TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
+
+    # Flat per-call charge (USD) for paid server-side tools under /v1/tools.
+    # Must stay > 0: an unmetered paid tool is a provider-spend leak.
+    TOOL_COST_WEB_SEARCH_USD = float(os.environ.get("TOOL_COST_WEB_SEARCH_USD", "0.01"))
+    TOOL_COST_TTS_USD = float(os.environ.get("TOOL_COST_TTS_USD", "0.02"))
+    TOOL_COST_DEFAULT_USD = float(os.environ.get("TOOL_COST_DEFAULT_USD", "0.01"))
 
     # Alibaba Cloud Configuration
     ALIBABA_CLOUD_API_KEY = os.environ.get("ALIBABA_CLOUD_API_KEY")

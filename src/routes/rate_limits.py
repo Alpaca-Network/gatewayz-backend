@@ -25,6 +25,37 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_RATE_LIMIT_FIELDS = (
+    "requests_per_minute",
+    "requests_per_hour",
+    "requests_per_day",
+    "tokens_per_minute",
+    "tokens_per_hour",
+    "tokens_per_day",
+    "burst_limit",
+    "concurrency_limit",
+)
+_ADMIN_ROLES = {"admin", "superadmin"}
+
+
+def _clamp_rate_limit_config(config: dict, user: dict) -> dict:
+    """Clamp self-service limits to the default (tier maximum) config.
+
+    Users may lower their key limits but not raise them past the platform
+    maximums; admins are exempt.
+    """
+    if user.get("is_admin") or user.get("role") in _ADMIN_ROLES:
+        return config
+    from src.services.rate_limiting import RateLimitConfig
+
+    maxima = RateLimitConfig()
+    clamped = dict(config)
+    for field in _RATE_LIMIT_FIELDS:
+        if isinstance(clamped.get(field), int):
+            clamped[field] = min(clamped[field], getattr(maxima, field))
+    return clamped
+
+
 # =============================================================================
 # ADVANCED RATE LIMITING ENDPOINTS
 # =============================================================================
@@ -147,6 +178,8 @@ async def update_user_rate_limits_advanced(
                     detail=f"Invalid value for {field}: must be non-negative integer",
                 )
 
+        rate_limit_config = _clamp_rate_limit_config(rate_limit_config, user)
+
         # Update rate limit configuration
         success = await asyncio.to_thread(
             update_rate_limit_config, key_to_update["api_key"], rate_limit_config
@@ -199,6 +232,8 @@ async def bulk_update_user_rate_limits(
                     status_code=400,
                     detail=f"Invalid value for {field}: must be non-negative integer",
                 )
+
+        rate_limit_config = _clamp_rate_limit_config(rate_limit_config, user)
 
         # Bulk update rate limit configurations
         updated_count = await asyncio.to_thread(

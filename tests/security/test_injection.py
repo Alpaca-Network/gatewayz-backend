@@ -26,8 +26,9 @@ from src.main import app
 
 @pytest.fixture
 def client():
-    """FastAPI test client"""
-    return TestClient(app)
+    """FastAPI test client (default admin key: POST /create now requires admin auth)"""
+    admin_key = os.environ.get("ADMIN_API_KEY", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+    return TestClient(app, headers={"Authorization": f"Bearer {admin_key}"})
 
 
 class TestSQLInjectionPrevention:

@@ -5,7 +5,7 @@ Handles CRUD operations for AI models with provider relationships
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from src.db.models_catalog_db import (
     activate_model,
@@ -37,12 +37,14 @@ from src.schemas.models_catalog import (
     ModelUpdate,
     ModelWithProvider,
 )
+from src.security.deps import require_admin_or_env_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/catalog/models-db",
     tags=["Models Catalog Management"],
+    dependencies=[Depends(require_admin_or_env_key)],
 )
 
 
