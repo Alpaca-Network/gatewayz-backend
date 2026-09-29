@@ -1768,23 +1768,36 @@ class StripeService:
 
     # ==================== Refund / dispute clawback ====================
 
-    def _purchase_grant_credits(self, payment_id: int) -> float:
-        """Total credits granted by 'purchase' ledger rows for this payment."""
+    def _payment_credit_position(self, payment_id: int) -> tuple[float, float]:
+        """Return (original grant, cumulative credits already owed back) for a payment.
+
+        Original grant = positive 'purchase' rows that are not dispute reinstatements.
+        Owed back = ``credits_owed`` on every reversal row (claimed or applied), net of
+        the ``reinstated_owed`` recorded by won-dispute reinstatements.
+        """
         from src.config.supabase_config import get_supabase_client
 
         rows = (
             get_supabase_client()
             .table("credit_transactions")
-            .select("amount")
+            .select("amount, transaction_type, metadata")
             .eq("payment_id", payment_id)
-            .eq("transaction_type", "purchase")
             .execute()
         )
-        return sum(
-            float(r.get("amount") or 0)
-            for r in (rows.data or [])
-            if float(r.get("amount") or 0) > 0
-        )
+        granted = 0.0
+        reversed_net = 0.0
+        for r in rows.data or []:
+            md = r.get("metadata") or {}
+            ttype = r.get("transaction_type")
+            amount = float(r.get("amount") or 0)
+            if ttype == "purchase" and amount > 0:
+                if md.get("dispute_reinstatement"):
+                    reversed_net -= float(md.get("reinstated_owed") or amount)
+                else:
+                    granted += amount
+            elif ttype == "refund" and md.get("credits_owed") is not None:
+                reversed_net += float(md.get("credits_owed") or 0)
+        return granted, max(0.0, reversed_net)
 
     @staticmethod
     def _payment_paid_cents(payment: dict[str, Any]) -> int:
@@ -1813,19 +1826,25 @@ class StripeService:
         from src.config.supabase_config import get_supabase_client
         from src.db.credit_transactions import (
             TransactionType,
-            get_transaction_by_request_id,
             log_credit_transaction,
         )
         from src.db.users import invalidate_user_cache_by_id
 
         request_id = self._grant_idempotency_key(idempotency_source)
-        if get_transaction_by_request_id(request_id):
-            logger.info("Clawback %s already applied; skipping", idempotency_source)
-            return {"status": "duplicate"}
-
+        client = get_supabase_client()
         payment_id = payment["id"]
         user_id = payment["user_id"]
-        granted = self._purchase_grant_credits(payment_id)
+
+        def _claim_exists() -> bool:
+            res = (
+                client.table("credit_transactions")
+                .select("request_id")
+                .eq("request_id", request_id)
+                .execute()
+            )
+            return bool(res.data)
+
+        granted, already_reversed = self._payment_credit_position(payment_id)
         if granted <= 0:
             logger.warning(
                 "No purchase grant found for payment %s (%s); nothing to reverse",
@@ -1839,53 +1858,84 @@ class StripeService:
 
         paid_cents = self._payment_paid_cents(payment)
         fraction = 1.0 if paid_cents <= 0 else min(1.0, max(0, amount_cents) / paid_cents)
-        to_reverse = round(granted * fraction, 6)
+        # Never reverse more than this payment's remaining (net) grant.
+        to_reverse = round(min(granted * fraction, max(0.0, granted - already_reversed)), 6)
 
-        client = get_supabase_client()
-        deducted = 0.0
-        allowance = 0.0
-        purchased_before = 0.0
-        for _ in range(3):  # optimistic-lock retry
-            row = (
-                client.table("users")
-                .select("purchased_credits, subscription_allowance")
-                .eq("id", user_id)
-                .execute()
-            )
-            if not row.data:
-                raise ValueError(f"User {user_id} not found for clawback")
-            purchased_before = float(row.data[0].get("purchased_credits") or 0)
-            allowance = float(row.data[0].get("subscription_allowance") or 0)
-            deducted = min(to_reverse, max(0.0, purchased_before))
-            updated = (
-                client.table("users")
-                .update({"purchased_credits": purchased_before - deducted})
-                .eq("id", user_id)
-                .eq("purchased_credits", row.data[0].get("purchased_credits"))
-                .execute()
-            )
-            if updated.data:
-                break
-        else:
-            raise RuntimeError(f"Clawback for user {user_id} lost the balance race; retry")
-
-        shortfall = round(to_reverse - deducted, 6)
-        log_credit_transaction(
+        base_meta = {**(extra_metadata or {}), "credits_owed": to_reverse}
+        # Claim idempotency FIRST: the unique request_id insert arbitrates concurrent
+        # callers (route + webhook); only the winner touches the balance.
+        claim = log_credit_transaction(
             user_id=user_id,
-            amount=-deducted,
+            amount=0.0,
             transaction_type=TransactionType.REFUND,
             description=f"Credits reversed: {reason}",
-            balance_before=allowance + purchased_before,
-            balance_after=allowance + purchased_before - deducted,
+            balance_before=0.0,
+            balance_after=0.0,
             payment_id=payment_id,
-            metadata={
-                **(extra_metadata or {}),
-                "credits_reversed": deducted,
-                "clawback_shortfall": shortfall,
-            },
+            metadata={**base_meta, "credits_reversed": 0.0},
             created_by="system:stripe_clawback",
             request_id=request_id,
         )
+        if not claim:
+            if _claim_exists():
+                logger.info("Clawback %s already applied; skipping", idempotency_source)
+                return {"status": "duplicate"}
+            raise RuntimeError(f"Could not record clawback {idempotency_source}; retry")
+
+        def _release_claim() -> None:
+            try:
+                client.table("credit_transactions").delete().eq("request_id", request_id).execute()
+            except Exception:
+                logger.error("Could not release clawback claim %s", request_id, exc_info=True)
+
+        deducted = 0.0
+        allowance = 0.0
+        purchased_before = 0.0
+        try:
+            for _ in range(3):  # optimistic-lock retry
+                row = (
+                    client.table("users")
+                    .select("purchased_credits, subscription_allowance")
+                    .eq("id", user_id)
+                    .execute()
+                )
+                if not row.data:
+                    raise ValueError(f"User {user_id} not found for clawback")
+                purchased_before = float(row.data[0].get("purchased_credits") or 0)
+                allowance = float(row.data[0].get("subscription_allowance") or 0)
+                deducted = min(to_reverse, max(0.0, purchased_before))
+                updated = (
+                    client.table("users")
+                    .update({"purchased_credits": purchased_before - deducted})
+                    .eq("id", user_id)
+                    .eq("purchased_credits", row.data[0].get("purchased_credits"))
+                    .execute()
+                )
+                if updated.data:
+                    break
+            else:
+                raise RuntimeError(f"Clawback for user {user_id} lost the balance race; retry")
+        except Exception:
+            # Nothing was deducted: release the claim so a retry can re-apply it.
+            _release_claim()
+            raise
+
+        shortfall = round(to_reverse - deducted, 6)
+        try:
+            client.table("credit_transactions").update(
+                {
+                    "amount": -deducted,
+                    "balance_before": allowance + purchased_before,
+                    "balance_after": allowance + purchased_before - deducted,
+                    "metadata": {
+                        **base_meta,
+                        "credits_reversed": deducted,
+                        "clawback_shortfall": shortfall,
+                    },
+                }
+            ).eq("request_id", request_id).execute()
+        except Exception:
+            logger.error("Clawback %s applied but ledger finalize failed", request_id, exc_info=True)
         invalidate_user_cache_by_id(user_id)
 
         if shortfall > 0:
@@ -1988,6 +2038,7 @@ class StripeService:
                 self._grant_idempotency_key(f"dispute:{dispute_id}")
             )
             restored = abs(float(original.get("amount") or 0)) if original else 0.0
+            owed = float(((original or {}).get("metadata") or {}).get("credits_owed") or restored)
             if restored > 0:
                 add_credits_to_user(
                     user_id=payment["user_id"],
@@ -1995,7 +2046,11 @@ class StripeService:
                     transaction_type="purchase",
                     description=f"Credits reinstated: dispute {dispute_id} won",
                     payment_id=payment["id"],
-                    metadata={"stripe_dispute_id": dispute_id},
+                    metadata={
+                        "stripe_dispute_id": dispute_id,
+                        "dispute_reinstatement": True,
+                        "reinstated_owed": owed,
+                    },
                     request_id=self._grant_idempotency_key(f"dispute-won:{dispute_id}"),
                 )
 

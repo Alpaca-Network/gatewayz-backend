@@ -55,6 +55,10 @@ class _Q:
         self.op, self.payload = "insert", payload
         return self
 
+    def delete(self):
+        self.op = "delete"
+        return self
+
     def eq(self, k, v):
         self.filters.append((k, v))
         return self
@@ -71,6 +75,9 @@ class _Q:
         if self.op == "update":
             for r in hit:
                 r.update(self.payload)
+        elif self.op == "delete":
+            for r in hit:
+                rows.remove(r)
         elif self.op == "insert":
             rows.append(dict(self.payload))
             hit = [rows[-1]]
@@ -113,6 +120,9 @@ def fake_db():
     )
 
     def _log(**kw):
+        rid = kw.get("request_id")
+        if rid and any(r.get("request_id") == rid for r in db.tables["credit_transactions"]):
+            return None  # unique index on request_id; real helper swallows the error
         row = dict(kw)
         db.tables["credit_transactions"].append(row)
         return row
@@ -587,3 +597,107 @@ def test_refund_route_reverses_credits(fake_db, svc):
     # the later charge.refunded webhook for the same refund id must not double reverse
     svc._handle_charge_refunded(_charge(refunds=[{"id": "re_9", "amount": 1000}]))
     assert len(_refund_rows(fake_db)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: claim-first idempotency, per-payment caps, transaction types
+# ---------------------------------------------------------------------------
+def test_concurrent_reversal_deducts_once_even_with_stale_idempotency_read(fake_db, svc):
+    # Both racers pass any read-based pre-check; the unique ledger insert must arbitrate.
+    with patch("src.db.credit_transactions.get_transaction_by_request_id", return_value=None):
+        r1 = svc._reverse_purchase_credits(fake_db.tables["payments"][0], 1000, "refund:re_r", "x")
+        r2 = svc._reverse_purchase_credits(fake_db.tables["payments"][0], 1000, "refund:re_r", "x")
+    assert r1["status"] == "reversed"
+    assert r2["status"] == "duplicate"
+    assert _purchased(fake_db) == pytest.approx(0.0)
+    assert len(_refund_rows(fake_db)) == 1
+
+
+def test_failed_deduction_releases_claim_so_retry_succeeds(fake_db, svc):
+    real_table = fake_db.table
+
+    class _Boom(_Q):
+        def execute(self):
+            if self.name == "users" and self.op == "update":
+                raise RuntimeError("db down")
+            return super().execute()
+
+    fake_db.table = lambda name: _Boom(fake_db, name)
+    with pytest.raises(RuntimeError):
+        svc._reverse_purchase_credits(fake_db.tables["payments"][0], 1000, "refund:re_f", "x")
+    assert _purchased(fake_db) == pytest.approx(10.0)
+    assert _refund_rows(fake_db) == []  # claim compensated
+    fake_db.table = real_table
+    res = svc._reverse_purchase_credits(fake_db.tables["payments"][0], 1000, "refund:re_f", "x")
+    assert res["status"] == "reversed"
+    assert _purchased(fake_db) == pytest.approx(0.0)
+
+
+def test_refund_then_dispute_on_same_charge_reverses_grant_once(fake_db, svc):
+    fake_db.tables["users"][0]["purchased_credits"] = 20.0  # 10 from another purchase
+    svc._handle_charge_refunded(_charge())
+    svc._handle_dispute_created(
+        {"id": "dp_x", "charge": "ch_1", "payment_intent": "pi_1", "amount": 1000}
+    )
+    assert _purchased(fake_db) == pytest.approx(10.0)  # other purchase untouched
+
+
+def test_refund_after_won_dispute_reverses_only_original_grant(fake_db, svc):
+    fake_db.tables["users"][0]["purchased_credits"] = 20.0
+    dispute = {"id": "dp_w", "charge": "ch_1", "payment_intent": "pi_1", "amount": 1000}
+    svc._handle_dispute_created(dispute)
+    assert _purchased(fake_db) == pytest.approx(10.0)
+
+    def _add(**kw):
+        fake_db.tables["users"][0]["purchased_credits"] += kw["credits"]
+        fake_db.tables["credit_transactions"].append(
+            {
+                "user_id": kw["user_id"],
+                "payment_id": kw["payment_id"],
+                "transaction_type": "purchase",
+                "amount": kw["credits"],
+                "metadata": kw["metadata"],
+                "request_id": kw["request_id"],
+            }
+        )
+
+    with patch(f"{MOD}.add_credits_to_user", side_effect=_add):
+        svc._handle_dispute_closed({**dispute, "status": "won"})
+    assert _purchased(fake_db) == pytest.approx(20.0)
+    svc._handle_charge_refunded(_charge())
+    assert _purchased(fake_db) == pytest.approx(10.0)  # 10, not 20
+
+
+def test_partial_refunds_cumulatively_capped_at_grant(fake_db, svc):
+    fake_db.tables["users"][0]["purchased_credits"] = 20.0
+    for i in range(3):
+        svc._reverse_purchase_credits(
+            fake_db.tables["payments"][0], 600, f"refund:re_c{i}", "x"
+        )
+    assert _purchased(fake_db) == pytest.approx(10.0)
+
+
+def test_reversal_rows_are_refund_type_not_usage(fake_db, svc):
+    svc._handle_charge_refunded(_charge())
+    rows = [r for r in fake_db.tables["credit_transactions"] if r.get("amount", 0) < 0]
+    assert rows and all(r["transaction_type"] == "refund" for r in rows)
+
+
+def test_tier_downgrade_audit_row_is_not_api_usage(svc):
+    with (
+        patch(
+            "src.db.subscription_products.get_allowance_from_tier",
+            side_effect=lambda t: ALLOW.get(t, 0.0),
+        ),
+        patch(
+            "src.db.users.get_user_by_id",
+            return_value={"subscription_allowance": 40.0, "purchased_credits": 0},
+        ),
+        patch("src.db.users.reset_subscription_allowance", return_value=True),
+        patch("stripe.Subscription.modify"),
+        patch("src.db.credit_transactions.log_credit_transaction") as log,
+    ):
+        svc._apply_tier_change_allowance(1, _paid_sub(), "max", "pro")
+    kw = log.call_args.kwargs
+    assert kw["amount"] < 0
+    assert kw["transaction_type"] == "subscription_downgrade"

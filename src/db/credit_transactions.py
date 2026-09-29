@@ -95,6 +95,9 @@ _METADATA_ALLOWED_KEYS = frozenset(
         "stripe_dispute_id",
         "credits_reversed",
         "clawback_shortfall",
+        "credits_owed",
+        "dispute_reinstatement",
+        "reinstated_owed",
         "topup_fee_rate",
         "topup_fee",
         # Staking rewards (src/services/staking_rewards.py) -- daily WAYZ
