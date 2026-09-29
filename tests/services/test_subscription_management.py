@@ -26,6 +26,24 @@ def stripe_service():
             return service
 
 
+PRICE_PRODUCTS = {
+    "price_max_75": "prod_TKOraBpWMxMAIu",
+    "price_pro_8": "prod_TKOqQPhVRxNp4Q",
+    "price_invalid_123": "prod_invalid_123",
+    "price_invalid_456": "prod_invalid_456",
+}
+
+
+@pytest.fixture(autouse=True)
+def _stripe_price_lookup():
+    """Tier changes bind tier to the Stripe price's real product (server-side)."""
+    with patch(
+        "stripe.Price.retrieve",
+        side_effect=lambda pid: {"id": pid, "product": PRICE_PRODUCTS[pid], "active": True},
+    ):
+        yield
+
+
 @pytest.fixture
 def mock_user_pro():
     """Mock user with Pro tier subscription"""
@@ -167,7 +185,7 @@ class TestUpgradeSubscription:
     ):
         """Test upgrade fails when product ID resolves to basic tier"""
         upgrade_request = UpgradeSubscriptionRequest(
-            new_price_id="price_invalid",
+            new_price_id="price_invalid_123",
             new_product_id="prod_invalid_123",
             proration_behavior="create_prorations",
         )
@@ -176,7 +194,7 @@ class TestUpgradeSubscription:
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_pro):
                 # get_tier_from_product_id returns "basic" for unknown product
                 with patch("src.services.payments.get_tier_from_product_id", return_value="basic"):
-                    with pytest.raises(ValueError, match="Invalid product ID for upgrade"):
+                    with pytest.raises(ValueError, match="does not map to a paid tier"):
                         stripe_service.upgrade_subscription(123, upgrade_request)
 
     def test_upgrade_invalid_product_id_returns_none(
@@ -184,7 +202,7 @@ class TestUpgradeSubscription:
     ):
         """Test upgrade fails when product ID resolves to None"""
         upgrade_request = UpgradeSubscriptionRequest(
-            new_price_id="price_invalid",
+            new_price_id="price_invalid_456",
             new_product_id="prod_invalid_456",
             proration_behavior="create_prorations",
         )
@@ -193,7 +211,7 @@ class TestUpgradeSubscription:
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_pro):
                 # get_tier_from_product_id returns None for unknown product
                 with patch("src.services.payments.get_tier_from_product_id", return_value=None):
-                    with pytest.raises(ValueError, match="Invalid product ID for upgrade"):
+                    with pytest.raises(ValueError, match="does not map to a paid tier"):
                         stripe_service.upgrade_subscription(123, upgrade_request)
 
     def test_upgrade_allowance_reset_failure(
@@ -210,6 +228,7 @@ class TestUpgradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test123"
         mock_updated_sub.status = "active"
+        mock_updated_sub.latest_invoice = {"status": "paid"}
         mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_pro):
@@ -229,7 +248,7 @@ class TestUpgradeSubscription:
                             with patch("src.db.plans.get_plan_id_by_tier", return_value=2):
                                 with patch(
                                     "src.db.subscription_products.get_allowance_from_tier",
-                                    return_value=150.0,
+                                    side_effect=lambda t: {"pro": 15.0, "max": 150.0}.get(t, 0.0),
                                 ):
                                     # Simulate reset_subscription_allowance returning None (failure)
                                     with patch(
@@ -262,6 +281,7 @@ class TestUpgradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test123"
         mock_updated_sub.status = "active"
+        mock_updated_sub.latest_invoice = {"status": "paid"}
         mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_pro):
@@ -281,7 +301,7 @@ class TestUpgradeSubscription:
                             with patch("src.db.plans.get_plan_id_by_tier", return_value=2):
                                 with patch(
                                     "src.db.subscription_products.get_allowance_from_tier",
-                                    return_value=150.0,
+                                    side_effect=lambda t: {"pro": 15.0, "max": 150.0}.get(t, 0.0),
                                 ):
                                     with patch(
                                         "src.db.users.reset_subscription_allowance",
@@ -325,6 +345,7 @@ class TestUpgradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test123"
         mock_updated_sub.status = "active"
+        mock_updated_sub.latest_invoice = {"status": "paid"}
         mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_pro):
@@ -344,7 +365,7 @@ class TestUpgradeSubscription:
                             with patch("src.db.plans.get_plan_id_by_tier", return_value=2):
                                 with patch(
                                     "src.db.subscription_products.get_allowance_from_tier",
-                                    return_value=150.0,
+                                    side_effect=lambda t: {"pro": 15.0, "max": 150.0}.get(t, 0.0),
                                 ):
                                     with patch(
                                         "src.db.users.reset_subscription_allowance",
@@ -397,7 +418,7 @@ class TestDowngradeSubscription:
     ):
         """Test downgrade fails when product ID resolves to basic tier"""
         downgrade_request = DowngradeSubscriptionRequest(
-            new_price_id="price_invalid",
+            new_price_id="price_invalid_123",
             new_product_id="prod_invalid_123",
             proration_behavior="create_prorations",
         )
@@ -405,7 +426,7 @@ class TestDowngradeSubscription:
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_max):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_max):
                 with patch("src.services.payments.get_tier_from_product_id", return_value="basic"):
-                    with pytest.raises(ValueError, match="Invalid product ID for downgrade"):
+                    with pytest.raises(ValueError, match="does not map to a paid tier"):
                         stripe_service.downgrade_subscription(456, downgrade_request)
 
     def test_downgrade_invalid_product_id_returns_none(
@@ -413,7 +434,7 @@ class TestDowngradeSubscription:
     ):
         """Test downgrade fails when product ID resolves to None"""
         downgrade_request = DowngradeSubscriptionRequest(
-            new_price_id="price_invalid",
+            new_price_id="price_invalid_456",
             new_product_id="prod_invalid_456",
             proration_behavior="create_prorations",
         )
@@ -421,7 +442,7 @@ class TestDowngradeSubscription:
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_max):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_max):
                 with patch("src.services.payments.get_tier_from_product_id", return_value=None):
-                    with pytest.raises(ValueError, match="Invalid product ID for downgrade"):
+                    with pytest.raises(ValueError, match="does not map to a paid tier"):
                         stripe_service.downgrade_subscription(456, downgrade_request)
 
     def test_downgrade_allowance_reset_failure(
@@ -438,6 +459,7 @@ class TestDowngradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test456"
         mock_updated_sub.status = "active"
+        mock_updated_sub.latest_invoice = {"status": "paid"}
         mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_max):
@@ -490,6 +512,7 @@ class TestDowngradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test456"
         mock_updated_sub.status = "active"
+        mock_updated_sub.latest_invoice = {"status": "paid"}
         mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_max):
@@ -555,6 +578,7 @@ class TestDowngradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test456"
         mock_updated_sub.status = "active"
+        mock_updated_sub.latest_invoice = {"status": "paid"}
         mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_max):
@@ -619,6 +643,7 @@ class TestCancelSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test123"
         mock_updated_sub.status = "active"
+        mock_updated_sub.latest_invoice = {"status": "paid"}
         mock_updated_sub.cancel_at_period_end = True
         mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 

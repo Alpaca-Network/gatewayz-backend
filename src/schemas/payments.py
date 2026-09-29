@@ -162,7 +162,10 @@ class CreateCheckoutSessionRequest(BaseModel):
     amount: int = Field(..., description="Amount in cents (e.g., 2999 for $29.99)", gt=0)
     credit_value: float | None = Field(
         None,
-        description="Credit value in dollars to add (for discounted packages). If not provided, amount/100 is used.",
+        description=(
+            "DEPRECATED / informational only. Credits are derived server-side from the amount "
+            "charged (1:1, plus promos from server config); this value is never trusted."
+        ),
         gt=0,  # Must be positive if provided
         le=10000,  # Maximum $10,000 credits per transaction
     )
@@ -559,7 +562,7 @@ class UpgradeSubscriptionRequest(BaseModel):
     new_product_id: str = Field(..., description="Stripe product ID for the new plan")
     proration_behavior: str = Field(
         default="create_prorations",
-        description="How to handle proration: create_prorations (default), always_invoice, or none",
+        description="Ignored: the server always uses always_invoice (kept for API compatibility)",
     )
 
     @field_validator("proration_behavior")
@@ -578,7 +581,7 @@ class DowngradeSubscriptionRequest(BaseModel):
     new_product_id: str = Field(..., description="Stripe product ID for the new plan")
     proration_behavior: str = Field(
         default="create_prorations",
-        description="How to handle proration: create_prorations (credits unused time), always_invoice, or none",
+        description="Ignored: the server always uses always_invoice (kept for API compatibility)",
     )
 
     @field_validator("proration_behavior")
