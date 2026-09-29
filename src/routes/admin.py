@@ -32,7 +32,7 @@ from src.schemas import (
     UserRegistrationRequest,
     UserRegistrationResponse,
 )
-from src.security.deps import require_admin
+from src.security.deps import require_admin, require_admin_or_env_key
 
 # Cache management functions migrated to model_catalog_cache
 # Old direct cache dict access replaced with new API calls
@@ -65,7 +65,12 @@ def _with_synthesized_credits(user: dict) -> dict:
     return user
 
 
-@router.post("/create", response_model=UserRegistrationResponse, tags=["authentication"])
+@router.post(
+    "/create",
+    response_model=UserRegistrationResponse,
+    tags=["authentication"],
+    dependencies=[Depends(require_admin_or_env_key)],
+)
 async def create_api_key(request: UserRegistrationRequest):
     """Create an API key for the user after dashboard login"""
     try:
