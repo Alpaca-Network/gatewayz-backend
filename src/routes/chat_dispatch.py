@@ -63,6 +63,21 @@ def _maybe_record_402(provider: str, status_code: int) -> None:
             pass
 
 
+async def _aclose_quiet(agen) -> None:
+    """Close an async generator so its cleanup (incl. stream billing) runs now.
+
+    Nested ``async for`` does not propagate a close to the inner generator, so
+    on a client disconnect each layer must close the one below it explicitly.
+    """
+    aclose = getattr(agen, "aclose", None)
+    if aclose is None:
+        return
+    try:
+        await aclose()
+    except BaseException:  # noqa: BLE001 - cleanup must not mask the cancellation
+        pass
+
+
 async def dispatch_streaming(
     *,
     is_anonymous,
@@ -95,10 +110,12 @@ async def dispatch_streaming(
         # iteration (not just setup) can be caught and the next provider tried,
         # but only before the first content chunk has been sent to the client.
         async def _auth_stream_with_failover():
+            _attempts = _auth_stream_attempts()
             try:
-                async for _chunk in _auth_stream_attempts():
+                async for _chunk in _attempts:
                     yield _chunk
             finally:
+                await _aclose_quiet(_attempts)
                 # Release the concurrency slot taken by the route's rate-limit
                 # pre-check. Streaming responses outlive chat_completions(), so
                 # the route can't release it — without this every streamed
@@ -133,9 +150,15 @@ async def dispatch_streaming(
                     _internal_stream = _handler.process_stream(_internal_req)
                     _sse_stream = _adapter.from_internal_stream(_internal_stream)
 
-                    async for _chunk in _sse_stream:
-                        _content_started = True
-                        yield _chunk
+                    try:
+                        async for _chunk in _sse_stream:
+                            _content_started = True
+                            yield _chunk
+                    finally:
+                        # Client abort: close downward so process_stream sees the
+                        # cancellation and bills the tokens streamed so far.
+                        await _aclose_quiet(_sse_stream)
+                        await _aclose_quiet(_internal_stream)
 
                     return  # Stream completed successfully
 
