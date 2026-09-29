@@ -51,7 +51,11 @@ MODEL_PREFIX_ROUTING: tuple[tuple[str, str], ...] = (
 
 
 # USD per 1M input tokens (embeddings have no output tokens). Keyed by the model
-# name with the provider namespace stripped, lower-cased.
+# name with the provider namespace stripped, lower-cased. Verified 2026-09-29
+# against OpenAI (3-small $0.02, 3-large $0.13, ada-002 $0.10) and DeepInfra
+# (bge-large $0.01, bge-base $0.005, all-MiniLM-L6-v2 $0.005) list prices;
+# billed at provider cost. Together models are not in the table and use the
+# fallback (well above Together's ~$0.008/M embedding rates).
 EMBEDDING_PRICE_PER_M_TOKENS: dict[str, float] = {
     "text-embedding-3-small": 0.02,
     "text-embedding-3-large": 0.13,

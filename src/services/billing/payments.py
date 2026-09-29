@@ -2753,8 +2753,11 @@ class StripeService:
                 )
                 tier, _ = self._resolve_tier_from_subscription(subscription, meta.get("tier"))
                 user = get_user_by_id(user_id) or {}
+                from_tier, to_tier = self._resolve_tier_change_from_invoice(
+                    invoice, tier, user.get("tier")
+                )
                 self._apply_tier_change_allowance(
-                    user_id, subscription, user.get("tier") or tier, tier
+                    user_id, subscription, from_tier, to_tier, invoice_id=invoice.id
                 )
                 return
 
@@ -3020,8 +3023,64 @@ class StripeService:
             return False
         return self._get_stripe_object_value(invoice, "status") in ("paid", "void")
 
+    def _resolve_tier_change_from_invoice(
+        self, invoice: Any, sub_tier: str, user_tier: str | None
+    ) -> tuple[str, str]:
+        """(from_tier, to_tier) of a proration invoice, independent of event order.
+
+        ``customer.subscription.updated`` may already have set ``users.tier`` to the
+        new tier, so ``user.tier`` is not a reliable from-tier. The invoice's own
+        proration lines are: credit lines (negative amount) belong to the old price,
+        charge lines (positive) to the new one.
+        """
+
+        def _line_tier(line: Any) -> str | None:
+            price = self._get_stripe_object_value(line, "price")
+            product = self._get_stripe_object_value(price, "product") if price else None
+            if not product:
+                pricing = self._get_stripe_object_value(line, "pricing")
+                details = (
+                    self._get_stripe_object_value(pricing, "price_details") if pricing else None
+                )
+                product = self._get_stripe_object_value(details, "product") if details else None
+            if product and not isinstance(product, str):
+                product = self._get_stripe_object_value(product, "id")
+            if not product:
+                return None
+            tier = get_tier_from_product_id(product)
+            return tier if tier and tier != "basic" else None
+
+        lines = self._get_stripe_object_value(invoice, "lines")
+        lines_data = self._get_stripe_object_value(lines, "data") if lines else None
+        old_tier: str | None = None
+        new_tier: str | None = None
+        for line in lines_data or []:
+            amount = self._coerce_to_int(self._get_stripe_object_value(line, "amount")) or 0
+            tier = _line_tier(line)
+            if not tier:
+                continue
+            if amount < 0:
+                old_tier = old_tier or tier
+            elif amount > 0:
+                new_tier = new_tier or tier
+        to_tier = new_tier or sub_tier
+        from_tier = old_tier
+        if not from_tier and user_tier and user_tier != to_tier:
+            from_tier = user_tier
+        if not from_tier:
+            paid = self._coerce_to_int(self._get_stripe_object_value(invoice, "amount_paid")) or 0
+            # A positive charge with no identifiable old price is an upgrade: never
+            # let an unknown baseline turn a paid upgrade into a zero grant.
+            from_tier = "basic" if paid > 0 else to_tier
+        return from_tier, to_tier
+
     def _apply_tier_change_allowance(
-        self, user_id: int, subscription: Any, from_tier: str, to_tier: str
+        self,
+        user_id: int,
+        subscription: Any,
+        from_tier: str,
+        to_tier: str,
+        invoice_id: str | None = None,
     ) -> None:
         """Adjust subscription_allowance for a settled tier change.
 
@@ -3038,6 +3097,10 @@ class StripeService:
 
         new_allowance = float(get_allowance_from_tier(to_tier) or 0.0)
         if new_allowance <= 0:
+            return
+        sub_meta = self._metadata_to_dict(self._get_stripe_object_value(subscription, "metadata"))
+        if invoice_id and sub_meta.get("allowance_last_invoice") == invoice_id:
+            logger.info("Invoice %s already applied for user %s; skipping", invoice_id, user_id)
             return
         period_start, hw = self._allowance_baseline(subscription, from_tier)
 
@@ -3096,7 +3159,11 @@ class StripeService:
         if sub_id:
             stripe.Subscription.modify(
                 sub_id,
-                metadata={"allowance_period_start": period_start, "allowance_hw": str(new_hw)},
+                metadata={
+                    "allowance_period_start": period_start,
+                    "allowance_hw": str(new_hw),
+                    **({"allowance_last_invoice": invoice_id} if invoice_id else {}),
+                },
             )
 
     def _get_stripe_proration_amount(
