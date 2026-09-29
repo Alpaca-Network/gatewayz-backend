@@ -31,6 +31,8 @@ def _empty_db_caches():
         ("z-ai/glm-4.6", "zai"),
         ("meta/muse-spark-1.3", "meta"),
         ("moonshot/kimi-k3", "moonshot"),
+        ("deepseek/deepseek-chat", "deepseek"),
+        ("sambanova/DeepSeek-V3.1", "sambanova"),
     ],
 )
 def test_native_org_prefix_routes_to_native_provider(model_id, expected):
@@ -48,6 +50,8 @@ def test_openrouter_suffix_still_wins_for_glm():
         ("zai", "zai/glm-5.3", "glm-5.3"),
         ("moonshot", "moonshot/kimi-k3", "kimi-k3"),
         ("meta", "meta/muse-spark-1.3", "muse-spark-1.3"),
+        ("deepseek", "deepseek/deepseek-chat", "deepseek-chat"),
+        ("sambanova", "sambanova/DeepSeek-V3.1", "DeepSeek-V3.1"),
     ],
 )
 def test_native_adapter_strips_catalog_prefix(slug, catalog_id, upstream_id):
