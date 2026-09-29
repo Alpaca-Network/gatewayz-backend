@@ -85,6 +85,7 @@ def get_daily_usage(user_id: int) -> float:
                 client.table("credit_transactions")
                 .select("amount")
                 .eq("user_id", user_id)
+                .eq("transaction_type", "api_usage")
                 .gte("created_at", start_of_day.isoformat())
                 .lt("amount", 0)
                 .order("id")

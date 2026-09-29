@@ -11,7 +11,11 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from src.security.security import audit_logger, validate_api_key_security
+from src.security.security import (
+    ApiKeyLookupUnavailable,
+    audit_logger,
+    validate_api_key_security,
+)
 from src.services.user_lookup_cache import get_user
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
@@ -232,6 +236,10 @@ async def get_api_key(
 
         return validated_key
 
+    except ApiKeyLookupUnavailable as e:
+        raise HTTPException(
+            status_code=503, detail="Authentication service temporarily unavailable"
+        ) from e
     except ValueError as e:
         error_message = str(e)
 

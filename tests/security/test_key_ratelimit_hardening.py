@@ -187,7 +187,7 @@ def test_validate_api_key_fails_closed_on_db_error(monkeypatch):
         patch("src.config.supabase_config.get_supabase_client", return_value=client),
         patch("src.db.users.get_user", legacy),
     ):
-        with pytest.raises(ValueError):
+        with pytest.raises(sec.ApiKeyLookupUnavailable):
             sec.validate_api_key_security("gw_revoked_key")
     legacy.assert_not_called()
 

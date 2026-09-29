@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field
 from src.schemas.proxy import ProxyRequest
 from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
-from src.security.security import validate_api_key_security
+from src.security.security import ApiKeyLookupUnavailable, validate_api_key_security
 from src.services.providers.anthropic_transformer import (
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
@@ -467,6 +467,8 @@ async def create_message(
                 client_ip=request.client.host if request and request.client else None,
                 referer=request.headers.get("referer") if request else None,
             )
+        except ApiKeyLookupUnavailable as e:
+            raise _anthropic_error(503, "api_error", "Authentication temporarily unavailable") from e
         except ValueError as e:
             raise _anthropic_error(401, "authentication_error", str(e)) from e
 

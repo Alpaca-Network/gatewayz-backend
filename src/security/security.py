@@ -185,6 +185,11 @@ def validate_domain_referrers(referer: str, allowed_domains: list[str]) -> bool:
 # ==================== API Key Validation ====================
 
 
+class ApiKeyLookupUnavailable(Exception):
+    """API key store unreachable. Not a ValueError: callers must answer 503, not 401
+    (a DB blip must not look like a revoked key and log clients out)."""
+
+
 def validate_api_key_security(
     api_key: str, client_ip: str | None = None, referer: str | None = None
 ) -> str:
@@ -263,7 +268,7 @@ def validate_api_key_security(
             # Fail closed: a DB error must not fall through to the legacy
             # (cached) user path, which would let revoked keys authenticate.
             logger.error(f"Error checking {table_name}: {e}")
-            raise ValueError("Unable to validate API key") from e
+            raise ApiKeyLookupUnavailable("Unable to validate API key") from e
 
     # Fallback to legacy user table validation
     logger.debug("Attempting legacy user validation")

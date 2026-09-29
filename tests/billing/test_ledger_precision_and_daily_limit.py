@@ -133,7 +133,7 @@ class TestDailyUsageAggregate:
         client = MagicMock()
         client.rpc.return_value.execute.side_effect = Exception("function does not exist")
         pages = [[{"amount": -0.001}] * 1000, [{"amount": -0.001}] * 500, []]
-        q = client.table.return_value.select.return_value.eq.return_value.gte.return_value.lt.return_value
+        q = client.table.return_value.select.return_value.eq.return_value.eq.return_value.gte.return_value.lt.return_value
         q.order.return_value.range.return_value.execute.side_effect = [
             MagicMock(data=p) for p in pages
         ]
@@ -159,6 +159,13 @@ class TestDailyUsageAggregate:
 
 
 class TestPreflight:
+    @pytest.fixture(autouse=True)
+    def _enforced(self, monkeypatch):
+        # The cap is opt-in (ENFORCE_DAILY_LIMITS env); these tests cover it when on.
+        from src.services.billing import daily_usage_limiter as d
+
+        monkeypatch.setattr(d, "ENFORCE_DAILY_LIMITS", True)
+
     def test_blocks_when_at_limit(self):
         from src.services.billing import daily_usage_limiter as d
 
@@ -196,3 +203,22 @@ class TestPreflight:
             patch("src.db.plans.is_admin_tier_user", return_value=True),
         ):
             d.check_daily_limit_preflight(1)
+
+
+class TestUsageAggregateOnlyCountsApiUsage:
+    def test_rpc_filters_to_api_usage(self):
+        # Refund/clawback rows are negative too; they must not count as usage.
+        assert "transaction_type = 'api_usage'" in _migration()
+
+    def test_default_is_not_enforced(self):
+        # A hardcoded $1/day cap for ALL users must not silently become effective.
+        import importlib
+
+        from src.config import usage_limits
+
+        with patch.dict("os.environ", {}, clear=False):
+            import os
+
+            os.environ.pop("ENFORCE_DAILY_LIMITS", None)
+            assert importlib.reload(usage_limits).ENFORCE_DAILY_LIMITS is False
+        importlib.reload(usage_limits)
