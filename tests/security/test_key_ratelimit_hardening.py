@@ -32,9 +32,9 @@ def test_messages_x_api_key_runs_validate_api_key_security():
         resp = TestClient(app).post(
             "/v1/messages",
             json=body,
-            headers={"x-api-key": "gw_live_abc123", "anthropic-version": "2023-06-01"},
+            headers={"x-api-key": "placeholder-not-a-real-key", "anthropic-version": "2023-06-01"},
         )
-    assert calls.get("key") == "gw_live_abc123"
+    assert calls.get("key") == "placeholder-not-a-real-key"
     assert resp.status_code in (401, 402, 403), resp.text
     chat.assert_not_called()
 
@@ -65,9 +65,8 @@ async def test_allowed_results_are_not_cached_so_every_request_counts():
 
 
 def _cfg(v):
-    return {
-        f: v
-        for f in (
+    return dict.fromkeys(
+        (
             "requests_per_minute",
             "requests_per_hour",
             "requests_per_day",
@@ -76,8 +75,9 @@ def _cfg(v):
             "tokens_per_day",
             "burst_limit",
             "concurrency_limit",
-        )
-    }
+        ),
+        v,
+    )
 
 
 @pytest.mark.asyncio
