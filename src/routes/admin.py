@@ -648,8 +648,9 @@ async def get_users_count(admin_user: dict = Depends(require_admin)):
 async def get_users_stats(
     # Optional filters (same as main endpoint)
     email: str | None = Query(None, description="Filter by email (case-insensitive partial match)"),
-    api_key: str
-    | None = Query(None, description="Filter by API key (case-insensitive partial match)"),
+    api_key: str | None = Query(
+        None, description="Filter by API key (case-insensitive partial match)"
+    ),
     is_active: bool | None = Query(None, description="Filter by active status (true/false)"),
     # Auth
     admin_user: dict = Depends(require_admin),
@@ -864,8 +865,9 @@ async def get_users_stats(
 async def get_all_users_info(
     # Search filters
     email: str | None = Query(None, description="Filter by email (case-insensitive partial match)"),
-    api_key: str
-    | None = Query(None, description="Filter by API key (case-insensitive partial match)"),
+    api_key: str | None = Query(
+        None, description="Filter by API key (case-insensitive partial match)"
+    ),
     is_active: bool | None = Query(None, description="Filter by active status (true/false)"),
     # Pagination
     limit: int = Query(

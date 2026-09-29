@@ -367,14 +367,12 @@ def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix
                         </div>
                     """
 
-                model_items.append(
-                    f"""
+                model_items.append(f"""
                     <li>
                         <span class="model-id">{escape(model_id)}</span>
                         {pricing_html}
                     </li>
-                    """
-                )
+                    """)
             models_html = f"""
             <tr class="model-row" id="models-{escape(gateway_id)}" style="display: none;">
                 <td colspan="6" class="models-cell">
@@ -446,9 +444,7 @@ def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix
                 <div class=\"metric\">{fixed}</div>
                 <div class=\"label\">Auto-fixed</div>
             </div>
-        """.format(
-            fixed=summary["fixed"]
-        )
+        """.format(fixed=summary["fixed"])
 
     raw_json = escape(json.dumps(results, indent=2))
     log_block = escape(log_output.strip()) if log_output else "No log output captured."
@@ -1452,8 +1448,9 @@ async def refresh_gateway_cache(
 
 @router.post("/admin/cache/clear", tags=["admin", "cache"])
 async def clear_all_caches(
-    gateway: str
-    | None = Query(None, description="Specific gateway to clear, or all if not specified"),
+    gateway: str | None = Query(
+        None, description="Specific gateway to clear, or all if not specified"
+    ),
     admin_user: dict = Depends(require_admin),
 ):
     """
@@ -1881,12 +1878,10 @@ def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> 
 @router.post("/admin/api/cache/invalidate", tags=["admin", "cache"])
 async def invalidate_cache(
     background_tasks: BackgroundTasks,
-    gateway: str
-    | None = Query(
+    gateway: str | None = Query(
         None, description="Specific gateway cache to invalidate, or all if not specified"
     ),
-    cache_type: str
-    | None = Query(
+    cache_type: str | None = Query(
         None,
         description="Type of cache to invalidate: 'models', 'providers', 'pricing', or all if not specified",
     ),

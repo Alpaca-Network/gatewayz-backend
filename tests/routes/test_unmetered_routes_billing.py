@@ -49,9 +49,10 @@ class TestEmbeddingsMetering:
 
     def test_zero_balance_gets_402_and_no_upstream_call(self, env):
         embeddings, http = env
-        with patch.object(users_module, "get_user", return_value=BROKE), patch.object(
-            users_module, "deduct_credits"
-        ) as ded:
+        with (
+            patch.object(users_module, "get_user", return_value=BROKE),
+            patch.object(users_module, "deduct_credits") as ded,
+        ):
             r = self._post(embeddings)
         assert r.status_code == 402
         http.post.assert_not_called()
@@ -59,9 +60,11 @@ class TestEmbeddingsMetering:
 
     def test_success_deducts_by_input_tokens_with_idempotent_ref(self, env):
         embeddings, http = env
-        with patch.object(users_module, "get_user", return_value=PAID), patch.object(
-            users_module, "deduct_credits"
-        ) as ded, patch.object(users_module, "record_usage") as rec:
+        with (
+            patch.object(users_module, "get_user", return_value=PAID),
+            patch.object(users_module, "deduct_credits") as ded,
+            patch.object(users_module, "record_usage") as rec,
+        ):
             r = self._post(embeddings)
         assert r.status_code == 200
         ded.assert_called_once()
@@ -80,9 +83,10 @@ class TestEmbeddingsMetering:
     def test_upstream_failure_is_not_charged(self, env):
         embeddings, http = env
         http.post.side_effect = RuntimeError("boom")
-        with patch.object(users_module, "get_user", return_value=PAID), patch.object(
-            users_module, "deduct_credits"
-        ) as ded:
+        with (
+            patch.object(users_module, "get_user", return_value=PAID),
+            patch.object(users_module, "deduct_credits") as ded,
+        ):
             r = self._post(embeddings)
         assert r.status_code == 502
         ded.assert_not_called()
@@ -103,9 +107,10 @@ class TestToolsMetering:
     def test_search_augment_zero_balance_402_no_search(self):
         from src.routes import tools
 
-        with patch.object(users_module, "get_user", return_value=BROKE), patch.object(
-            tools, "execute_tool", new_callable=AsyncMock
-        ) as ex:
+        with (
+            patch.object(users_module, "get_user", return_value=BROKE),
+            patch.object(tools, "execute_tool", new_callable=AsyncMock) as ex,
+        ):
             r = _client(tools.router).post("/tools/search/augment", json={"query": "q"})
         assert r.status_code == 402
         ex.assert_not_called()
@@ -114,10 +119,11 @@ class TestToolsMetering:
         from src.routes import tools
 
         res = ToolResult(success=True, result={"results": [{"title": "t"}]}, metadata={})
-        with patch.object(users_module, "get_user", return_value=PAID), patch.object(
-            users_module, "deduct_credits"
-        ) as ded, patch.object(users_module, "record_usage"), patch.object(
-            tools, "execute_tool", new_callable=AsyncMock, return_value=res
+        with (
+            patch.object(users_module, "get_user", return_value=PAID),
+            patch.object(users_module, "deduct_credits") as ded,
+            patch.object(users_module, "record_usage"),
+            patch.object(tools, "execute_tool", new_callable=AsyncMock, return_value=res),
         ):
             r = _client(tools.router).post("/tools/search/augment", json={"query": "q"})
         assert r.status_code == 200
@@ -129,10 +135,11 @@ class TestToolsMetering:
         from src.routes import tools
 
         res = ToolResult(success=True, result={}, metadata={})
-        with patch.object(users_module, "get_user", return_value=PAID), patch.object(
-            users_module, "deduct_credits"
-        ) as ded, patch.object(users_module, "record_usage"), patch.object(
-            tools, "execute_tool", new_callable=AsyncMock, return_value=res
+        with (
+            patch.object(users_module, "get_user", return_value=PAID),
+            patch.object(users_module, "deduct_credits") as ded,
+            patch.object(users_module, "record_usage"),
+            patch.object(tools, "execute_tool", new_callable=AsyncMock, return_value=res),
         ):
             r = _client(tools.router).post("/tools/execute", json={"name": name, "parameters": {}})
         assert r.status_code == 200
@@ -141,9 +148,10 @@ class TestToolsMetering:
     def test_execute_zero_balance_402(self):
         from src.routes import tools
 
-        with patch.object(users_module, "get_user", return_value=BROKE), patch.object(
-            tools, "execute_tool", new_callable=AsyncMock
-        ) as ex:
+        with (
+            patch.object(users_module, "get_user", return_value=BROKE),
+            patch.object(tools, "execute_tool", new_callable=AsyncMock) as ex,
+        ):
             r = _client(tools.router).post(
                 "/tools/execute", json={"name": "web_search", "parameters": {}}
             )
@@ -154,9 +162,11 @@ class TestToolsMetering:
         from src.routes import tools
 
         res = ToolResult(success=False, error="x", metadata={})
-        with patch.object(users_module, "get_user", return_value=PAID), patch.object(
-            users_module, "deduct_credits"
-        ) as ded, patch.object(tools, "execute_tool", new_callable=AsyncMock, return_value=res):
+        with (
+            patch.object(users_module, "get_user", return_value=PAID),
+            patch.object(users_module, "deduct_credits") as ded,
+            patch.object(tools, "execute_tool", new_callable=AsyncMock, return_value=res),
+        ):
             _client(tools.router).post(
                 "/tools/execute", json={"name": "web_search", "parameters": {}}
             )

@@ -510,11 +510,15 @@ class TestToolsRoute:
         """Funded user; deduction mocked (metering itself is tested in tests/routes)."""
         from src.db import users as users_module
 
-        with patch.object(
-            users_module,
-            "get_user",
-            return_value={"id": 1, "subscription_allowance": 0, "purchased_credits": 10},
-        ), patch.object(users_module, "deduct_credits"), patch.object(users_module, "record_usage"):
+        with (
+            patch.object(
+                users_module,
+                "get_user",
+                return_value={"id": 1, "subscription_allowance": 0, "purchased_credits": 10},
+            ),
+            patch.object(users_module, "deduct_credits"),
+            patch.object(users_module, "record_usage"),
+        ):
             yield
 
     @pytest.fixture
@@ -644,11 +648,15 @@ class TestSearchAugmentRoute:
         """Funded user; deduction mocked (metering itself is tested in tests/routes)."""
         from src.db import users as users_module
 
-        with patch.object(
-            users_module,
-            "get_user",
-            return_value={"id": 1, "subscription_allowance": 0, "purchased_credits": 10},
-        ), patch.object(users_module, "deduct_credits"), patch.object(users_module, "record_usage"):
+        with (
+            patch.object(
+                users_module,
+                "get_user",
+                return_value={"id": 1, "subscription_allowance": 0, "purchased_credits": 10},
+            ),
+            patch.object(users_module, "deduct_credits"),
+            patch.object(users_module, "record_usage"),
+        ):
             yield
 
     @pytest.fixture

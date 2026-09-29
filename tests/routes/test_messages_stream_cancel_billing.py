@@ -12,9 +12,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.adapters.chat.openai import OpenAIChatAdapter
 from src.handlers import chat_handler
 from src.handlers.chat_handler import ChatInferenceHandler
-from src.adapters.chat.openai import OpenAIChatAdapter
 from src.routes import messages as messages_route
 from src.routes.chat_dispatch import _aclose_quiet
 from src.schemas.internal.chat import InternalChatRequest, InternalMessage
