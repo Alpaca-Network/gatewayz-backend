@@ -389,6 +389,7 @@ class TestAdapterRegistry:
             "minimax",
             "xiaomi",
             "meta",
+            "sambanova",
         }
 
     def test_all_entries_satisfy_protocol(self):

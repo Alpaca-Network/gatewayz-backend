@@ -29,6 +29,7 @@ from src.services.providers.moonshot_catalog import fetch_models_from_moonshot
 from src.services.providers.novita_client import fetch_models_from_novita
 from src.services.providers.openai_client import fetch_models_from_openai
 from src.services.providers.openrouter_client import fetch_models_from_openrouter
+from src.services.providers.sambanova_catalog import fetch_models_from_sambanova
 from src.services.providers.together_catalog import fetch_models_from_together
 from src.services.providers.xai_client import fetch_models_from_xai
 from src.services.providers.xiaomi_catalog import fetch_models_from_xiaomi
@@ -77,6 +78,7 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "minimax": fetch_models_from_minimax,
     "xiaomi": fetch_models_from_xiaomi,
     "meta": fetch_models_from_meta,
+    "sambanova": fetch_models_from_sambanova,
 }
 
 

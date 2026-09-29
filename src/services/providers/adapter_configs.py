@@ -92,6 +92,17 @@ ADAPTER_CONFIGS: dict[str, ProviderConfig] = {
         base_url="https://api.deepseek.com/v1",
         api_key_env="DEEPSEEK_API_KEY",
         display_name="DeepSeek",
+        # Catalog stores ids as "deepseek/deepseek-chat"; DeepSeek's API expects
+        # the bare id. Strip the slug prefix before the upstream call.
+        model_prefix="deepseek/",
+    ),
+    "sambanova": ProviderConfig(
+        slug="sambanova",
+        base_url="https://api.sambanova.ai/v1",
+        api_key_env="SAMBANOVA_API_KEY",
+        display_name="SambaNova",
+        # Catalog ids are "sambanova/DeepSeek-V3.1"; the API wants "DeepSeek-V3.1".
+        model_prefix="sambanova/",
     ),
     "moonshot": ProviderConfig(
         slug="moonshot",
