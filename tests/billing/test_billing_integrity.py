@@ -159,16 +159,23 @@ def test_api_keys_uses_config_constants():
 # =========================================================================
 
 
-def test_free_model_zero_cost():
+def test_free_model_zero_cost(monkeypatch):
     """Known-free models (:free suffix AND in the free set) cost $0."""
+    monkeypatch.setattr(
+        "src.services.cache.model_capabilities_cache.is_free_model",
+        lambda m: m.lower() == "google/gemini-2.0-flash-exp:free",
+    )
     from src.services.pricing import calculate_cost
 
     cost = calculate_cost("google/gemini-2.0-flash-exp:free", 10000, 5000)
     assert cost == 0.0
 
 
-def test_spoofed_free_suffix_is_charged():
+def test_spoofed_free_suffix_is_charged(monkeypatch):
     """A bare :free suffix on a non-free model is billed at the normal rate."""
+    monkeypatch.setattr(
+        "src.services.cache.model_capabilities_cache.is_free_model", lambda m: False
+    )
     from src.services.pricing import calculate_cost
 
     assert calculate_cost("openai/gpt-4o:free", 10000, 5000) > 0.0

@@ -1,9 +1,20 @@
 """`:free` is only free when the model is genuinely in the free set, and a `:free`
 request that fails over to a paid provider is billed at the paid price."""
 
+import pytest
+
 from src.handlers.chat_handler import _loss_proof_cost_split
 from src.routes.chat_helpers import is_free_model
 from src.services.pricing import calculate_cost, calculate_cost_async, model_has_pricing
+
+
+@pytest.fixture(autouse=True)
+def _known_free_set(monkeypatch):
+    """Deterministic free set, independent of DB/cache state left by other tests."""
+    monkeypatch.setattr(
+        "src.services.cache.model_capabilities_cache.is_free_model",
+        lambda m: m.lower() == "google/gemini-2.0-flash-exp:free",
+    )
 
 
 def test_genuine_free_model_is_free():
