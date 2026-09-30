@@ -2056,6 +2056,46 @@ class DetailedErrorFactory:
         return ErrorResponse(error=error)
 
     @staticmethod
+    def insufficient_permissions(
+        reason: str | None = None,
+        request_id: str | None = None,
+    ) -> ErrorResponse:
+        """403 because of WHO you are, not what you have paid for.
+
+        The generic-403 arm of the error handler routed every unmatched
+        forbidden condition to plan_limit_reached, so "Administrator privileges
+        required" reached the caller as:
+
+            "You have reached your plan's usage limit. Please upgrade your
+             plan or wait for the limit to reset."
+
+        No plan grants admin and no waiting confers it. That advice is not
+        merely wrong, it is expensive: it sends somebody to buy an upgrade to
+        fix a permissions problem.
+
+        ErrorCode.INSUFFICIENT_PERMISSIONS already existed with the right
+        status, the right category and an honest message. Nothing had to be
+        invented; it simply was never wired to the generic case.
+        """
+        code = ErrorCode.INSUFFICIENT_PERMISSIONS
+        message = reason or get_error_message(code)
+
+        error = ErrorDetail(
+            type=get_error_type(code),
+            message=message,
+            detail=get_error_detail(code),
+            code=code,
+            status=get_status_code(code),
+            request_id=request_id or f"req_{uuid.uuid4().hex[:12]}",
+            timestamp=datetime.utcnow().isoformat() + "Z",
+            suggestions=get_suggestions(code),
+            context=ErrorContext(),
+            docs_url=get_docs_url(code),
+        )
+
+        return ErrorResponse(error=error)
+
+    @staticmethod
     def plan_limit_reached(
         reason: str,
         plan_name: str | None = None,
