@@ -267,18 +267,56 @@ class TestAuthRateLimiter:
 class TestGetClientIP:
     """Tests for get_client_ip helper function"""
 
-    def test_get_ip_from_x_real_ip(self):
-        """Test extracting IP from X-Real-IP header (highest priority)"""
+    def test_default_ignores_spoofable_x_real_ip(self):
+        """Default mode (x-forwarded-for-rightmost) must not honor a client-set X-Real-IP."""
         request = MagicMock()
         request.headers = {
-            "X-Real-IP": "10.20.30.40",
+            "X-Real-IP": "6.6.6.6",
             "X-Forwarded-For": "203.0.113.195, 70.41.3.18",
         }
         request.client = MagicMock()
         request.client.host = "10.0.0.1"
 
-        ip = get_client_ip(request)
-        assert ip == "10.20.30.40"
+        assert get_client_ip(request) == "70.41.3.18"
+
+    def test_x_real_ip_mode(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        request.headers = {"X-Real-IP": "10.20.30.40", "X-Forwarded-For": "1.1.1.1, 2.2.2.2"}
+        request.client = MagicMock()
+        request.client.host = "10.0.0.1"
+        with patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-real-ip"):
+            assert get_client_ip(request) == "10.20.30.40"
+
+    def test_cf_connecting_ip_mode_ignores_other_headers(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        request.headers = {"CF-Connecting-IP": "9.9.9.9", "X-Real-IP": "6.6.6.6"}
+        request.client = MagicMock()
+        request.client.host = "10.0.0.1"
+        with patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "cf-connecting-ip"):
+            assert get_client_ip(request) == "9.9.9.9"
+
+    def test_configured_header_absent_falls_back_to_peer_not_other_headers(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        request.headers = {"X-Forwarded-For": "6.6.6.6", "X-Real-IP": "7.7.7.7"}
+        request.client = MagicMock()
+        request.client.host = "10.0.0.1"
+        with patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "cf-connecting-ip"):
+            assert get_client_ip(request) == "10.0.0.1"
+
+    def test_invalid_mode_uses_default(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        request.headers = {"X-Forwarded-For": "1.1.1.1, 2.2.2.2"}
+        request.client = None
+        with patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "bogus"):
+            assert get_client_ip(request) == "2.2.2.2"
 
     def test_get_ip_from_x_forwarded_for_rightmost(self):
         """Test extracting rightmost IP from X-Forwarded-For header (proxy-added)"""

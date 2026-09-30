@@ -399,6 +399,26 @@ class Config:
     COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS = float(
         _get_env_var("COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS", "0.5")
     )
+    # Spot-check hardening (2026-09): replay length + unsampled auto-verify
+    # threshold are tunable; nodes whose reported completion tokens exceed the
+    # gateway's own count (cap_reported_tokens) this many times in 24h are
+    # flagged and lose 24h-aging auto-verification.
+    COMMUNITY_SPOTCHECK_REPLAY_MAX_TOKENS = int(
+        _get_env_var("COMMUNITY_SPOTCHECK_REPLAY_MAX_TOKENS", "512")
+    )
+    COMMUNITY_SPOTCHECK_UNSAMPLED_MAX_FAILURE_RATE = float(
+        _get_env_var("COMMUNITY_SPOTCHECK_UNSAMPLED_MAX_FAILURE_RATE", "0.05")
+    )
+    COMMUNITY_OVERREPORT_FLAG_THRESHOLD = int(
+        _get_env_var("COMMUNITY_OVERREPORT_FLAG_THRESHOLD", "3")
+    )
+    # Which header carries the real client IP. One of: x-real-ip |
+    # x-forwarded-for-rightmost | cf-connecting-ip. See
+    # src/services/auth_rate_limiting.get_client_ip for the topology rationale.
+    TRUSTED_CLIENT_IP_HEADER = (
+        _get_env_var("TRUSTED_CLIENT_IP_HEADER", "x-forwarded-for-rightmost")
+        or "x-forwarded-for-rightmost"
+    ).lower()
     COMMUNITY_SETTLEMENT_STUCK_HOURS = int(_get_env_var("COMMUNITY_SETTLEMENT_STUCK_HOURS", "2"))
     COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS = int(
         _get_env_var("COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS", "48")

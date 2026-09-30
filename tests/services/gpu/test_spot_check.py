@@ -600,3 +600,131 @@ async def test_run_spot_check_verification_sleeps_between_replays(
 
     assert mock_sleep.call_count == 2
     mock_sleep.assert_called_with(0.5)
+
+
+# ---------------------------------------------------------------------------
+# Hardening: configurable replay length, over-report flagging
+# ---------------------------------------------------------------------------
+
+
+def _replay_setup(mock_get_stash, mock_get_node, mock_get_adapter, mock_get_ref, reply):
+    mock_get_stash.return_value = {"messages": [{"role": "user", "content": "hi"}], "model": "m"}
+    mock_get_node.return_value = {"id": 7}
+    adapter = MagicMock()
+    adapter.request = MagicMock(return_value=reply)
+    mock_get_adapter.return_value = adapter
+    mock_get_ref.return_value = None
+    return adapter
+
+
+@patch("src.services.gpu.spot_check._get_reference_request_fn")
+@patch("src.services.gpu.spot_check._get_node_adapter")
+@patch("src.services.gpu.spot_check.get_node")
+@patch("src.services.gpu.spot_check.get_stashed_prompt")
+@pytest.mark.asyncio
+async def test_replay_length_covers_claimed_completion_up_to_configured_cap(
+    mock_get_stash, mock_get_node, mock_get_adapter, mock_get_ref, sb
+):
+    adapter = _replay_setup(
+        mock_get_stash,
+        mock_get_node,
+        mock_get_adapter,
+        mock_get_ref,
+        _raw_response("x " * 300, 300),
+    )
+    outcome = await spot_check._verify_sampled_row(_work_row(completion_tokens=300))
+    assert outcome == "verified"  # old 64-token cap would have failed 64 vs 300
+    assert adapter.request.call_args.kwargs["max_tokens"] >= 300
+
+
+@patch("src.services.gpu.spot_check._get_reference_request_fn")
+@patch("src.services.gpu.spot_check._get_node_adapter")
+@patch("src.services.gpu.spot_check.get_node")
+@patch("src.services.gpu.spot_check.get_stashed_prompt")
+@pytest.mark.asyncio
+async def test_replay_cap_is_env_configurable_and_truncation_is_expected(
+    mock_get_stash, mock_get_node, mock_get_adapter, mock_get_ref, sb
+):
+    adapter = _replay_setup(
+        mock_get_stash,
+        mock_get_node,
+        mock_get_adapter,
+        mock_get_ref,
+        _raw_response("x " * 100, 100),
+    )
+    with patch.object(spot_check.Config, "COMMUNITY_SPOTCHECK_REPLAY_MAX_TOKENS", 100):
+        outcome = await spot_check._verify_sampled_row(_work_row(completion_tokens=5000))
+    assert adapter.request.call_args.kwargs["max_tokens"] == 100
+    assert outcome == "verified"
+
+
+@patch("src.services.gpu.spot_check._get_reference_request_fn")
+@patch("src.services.gpu.spot_check._get_node_adapter")
+@patch("src.services.gpu.spot_check.get_node")
+@patch("src.services.gpu.spot_check.get_stashed_prompt")
+@pytest.mark.asyncio
+async def test_replay_fails_node_that_claimed_far_more_than_it_produces(
+    mock_get_stash, mock_get_node, mock_get_adapter, mock_get_ref, sb
+):
+    _replay_setup(
+        mock_get_stash, mock_get_node, mock_get_adapter, mock_get_ref, _raw_response("x " * 40, 40)
+    )
+    outcome = await spot_check._verify_sampled_row(_work_row(completion_tokens=300))
+    assert outcome == "failed"
+
+
+@patch("src.services.gpu.spot_check.is_overreport_flagged", return_value=True)
+@patch("src.services.gpu.spot_check.node_verification_stats_since", return_value=(0, 100))
+def test_resolve_aged_row_skipped_for_overreporting_node(mock_stats, mock_flag, sb):
+    assert spot_check._resolve_aged_row(_work_row(node_id=7)) == "skipped"
+
+
+@patch("src.services.gpu.spot_check.node_verification_stats_since", return_value=(8, 100))
+def test_unsampled_failure_rate_threshold_is_configurable(mock_stats, sb):
+    with patch.object(spot_check.Config, "COMMUNITY_SPOTCHECK_UNSAMPLED_MAX_FAILURE_RATE", 0.10):
+        assert spot_check._resolve_aged_row(_work_row(node_id=7)) == "verified"
+    with patch.object(spot_check.Config, "COMMUNITY_SPOTCHECK_UNSAMPLED_MAX_FAILURE_RATE", 0.05):
+        assert spot_check._resolve_aged_row(_work_row(node_id=7)) == "skipped"
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.d = {}
+        self.ttl = {}
+
+    def incr(self, k):
+        self.d[k] = int(self.d.get(k, 0)) + 1
+        return self.d[k]
+
+    def expire(self, k, s):
+        self.ttl[k] = s
+
+    def get(self, k):
+        return self.d.get(k)
+
+
+def test_overreport_flags_after_threshold_and_penalizes_once(sb):
+    from src.services.gpu import overreport
+
+    r = _FakeRedis()
+    with (
+        patch("src.services.gpu.overreport.get_redis_client", return_value=r),
+        patch("src.db.gpu_payouts.adjust_health_score") as mock_adjust,
+        patch.object(overreport.Config, "COMMUNITY_OVERREPORT_FLAG_THRESHOLD", 3),
+    ):
+        for _ in range(2):
+            overreport.record_overreport(7)
+        assert overreport.is_overreport_flagged(7) is False
+        overreport.record_overreport(7)
+        overreport.record_overreport(7)
+        assert overreport.is_overreport_flagged(7) is True
+        mock_adjust.assert_called_once_with(7, -20)
+    assert r.ttl["gpu_overreport:7"] == 24 * 3600
+
+
+def test_overreport_no_redis_never_flags(sb):
+    from src.services.gpu import overreport
+
+    with patch("src.services.gpu.overreport.get_redis_client", return_value=None):
+        assert overreport.record_overreport(7) == 0
+        assert overreport.is_overreport_flagged(7) is False

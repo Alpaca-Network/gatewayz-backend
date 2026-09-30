@@ -185,10 +185,18 @@ def adapter_for_node(node: dict) -> OpenAICompatAdapter:
         import httpx
         from openai import OpenAI
 
+        from src.utils.ssrf_guard import PinnedPublicIPTransport
+
+        # PinnedPublicIPTransport resolves + validates + pins the IP per request,
+        # so a DNS re-point between _assert_endpoint_public and connect can't win.
         return OpenAI(
             base_url=endpoint_url,
             api_key=plaintext_key or "unused",
-            http_client=httpx.Client(follow_redirects=False, timeout=httpx.Timeout(600.0)),
+            http_client=httpx.Client(
+                follow_redirects=False,
+                timeout=httpx.Timeout(600.0),
+                transport=PinnedPublicIPTransport(),
+            ),
         )
 
     cfg = ProviderConfig(
@@ -218,6 +226,21 @@ def _assert_endpoint_public(endpoint_url: str) -> None:
     except SSRFBlockedError as e:
         logger.warning("community node endpoint blocked by SSRF guard: %s", e.reason)
         raise HTTPException(status_code=502, detail="community_node_endpoint_blocked") from e
+
+
+def _reraise_if_ssrf_blocked(exc: BaseException) -> None:
+    """The pinned transport raises SSRFBlockedError at connect time; the OpenAI SDK
+    wraps it as APIConnectionError. Surface it as the same 502 as the pre-check."""
+    from src.utils.ssrf_guard import SSRFBlockedError
+
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, SSRFBlockedError):
+            logger.warning("community node connect blocked by SSRF guard: %s", cur.reason)
+            raise HTTPException(status_code=502, detail="community_node_endpoint_blocked") from cur
+        cur = cur.__cause__ or cur.__context__
 
 
 def cap_reported_tokens(
@@ -291,16 +314,24 @@ def _call_node(
         # the client, reused here for the *outbound* leg to the node.
         extra_headers[_REQUEST_ID_HEADER] = billing_ref
 
-    if stream:
-        raw_stream = client.chat.completions.create(
-            model=resolved, messages=messages, stream=True, extra_headers=extra_headers, **kwargs
-        )
-        return raw_stream, {}
+    try:
+        if stream:
+            raw_stream = client.chat.completions.create(
+                model=resolved,
+                messages=messages,
+                stream=True,
+                extra_headers=extra_headers,
+                **kwargs,
+            )
+            return raw_stream, {}
 
-    raw_response = client.chat.completions.with_raw_response.create(
-        model=resolved, messages=messages, extra_headers=extra_headers, **kwargs
-    )
-    return raw_response.parse(), dict(raw_response.headers)
+        raw_response = client.chat.completions.with_raw_response.create(
+            model=resolved, messages=messages, extra_headers=extra_headers, **kwargs
+        )
+        return raw_response.parse(), dict(raw_response.headers)
+    except Exception as e:
+        _reraise_if_ssrf_blocked(e)
+        raise
 
 
 def _record_receipt(
@@ -325,6 +356,10 @@ def _record_receipt(
     prompt_tokens, completion_tokens = cap_reported_tokens(
         reported_prompt, reported_completion, messages, response_text
     )
+    if reported_completion > completion_tokens:
+        from src.services.gpu.overreport import record_overreport
+
+        record_overreport(node.get("id"))
     if (prompt_tokens, completion_tokens) != (reported_prompt, reported_completion):
         logger.warning(
             "community node %s: reported tokens (%s, %s) capped to gateway-counted (%s, %s)",

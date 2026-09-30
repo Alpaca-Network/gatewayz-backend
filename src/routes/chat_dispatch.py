@@ -38,6 +38,7 @@ from src.services.provider_failover import (  # noqa: F401
     enforce_model_failover_rules,
     filter_by_circuit_breaker,
     map_provider_error,
+    restrict_chain_for_zero_balance_free_model,
     should_failover,
 )
 from src.utils.ai_tracing import AIRequestType, AITracer  # noqa: F401
@@ -396,6 +397,13 @@ async def dispatch_streaming(
                         original_model, extended_chain, allow_payment_failover=True
                     )
                     extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
+                    extended_chain = restrict_chain_for_zero_balance_free_model(
+                        original_model,
+                        extended_chain,
+                        user=user,
+                        is_anonymous=is_anonymous,
+                        raise_if_empty=False,
+                    )
                     # Find providers we haven't tried yet
                     new_providers = [p for p in extended_chain if p not in provider_chain]
                     if new_providers:
@@ -725,6 +733,13 @@ async def dispatch_non_streaming(
                         original_model, extended_chain, allow_payment_failover=True
                     )
                     extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
+                    extended_chain = restrict_chain_for_zero_balance_free_model(
+                        original_model,
+                        extended_chain,
+                        user=user,
+                        is_anonymous=is_anonymous,
+                        raise_if_empty=False,
+                    )
                     # Find providers we haven't tried yet
                     new_providers = [p for p in extended_chain if p not in provider_chain]
                     if new_providers:

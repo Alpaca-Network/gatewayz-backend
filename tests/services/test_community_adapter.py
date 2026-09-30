@@ -563,3 +563,90 @@ def test_client_does_not_follow_redirects(monkeypatch):
     ca.adapter_for_node(NODE)._get_client()
     assert isinstance(seen["http_client"], httpx.Client)
     assert seen["http_client"].follow_redirects is False
+
+
+def test_client_uses_ip_pinned_transport(monkeypatch):
+    from src.utils.ssrf_guard import PinnedPublicIPTransport
+
+    seen = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+    monkeypatch.setattr(ca, "_decrypt_node_key", lambda enc: "k")
+    ca.clear_adapter_cache()
+    ca.adapter_for_node(NODE)._get_client()
+    assert isinstance(seen["http_client"]._transport, PinnedPublicIPTransport)
+
+
+def test_connect_time_ssrf_block_maps_to_502(monkeypatch):
+    from src.utils.ssrf_guard import SSRFBlockedError
+
+    _install_fake_gpu_module(monkeypatch, nodes=[NODE])
+    _install_fake_db_gpu_work(monkeypatch)
+    monkeypatch.setattr(ca, "_decrypt_node_key", lambda enc: "k")
+
+    def _create(**kw):
+        try:
+            raise SSRFBlockedError("private_address_blocked")
+        except SSRFBlockedError as inner:
+            raise RuntimeError("Connection error.") from inner
+
+    fake = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=_create,
+                with_raw_response=SimpleNamespace(create=_create),
+            )
+        )
+    )
+    monkeypatch.setattr(ca.OpenAICompatAdapter, "_get_client", lambda self: fake)
+    with pytest.raises(HTTPException) as ei:
+        ca.community_request(
+            [{"role": "user", "content": "hi"}], "community/m", _gatewayz_billing_ref="r"
+        )
+    assert ei.value.detail == "community_node_endpoint_blocked"
+
+
+def test_receipt_records_overreport_when_reported_exceeds_gateway_count(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "src.services.gpu.overreport.record_overreport", lambda nid: calls.append(nid)
+    )
+    _install_fake_db_gpu_work(monkeypatch)
+    ca._record_receipt(
+        node=NODE,
+        model_suffix="m",
+        messages=[{"role": "user", "content": "hi"}],
+        response_text="ok",
+        prompt_tokens=1,
+        completion_tokens=5000,
+        latency_ms=1,
+        status="completed",
+        response_headers=None,
+        billing_ref="r",
+    )
+    assert calls == ["node-1"]
+
+
+def test_receipt_honest_counts_do_not_record_overreport(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "src.services.gpu.overreport.record_overreport", lambda nid: calls.append(nid)
+    )
+    _install_fake_db_gpu_work(monkeypatch)
+    ca._record_receipt(
+        node=NODE,
+        model_suffix="m",
+        messages=[{"role": "user", "content": "hi"}],
+        response_text="the answer",
+        prompt_tokens=1,
+        completion_tokens=0,
+        latency_ms=1,
+        status="completed",
+        response_headers=None,
+        billing_ref="r",
+    )
+    assert calls == []
