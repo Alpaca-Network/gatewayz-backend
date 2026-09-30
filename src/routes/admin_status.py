@@ -36,6 +36,7 @@ from src.routes.admin_wayz import (
 from src.security.deps import require_admin_or_env_key
 from src.services.integrations_health import check_all
 from src.services.privy_migration import migration_counts
+from src.services.provider_alerting import ops_alerts_status
 from src.services.provider_budget_alerts import provider_budget_status
 from src.services.secrets_registry import SECRET_NAMES, secret_ages
 
@@ -120,6 +121,7 @@ async def get_admin_status(
         "wayz": _safe_block(lambda: _build_wayz_block(jobs_block), "wayz"),
         "migration": _safe_block(_build_migration_block, "migration"),
         "provider_budget": _safe_block(_build_provider_budget_block, "provider_budget"),
+        "ops_alerts": _safe_block(ops_alerts_status, "ops_alerts"),
     }
 
     return {"success": True, "data": data}

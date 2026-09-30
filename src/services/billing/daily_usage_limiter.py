@@ -9,6 +9,7 @@ from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.config.usage_limits import (
+    DAILY_LIMIT_APPLIES_TO,
     DAILY_LIMIT_RESET_HOUR,
     DAILY_USAGE_CRITICAL_THRESHOLD,
     DAILY_USAGE_LIMIT,
@@ -102,6 +103,40 @@ def get_daily_usage(user_id: int) -> float:
         raise DailyUsageUnavailable(str(e)) from e
 
 
+def _cap_applies_to_user(user_id: int) -> bool:
+    """Whether the daily cap covers this user under DAILY_LIMIT_APPLIES_TO.
+
+    ``all`` -> always. ``free_only`` -> only users with purchased_credits <= 0 and
+    no active paid subscription.
+
+    Raises:
+        DailyUsageUnavailable: the user row could not be read (callers pick their
+        failure policy, same as a usage-lookup failure).
+    """
+    if DAILY_LIMIT_APPLIES_TO == "all":
+        return True
+    try:
+        rows = (
+            get_supabase_client()
+            .table("users")
+            .select("purchased_credits, subscription_status")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        logger.error(f"Failed to read user {user_id} for daily-limit scope: {e}")
+        raise DailyUsageUnavailable(str(e)) from e
+    if not rows:
+        return True  # unknown user: treat as free
+    row = rows[0]
+    purchased = float(row.get("purchased_credits") or 0)
+    paid_sub = str(row.get("subscription_status") or "").lower() == "active"
+    return not (purchased > 0 or paid_sub)
+
+
 def check_daily_limit_preflight(user_id: int) -> None:
     """
     Cheap PRE-inference gate: refuse before spending upstream money.
@@ -128,6 +163,8 @@ def check_daily_limit_preflight(user_id: int) -> None:
     except Exception as e:  # unknown tier -> treat as normal user
         logger.warning(f"Admin check failed in daily-limit preflight: {e}")
 
+    if not _cap_applies_to_user(user_id):  # may raise DailyUsageUnavailable (fail closed)
+        return
     used = get_daily_usage(user_id)  # may raise DailyUsageUnavailable (fail closed)
     if used >= DAILY_USAGE_LIMIT:
         raise DailyUsageLimitExceeded(
@@ -165,6 +202,15 @@ def check_daily_usage_limit(user_id: int, requested_amount: float) -> dict[str, 
         }
 
     try:
+        if not _cap_applies_to_user(user_id):
+            return {
+                "allowed": True,
+                "remaining": float("inf"),
+                "used": 0.0,
+                "limit": float("inf"),
+                "reset_time": get_daily_reset_time(),
+                "warning_level": "ok",
+            }
         current_usage = get_daily_usage(user_id)
         remaining = DAILY_USAGE_LIMIT - current_usage
         usage_percent = current_usage / DAILY_USAGE_LIMIT if DAILY_USAGE_LIMIT > 0 else 0
