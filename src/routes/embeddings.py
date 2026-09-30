@@ -52,14 +52,17 @@ MODEL_PREFIX_ROUTING: tuple[tuple[str, str], ...] = (
 
 # USD per 1M input tokens (embeddings have no output tokens). Keyed by the model
 # name with the provider namespace stripped, lower-cased. Verified 2026-09-29
-# against OpenAI (3-small $0.02, 3-large $0.13, ada-002 $0.10) and DeepInfra
-# (bge-large $0.01, bge-base $0.005, all-MiniLM-L6-v2 $0.005) list prices;
-# billed at provider cost. Together models are not in the table and use the
-# fallback (well above Together's ~$0.008/M embedding rates).
+# against OpenAI (3-small $0.02, 3-large $0.13, ada-002 $0.10), DeepInfra
+# (bge-large $0.01, bge-base $0.005, all-MiniLM-L6-v2 $0.005) and Together
+# (multilingual-e5-large-instruct $0.02, together.ai/models page) list prices.
+# Billed at provider cost x Config.EMBEDDING_MARGIN. Together currently offers no
+# serverless embedding models (m2-bert etc. are "launching soon"; bge/gte have no
+# published Together price), so those fall to the conservative fallback.
 EMBEDDING_PRICE_PER_M_TOKENS: dict[str, float] = {
     "text-embedding-3-small": 0.02,
     "text-embedding-3-large": 0.13,
     "text-embedding-ada-002": 0.10,
+    "intfloat/multilingual-e5-large-instruct": 0.02,
     "baai/bge-large-en-v1.5": 0.01,
     "baai/bge-base-en-v1.5": 0.005,
     "sentence-transformers/all-minilm-l6-v2": 0.005,
@@ -77,7 +80,8 @@ def embedding_cost(model: str, input_tokens: int) -> float:
             name = name[len(prefix) :]
             break
     price = EMBEDDING_PRICE_PER_M_TOKENS.get(name, EMBEDDING_FALLBACK_PRICE_PER_M_TOKENS)
-    return max(0, input_tokens) * price / 1_000_000
+    margin = max(1.0, Config.EMBEDDING_MARGIN)
+    return max(0, input_tokens) * price * margin / 1_000_000
 
 
 def estimate_input_tokens(value: Any) -> int:

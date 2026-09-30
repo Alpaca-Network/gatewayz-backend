@@ -714,17 +714,22 @@ class Config:
     # Tavily Web Search Configuration
     TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
 
-    # Flat per-call charge (USD) for paid server-side tools under /v1/tools.
-    # Must stay > 0: an unmetered paid tool is a provider-spend leak.
-    # Web search: Tavily pay-as-you-go $0.008/credit; basic=1 credit, advanced=2
-    # ($0.016). The flat charge covers the advanced worst case.
-    TOOL_COST_WEB_SEARCH_USD = float(os.environ.get("TOOL_COST_WEB_SEARCH_USD", "0.02"))
-    # TTS: Chatterbox (Resemble) ~ $0.025 per 1k chars (third-party listing, not
-    # verified against Resemble's own rate card); max input is 5000 chars
-    # => $0.125 worst case, so the flat charge covers a maximum-length request.
-    TOOL_COST_TTS_USD = float(os.environ.get("TOOL_COST_TTS_USD", "0.13"))
+    # Flat per-call charge for paid server-side tools under /v1/tools =
+    # provider cost x TOOL_MARGIN. Must stay > 0: an unmetered paid tool is a
+    # provider-spend leak. Values below are PROVIDER cost (verified 2026-09-29).
+    TOOL_MARGIN = float(os.environ.get("TOOL_MARGIN", "1.2"))
+    # Web search: Tavily pay-as-you-go $0.008/credit (docs.tavily.com/documentation/api-credits);
+    # basic=1 credit, advanced=2 ($0.016). Flat charge covers the advanced worst case.
+    TOOL_COST_WEB_SEARCH_USD = float(os.environ.get("TOOL_COST_WEB_SEARCH_USD", "0.016"))
+    # TTS: the tool calls Resemble AI's hosted API (api.resemble.ai/v2/synthesize);
+    # Resemble publishes no TTS rate card we could verify. Highest public hosted
+    # Chatterbox rate found: fal.ai Chatterbox HD $0.04/1k chars. Max input is
+    # 5000 chars => $0.20 worst case, so the flat charge covers a max-length request.
+    TOOL_COST_TTS_USD = float(os.environ.get("TOOL_COST_TTS_USD", "0.20"))
     # Unknown tools: at least the most expensive priced search call.
-    TOOL_COST_DEFAULT_USD = float(os.environ.get("TOOL_COST_DEFAULT_USD", "0.02"))
+    TOOL_COST_DEFAULT_USD = float(os.environ.get("TOOL_COST_DEFAULT_USD", "0.016"))
+    # Margin applied to embedding provider list prices (routes/embeddings.py).
+    EMBEDDING_MARGIN = float(os.environ.get("EMBEDDING_MARGIN", "1.2"))
 
     # Alibaba Cloud Configuration
     ALIBABA_CLOUD_API_KEY = os.environ.get("ALIBABA_CLOUD_API_KEY")

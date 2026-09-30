@@ -30,13 +30,16 @@ router = APIRouter(prefix="/tools", tags=["tools"])
 
 
 def tool_cost_usd(tool_name: str) -> float:
-    """Flat per-call USD charge for a tool. Always > 0 (unknown tools use the default)."""
+    """Flat per-call USD charge for a tool (provider cost x TOOL_MARGIN). Always > 0 (unknown tools use the default)."""
     costs = {
         "web_search": Config.TOOL_COST_WEB_SEARCH_USD,
         "text_to_speech": Config.TOOL_COST_TTS_USD,
     }
     cost = costs.get(tool_name, Config.TOOL_COST_DEFAULT_USD)
-    return cost if cost > 0 else 0.02
+    if cost <= 0:
+        cost = 0.016
+    margin = Config.TOOL_MARGIN if Config.TOOL_MARGIN >= 1.0 else 1.0
+    return cost * margin
 
 
 async def _charge_tool(api_key: str, user: dict, tool_name: str, request: Request | None) -> None:
