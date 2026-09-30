@@ -170,6 +170,7 @@ class TestPreflight:
         from src.services.billing import daily_usage_limiter as d
 
         monkeypatch.setattr(d, "ENFORCE_DAILY_LIMITS", True)
+        monkeypatch.setattr(d, "DAILY_LIMIT_APPLIES_TO", "all")  # legacy scope
 
     def test_blocks_when_at_limit(self):
         from src.services.billing import daily_usage_limiter as d

@@ -124,6 +124,12 @@ def _flush(provider: str, reason: str, sample_model: str | None, count: int) -> 
             sample_model,
             count,
         )
+        try:
+            from src.services.provider_alerting import alert_provider_budget_exhausted
+
+            alert_provider_budget_exhausted(provider, reason, sample_model)
+        except Exception:  # noqa: BLE001 - alerting must never break the flush
+            logger.warning("Provider budget ops alert failed", exc_info=True)
     except Exception as e:
         # Put the occurrences back so the next detection retries them instead of losing
         # the count to a transient Supabase failure. Also reset last_flush_at so the next

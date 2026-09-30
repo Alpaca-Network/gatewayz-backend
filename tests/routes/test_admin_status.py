@@ -102,6 +102,7 @@ class TestResponseShape:
             "secrets",
             "wayz",
             "provider_budget",
+            "ops_alerts",
         ):
             assert key in data
 
