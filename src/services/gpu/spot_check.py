@@ -28,6 +28,7 @@ import asyncio
 import difflib
 import json
 import logging
+import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -45,6 +46,7 @@ from src.db.gpu_payouts import (
     void_earning_for_work,
 )
 from src.services.gpu.earnings import record_earning_for_verified_work
+from src.services.gpu.overreport import is_overreport_flagged
 from src.services.providers.community_adapter import adapter_for_node
 
 logger = logging.getLogger(__name__)
@@ -53,9 +55,7 @@ _STASH_KEY_PREFIX = "gpu_spotcheck:"
 _STASH_TTL_SECONDS = 1200  # 20 min (spec §5)
 _SAMPLED_LOOKBACK_HOURS = 1  # "last hour" per spec §5
 _UNSAMPLED_AGE_HOURS = 24
-_UNSAMPLED_MAX_DAILY_FAILURE_RATE = 0.05  # spec §5
 
-_REPLAY_MAX_TOKENS_CAP = 64
 _SIMILARITY_THRESHOLD = 0.8
 _TOKEN_COUNT_TOLERANCE = 0.25
 _MAX_FAILS_BEFORE_DISABLE = 3
@@ -254,11 +254,16 @@ async def _verify_sampled_row(work: dict) -> str:
         return "skipped"
 
     claimed_tokens = work.get("completion_tokens") or 0
-    max_tokens = (
-        min(_REPLAY_MAX_TOKENS_CAP, claimed_tokens)
-        if claimed_tokens > 0
-        else _REPLAY_MAX_TOKENS_CAP
-    )
+    replay_cap = max(1, int(Config.COMMUNITY_SPOTCHECK_REPLAY_MAX_TOKENS))
+    if claimed_tokens > 0:
+        # Replay long enough to compare against the claimed length: allow one token
+        # past the tolerance band so over-long output is detectable, bounded by the cap.
+        max_tokens = min(replay_cap, math.ceil(claimed_tokens * (1 + _TOKEN_COUNT_TOLERANCE)) + 1)
+        # Past the cap the replay is truncated, so a truthful node yields ~cap tokens.
+        expected_tokens = min(claimed_tokens, replay_cap)
+    else:
+        max_tokens = replay_cap
+        expected_tokens = 0
     messages = stash["messages"]
     model = stash.get("model") or work.get("model")
 
@@ -269,7 +274,7 @@ async def _verify_sampled_row(work: dict) -> str:
 
     if not node_text.strip():
         return "failed"
-    if not _within_tolerance(node_completion_tokens, claimed_tokens, _TOKEN_COUNT_TOLERANCE):
+    if not _within_tolerance(node_completion_tokens, expected_tokens, _TOKEN_COUNT_TOLERANCE):
         return "failed"
 
     reference_fn = _get_reference_request_fn()
@@ -279,8 +284,8 @@ async def _verify_sampled_row(work: dict) -> str:
             reference_text, _ = reference_reply
             similarity = difflib.SequenceMatcher(
                 None,
-                _first_n_tokens(node_text, _REPLAY_MAX_TOKENS_CAP),
-                _first_n_tokens(reference_text, _REPLAY_MAX_TOKENS_CAP),
+                _first_n_tokens(node_text, replay_cap),
+                _first_n_tokens(reference_text, replay_cap),
             ).ratio()
             if similarity < _SIMILARITY_THRESHOLD:
                 return "failed"
@@ -343,10 +348,16 @@ def _resolve_aged_row(work: dict) -> str:
     we have no evidence this specific row was bad, only that the node's
     recent track record is poor."""
     node_id = work.get("node_id")
+    if node_id is not None and is_overreport_flagged(node_id):
+        return "skipped"  # repeatedly over-reported tokens: no auto-verification
     since = (datetime.now(UTC) - timedelta(hours=_UNSAMPLED_AGE_HOURS)).isoformat()
     failed, total = node_verification_stats_since(node_id, since) if node_id is not None else (0, 0)
     failure_rate = (failed / total) if total > 0 else 0.0
-    return "verified" if failure_rate < _UNSAMPLED_MAX_DAILY_FAILURE_RATE else "skipped"
+    return (
+        "verified"
+        if failure_rate < Config.COMMUNITY_SPOTCHECK_UNSAMPLED_MAX_FAILURE_RATE
+        else "skipped"
+    )
 
 
 def _resolve_verified_aged_row_outcome(work: dict) -> str:

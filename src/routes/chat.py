@@ -333,6 +333,7 @@ from src.routes.chat_context import inject_conversation_history, persist_convers
 from src.routes.chat_request import prepare_upstream_request
 from src.routes.chat_routing import resolve_auto_routed_model, resolve_model_routing
 from src.routes.chat_streaming import stream_generator  # noqa: F401
+from src.services.provider_failover import restrict_chain_for_zero_balance_free_model
 
 # Log route registration for debugging
 logger.info("📍 Registering /chat/completions endpoint")
@@ -825,6 +826,10 @@ async def chat_completions(
         # === 2.6) Prepare upstream request (params + provider + failover chain) ===
         model, provider, provider_chain, optional = await prepare_upstream_request(
             req, original_model, is_code_route, tracker
+        )
+        # A $0-balance/anonymous caller on a free model must never fail over to a paid provider.
+        provider_chain = restrict_chain_for_zero_balance_free_model(
+            model, provider_chain, user=user, is_anonymous=is_anonymous
         )
 
         # === 2.5) Await web search results if task was started (runs in parallel, minimal added latency) ===

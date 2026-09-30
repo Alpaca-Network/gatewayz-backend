@@ -335,40 +335,46 @@ async def check_auth_rate_limit(
     return await limiter.check_rate_limit(identifier, limit_type)
 
 
+_CLIENT_IP_HEADER_MODES = ("x-real-ip", "x-forwarded-for-rightmost", "cf-connecting-ip")
+_DEFAULT_CLIENT_IP_HEADER = "x-forwarded-for-rightmost"
+
+
 def get_client_ip(request) -> str:
     """
-    Get the real client IP address from a FastAPI request.
+    Get the client IP address from a FastAPI request.
 
-    Security considerations:
-    - X-Forwarded-For can be spoofed by attackers
-    - Railway proxy adds the real client IP as the rightmost entry
-    - We use a combination approach: prefer X-Real-IP (set by trusted proxy),
-      then rightmost X-Forwarded-For entry, then direct connection
+    Exactly ONE header is trusted, chosen by Config.TRUSTED_CLIENT_IP_HEADER
+    (x-real-ip | x-forwarded-for-rightmost | cf-connecting-ip). Consulting several
+    headers in order lets a client spoof whichever one the edge does not overwrite,
+    so there is no cascade: if the configured header is absent we fall back to the
+    socket peer, never to another client-controllable header.
 
-    Args:
-        request: FastAPI Request object
-
-    Returns:
-        Client IP address string
+    Default: x-forwarded-for-rightmost. Prod (api.gatewayz.ai) is served directly
+    by Railway's edge (server: railway-hikari, no Cloudflare headers), whose proxy
+    appends the connecting peer to X-Forwarded-For, so the rightmost entry is
+    edge-written and unspoofable. Railway staff have documented X-Real-IP being
+    set to the CDN edge IP when their CDN path is active, so it is not the default.
     """
-    # First check X-Real-IP (set by trusted proxies like nginx)
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
+    from src.config.config import Config
 
-    # Check X-Forwarded-For header
-    # Format: "client, proxy1, proxy2" - the rightmost non-private IP is most reliable
-    # as proxies append to this header (harder to spoof the rightmost entry)
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # Split and get all IPs in the chain
-        ips = [ip.strip() for ip in forwarded_for.split(",")]
+    mode = (getattr(Config, "TRUSTED_CLIENT_IP_HEADER", None) or "").lower()
+    if mode not in _CLIENT_IP_HEADER_MODES:
+        mode = _DEFAULT_CLIENT_IP_HEADER
 
-        # For Railway: take the rightmost IP (added by Railway's proxy)
-        # This is harder to spoof as the attacker would need to control the proxy
-        if len(ips) >= 1:
-            # Use rightmost IP - this is what Railway's proxy adds
-            return ips[-1]
+    if mode == "x-real-ip":
+        value = request.headers.get("X-Real-IP")
+        if value and value.strip():
+            return value.strip()
+    elif mode == "cf-connecting-ip":
+        value = request.headers.get("CF-Connecting-IP")
+        if value and value.strip():
+            return value.strip()
+    else:
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
+            if ips:
+                return ips[-1]
 
     # Fall back to direct connection IP
     return request.client.host if request.client else "unknown"

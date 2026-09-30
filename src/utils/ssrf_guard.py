@@ -20,6 +20,8 @@ import ipaddress
 import socket
 from urllib.parse import urlsplit
 
+import httpx
+
 # 100.64.0.0/10 -- Carrier-Grade NAT (RFC 6598). ipaddress doesn't classify
 # this as private/reserved, so it needs an explicit check.
 _CGNAT_RANGE = ipaddress.ip_network("100.64.0.0/10")
@@ -113,3 +115,33 @@ def assert_public_https_url(url: str) -> str:
         raise SSRFBlockedError("missing_hostname")
 
     return resolve_public_ip(parts.hostname)
+
+
+class PinnedPublicIPTransport(httpx.BaseTransport):
+    """httpx transport that closes the DNS-rebind window on every request.
+
+    Per request: resolve the hostname ONCE, require every address to be public,
+    then connect to that exact IP literal. The original hostname is preserved
+    as the Host header and as the TLS SNI/verification name, so certificates
+    still validate against the operator's hostname. Nothing re-resolves DNS
+    between the check and the connect.
+    """
+
+    def __init__(self, **transport_kwargs):
+        self._inner = httpx.HTTPTransport(**transport_kwargs)
+
+    def handle_request(self, request):
+        host = request.url.host
+        ip = resolve_public_ip(host)  # raises SSRFBlockedError
+        request.extensions = {**request.extensions, "sni_hostname": host.encode("ascii")}
+        request.url = request.url.copy_with(host=ip.split("%", 1)[0])
+        return self._inner.handle_request(request)
+
+    def close(self):
+        self._inner.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()

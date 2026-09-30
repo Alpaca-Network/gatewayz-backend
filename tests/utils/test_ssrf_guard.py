@@ -116,3 +116,51 @@ def test_assert_public_https_url_blocks_internal_host(monkeypatch):
     with pytest.raises(SSRFBlockedError) as exc_info:
         assert_public_https_url("https://internal.example.com")
     assert exc_info.value.reason == "private_address_blocked"
+
+
+class TestPinnedPublicIPTransport:
+    def _transport(self, monkeypatch, ips):
+        import httpx
+
+        from src.utils import ssrf_guard
+
+        seen = []
+        it = iter(ips)
+
+        def fake_resolve(host):
+            v = next(it)
+            if isinstance(v, Exception):
+                raise v
+            return v
+
+        def fake_inner(self, request):
+            seen.append(request)
+            return httpx.Response(200, request=request)
+
+        monkeypatch.setattr(ssrf_guard, "resolve_public_ip", fake_resolve)
+        monkeypatch.setattr(httpx.HTTPTransport, "handle_request", fake_inner)
+        return ssrf_guard.PinnedPublicIPTransport(), seen
+
+    def test_connects_to_pinned_ip_preserving_host_and_sni(self, monkeypatch):
+        import httpx
+
+        t, seen = self._transport(monkeypatch, ["93.184.216.34"])
+        t.handle_request(httpx.Request("POST", "https://node.example.test/v1/chat"))
+        req = seen[0]
+        assert req.url.host == "93.184.216.34"
+        assert req.headers["host"] == "node.example.test"
+        assert req.extensions["sni_hostname"] == b"node.example.test"
+
+    def test_rebind_between_calls_is_blocked_without_connecting(self, monkeypatch):
+        import httpx
+        import pytest
+
+        from src.utils.ssrf_guard import SSRFBlockedError
+
+        t, seen = self._transport(
+            monkeypatch, ["93.184.216.34", SSRFBlockedError("private_address_blocked")]
+        )
+        t.handle_request(httpx.Request("GET", "https://node.example.test/"))
+        with pytest.raises(SSRFBlockedError):
+            t.handle_request(httpx.Request("GET", "https://node.example.test/"))
+        assert len(seen) == 1

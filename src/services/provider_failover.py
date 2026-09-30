@@ -326,6 +326,81 @@ def enforce_model_failover_rules(
     return provider_chain
 
 
+FREE_MODEL_UNAVAILABLE_CODE = "free_model_unavailable"
+
+
+def _free_providers_for_model(model_id: str) -> set[str]:
+    """Providers on which *model_id* is genuinely free. A ``:free`` model is only free
+    on OpenRouter; any other provider serving the base model bills at paid rates."""
+    if model_id and model_id.lower().endswith(":free"):
+        return {"openrouter"}
+    return set()
+
+
+def _is_known_free_model(model_id: str) -> bool:
+    if not model_id or not model_id.lower().endswith(":free"):
+        return False
+    from src.services.cache.model_capabilities_cache import is_free_model
+
+    return bool(is_free_model(model_id))
+
+
+def restrict_chain_for_zero_balance_free_model(
+    model_id: str,
+    provider_chain: list[str],
+    *,
+    user: dict | None,
+    is_anonymous: bool,
+    raise_if_empty: bool = True,
+) -> list[str]:
+    """Keep a $0-balance (or anonymous) caller on a free model from failing over to a
+    PAID provider.
+
+    The credit check is skipped for genuinely free models before the serving provider
+    is known, so an unrestricted chain lets a user with no spendable balance get
+    served -- and billed after the fact, unpaid -- by a paid provider. When the caller
+    can't pay, only providers where the model is free stay in the chain. If none
+    remain, raise a clear 503 (or return [] when ``raise_if_empty`` is False).
+    Callers with a positive spendable balance are untouched.
+    """
+    if not _is_known_free_model(model_id):
+        return provider_chain
+    if not is_anonymous:
+        u = user or {}
+        spendable = float(u.get("subscription_allowance") or 0) + float(
+            u.get("purchased_credits") or 0
+        )
+        if spendable > 0:
+            return provider_chain
+
+    free_providers = _free_providers_for_model(model_id)
+    restricted = [p for p in provider_chain if p in free_providers]
+    if len(restricted) != len(provider_chain):
+        logger.info(
+            "Free model '%s': caller has no spendable balance; restricting failover chain "
+            "%s -> %s",
+            model_id,
+            provider_chain,
+            restricted,
+        )
+    if not restricted and raise_if_empty:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": (
+                        f"The free model '{model_id}' is temporarily unavailable on its free "
+                        "provider, and failing over to a paid provider requires account credits. "
+                        "Add credits or retry shortly."
+                    ),
+                    "type": "service_unavailable",
+                    "code": FREE_MODEL_UNAVAILABLE_CODE,
+                }
+            },
+        )
+    return restricted
+
+
 def get_fallback_model_id(model_id: str, provider: str) -> str:
     """
     Transform model ID for fallback provider when circuit breaker triggers failover.
