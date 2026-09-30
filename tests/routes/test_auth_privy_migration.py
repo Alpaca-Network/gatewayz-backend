@@ -111,6 +111,11 @@ def _configure_token(monkeypatch, key_pair, *, mode="enforce"):
 
 
 class TestAdoptionCalledOnVerifiedUnknownDid:
+    # get_supabase_client is patched: /auth calls it before the adoption branch, and
+    # the real one raises "Supabase unavailable (retry in Ns)" for 60s whenever an
+    # earlier test in the same xdist worker left a fresh init error cached in
+    # src.config.supabase_config (_last_error) -- the source of the order-dependent 500.
+    @patch("src.routes.auth.supabase_config.get_supabase_client")
     @patch("src.routes.auth._handle_existing_user")
     @patch("src.routes.auth.attempt_adoption", new_callable=AsyncMock)
     @patch("src.routes.auth.migration_mode_is_adopt", return_value=True)
@@ -123,6 +128,7 @@ class TestAdoptionCalledOnVerifiedUnknownDid:
         mock_mode,
         mock_attempt_adoption,
         mock_handle_existing_user,
+        mock_get_client,
         monkeypatch,
         key_pair,
     ):

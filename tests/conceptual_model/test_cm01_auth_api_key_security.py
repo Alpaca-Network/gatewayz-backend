@@ -127,22 +127,33 @@ class TestCM04HmacLookupWithoutDecryption:
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 class TestCM05EncryptedKeyNotPlaintextInDb:
-    def test_encrypted_key_not_plaintext_in_db(self, mock_supabase):
+    def test_encrypted_key_not_plaintext_in_db(self, mock_supabase, monkeypatch, request):
         """create_api_key must store an encrypted_key that differs from the
         plaintext API key."""
         # Set up KEY_HASH_SALT for sha256_key_hash used inside create_api_key
-        os.environ.setdefault("KEY_HASH_SALT", "test-key-hash-salt-minimum-sixteen")
+        monkeypatch.setenv(
+            "KEY_HASH_SALT", os.environ.get("KEY_HASH_SALT", "test-key-hash-salt-minimum-sixteen")
+        )
 
         # Set up KEYRING for encrypt_api_key used inside create_api_key
         test_fernet_key = Fernet.generate_key().decode()
-        os.environ["KEY_VERSION"] = "1"
-        os.environ["KEYRING_1"] = test_fernet_key
+        monkeypatch.setenv("KEY_VERSION", "1")
+        monkeypatch.setenv("KEYRING_1", test_fernet_key)
 
         # Reload the crypto module so it picks up the new keyring env vars
         import importlib
 
         import src.utils.crypto as crypto_mod
 
+        # Reload mutates the shared module in place; restore it on teardown so the
+        # test keyring does not leak into later tests in the same worker.
+        _saved_crypto = dict(crypto_mod.__dict__)
+
+        def _restore_crypto():
+            crypto_mod.__dict__.clear()
+            crypto_mod.__dict__.update(_saved_crypto)
+
+        request.addfinalizer(_restore_crypto)
         importlib.reload(crypto_mod)
 
         # Mock check_plan_entitlements to avoid Supabase call

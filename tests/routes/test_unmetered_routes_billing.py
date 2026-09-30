@@ -71,7 +71,7 @@ class TestEmbeddingsMetering:
         args = ded.call_args.args
         assert args[0] == "gw_test"
         # 1000 tokens * $0.02/M
-        assert args[1] == pytest.approx(0.00002)
+        assert args[1] == pytest.approx(0.00002 * _cfg().EMBEDDING_MARGIN)
         assert args[4]  # billing_ref idempotency key passed as request_id
         rec.assert_called_once()
 
@@ -202,15 +202,26 @@ class TestAnonymousReservation:
         assert "record_anonymous_request" not in inspect.getsource(post_processing)
 
 
+def _cfg():
+    from src.config import Config
+
+    return Config
+
+
 def test_metering_prices_cover_provider_list_prices():
     from src.config import Config
     from src.routes.embeddings import embedding_cost
     from src.routes.tools import tool_cost_usd
 
-    assert Config.TOOL_COST_WEB_SEARCH_USD >= 0.016  # Tavily advanced = 2 x $0.008
-    assert tool_cost_usd("text_to_speech") >= 0.125  # 5000 chars x $0.025/1k
-    assert tool_cost_usd("unknown_tool") >= 0.016
-    assert embedding_cost("text-embedding-3-small", 1_000_000) == pytest.approx(0.02)
-    assert embedding_cost("text-embedding-3-large", 1_000_000) == pytest.approx(0.13)
-    assert embedding_cost("openai/text-embedding-ada-002", 1_000_000) == pytest.approx(0.10)
-    assert embedding_cost("BAAI/bge-large-en-v1.5", 1_000_000) >= 0.01
+    m = Config.EMBEDDING_MARGIN
+    assert m >= 1.2 and Config.TOOL_MARGIN >= 1.2
+    assert tool_cost_usd("web_search") == pytest.approx(0.016 * Config.TOOL_MARGIN)  # Tavily adv.
+    assert tool_cost_usd("text_to_speech") >= 0.20 * 1.2  # 5000 chars x $0.04/1k (fal HD)
+    assert tool_cost_usd("unknown_tool") >= 0.016 * 1.2
+    assert embedding_cost("text-embedding-3-small", 1_000_000) == pytest.approx(0.02 * m)
+    assert embedding_cost("text-embedding-3-large", 1_000_000) == pytest.approx(0.13 * m)
+    assert embedding_cost("openai/text-embedding-ada-002", 1_000_000) == pytest.approx(0.10 * m)
+    assert embedding_cost("BAAI/bge-large-en-v1.5", 1_000_000) == pytest.approx(0.01 * m)
+    assert embedding_cost(
+        "together/intfloat/multilingual-e5-large-instruct", 10**6
+    ) == pytest.approx(0.02 * m)
