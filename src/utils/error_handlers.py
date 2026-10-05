@@ -13,6 +13,7 @@ Usage:
 
 import http
 import logging
+import re
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -23,6 +24,10 @@ from src.utils.errors import DetailedErrorFactory
 
 # Placeholder used when an HTTPException carried no detail of its own.
 _NO_DETAIL = "An error occurred"
+
+# The WORD ip, not the letters. "privileges", "recipient" and "description" all
+# contain the substring and none of them is an IP restriction.
+_IP_RESTRICTION_RE = re.compile(r"\bip\b|\bip[- ]?address\b|ip allowlist|ip restrict", re.I)
 
 
 def _stated_reason(detail: str, status_code: int) -> str | None:
@@ -163,15 +168,28 @@ def _map_http_exception_to_detailed_error(
             return DetailedErrorFactory.trial_expired(request_id=request_id)
         elif "plan" in detail_lower and "limit" in detail_lower:
             return DetailedErrorFactory.plan_limit_reached(reason=detail, request_id=request_id)
-        elif "ip" in detail_lower:
-            # Try to extract IP address
+        elif _IP_RESTRICTION_RE.search(detail_lower):
+            # Was `"ip" in detail_lower` -- a bare substring scan, so any
+            # forbidden message containing those two letters anywhere
+            # ("recipient", "description", "multiple") was reported to the
+            # caller as an IP restriction. Require the word, not the letters.
             ip = _extract_ip_address(detail)
             return DetailedErrorFactory.ip_restricted(
                 ip_address=ip or "unknown", request_id=request_id
             )
         else:
-            # Generic forbidden - use plan_limit_reached
-            return DetailedErrorFactory.plan_limit_reached(reason=detail, request_id=request_id)
+            # A 403 we cannot classify is about WHO the caller is, not what
+            # they have paid for.
+            #
+            # This arm used to return plan_limit_reached, so "Administrator
+            # privileges required" reached the caller as "You have reached your
+            # plan's usage limit. Please upgrade your plan or wait for the limit
+            # to reset." No plan grants admin and no waiting confers it -- that
+            # advice sends somebody to buy an upgrade to fix a permissions
+            # problem. Measured against production 2026-09-30.
+            return DetailedErrorFactory.insufficient_permissions(
+                reason=detail, request_id=request_id
+            )
 
     elif status_code == 404:
         # Not found - check if it's a model error
