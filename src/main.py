@@ -467,6 +467,8 @@ def create_app() -> FastAPI:
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
         ("status_page", "Public Status Page"),  # Public status page (no auth required)
+        # Inference escrow: job-scoped keys + sealed usage records (GenLayer cohort).
+        ("jobs", "Inference Jobs"),
     ]
 
     # Define non-v1 routes (loaded directly on app without prefix)

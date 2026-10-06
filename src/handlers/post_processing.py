@@ -8,6 +8,7 @@ from src.db.api_keys import increment_api_key_usage
 from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.db.chat_history import get_chat_session, save_chat_message
 from src.db.plans import enforce_plan_limits
+from src.services.job_usage import record_job_usage
 from src.services.passive_health_monitor import capture_model_health
 from src.services.pricing import calculate_cost_async
 from src.services.prometheus_metrics import (
@@ -350,6 +351,18 @@ async def _process_stream_completion_background(
                 )
                 # NOTE: Credit deduction failed, so no credits were taken.
                 # No refund needed here - the reconciliation log handles this case.
+
+            # Inference-escrow usage line; a no-op unless this is a job-scoped key.
+            await _to_thread(
+                record_job_usage,
+                user,
+                model,
+                provider,
+                prompt_tokens,
+                completion_tokens,
+                cost,
+                request_id or "",
+            )
 
             # Increment API key usage counter
             await _to_thread(increment_api_key_usage, api_key)
