@@ -24,6 +24,7 @@ from src.schemas.internal.chat import (
     InternalStreamChunk,
     InternalUsage,
 )
+from src.services.job_usage import record_job_usage
 from src.services.circuit_breaker import CircuitBreakerError
 from src.services.credit_precheck import estimate_and_check_credits
 from src.services.pricing import calculate_cost_split, get_model_pricing
@@ -1038,6 +1039,23 @@ class ChatInferenceHandler:
             self.background_tasks.add_task(save_chat_completion_request_with_cost, **save_kwargs)
         else:
             save_chat_completion_request_with_cost(**save_kwargs)
+
+        # Inference-escrow usage line; a no-op unless this is a job-scoped key.
+        # Same billing_ref as the request row, so the two join.
+        if status == "completed" and not self.is_anonymous:
+            job_args = (
+                self.user,
+                model_name,
+                provider_name,
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                save_kwargs["request_id"] or "",
+            )
+            if self.background_tasks and not cancelled:
+                self.background_tasks.add_task(record_job_usage, *job_args)
+            else:
+                record_job_usage(*job_args)
 
         logger.debug(
             f"[ChatHandler] Saved request record: request_id={self.request_id}, "

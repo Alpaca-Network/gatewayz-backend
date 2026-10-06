@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 # entries above the general ones.
 _KEY_FAILURE_MAP: tuple[tuple[str, int, str, str], ...] = (
     (
+        "Job spend cap reached",
+        402,
+        "job_cap_exhausted",
+        "This job-scoped key has reached its job's spend cap. Retrying will not clear "
+        "it — the job is out of budget.",
+    ),
+    ("Job is not running", 409, "job_not_running", "This job is closed or past its deadline."),
+    (
         "limit reached",
         402,
         "request_cap_exhausted",
