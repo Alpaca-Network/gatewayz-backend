@@ -736,6 +736,14 @@ async def lifespan(app):
         logger.warning(f"Failed to start ledger reconciliation scheduler: {e}")
         # Don't fail startup if reconciliation fails to start
 
+    # Gatewayz Verify case poller (GenLayer cohort); no-op unless configured.
+    try:
+        from src.services.scheduled_sync import start_verify_poller
+
+        start_verify_poller()
+    except Exception as e:
+        logger.warning(f"Failed to start Verify poller: {e}")
+
     # Start data retention cleanup (gatewayz-backend M3, threat model L11)
     try:
         from src.services.scheduled_sync import start_retention_scheduler
@@ -1000,7 +1008,9 @@ async def lifespan(app):
 
     # Stop scheduled model sync (Phase 3 - Issue #996)
     try:
-        from src.services.scheduled_sync import stop_scheduler
+        from src.services.scheduled_sync import stop_scheduler, stop_verify_poller
+
+        stop_verify_poller()
 
         stop_scheduler()
         logger.info("Scheduled model sync service stopped")

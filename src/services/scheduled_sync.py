@@ -804,6 +804,49 @@ async def run_scheduled_retention_cleanup():
         )
 
 
+_verify_scheduler: AsyncIOScheduler | None = None
+
+
+def start_verify_poller():
+    """Advance open Gatewayz Verify cases every 20s (no-op unless Verify is configured)."""
+    global _verify_scheduler
+    from src.services.genlayer_verify import is_configured
+    from src.services.verify_cases import poll_open_cases
+
+    if not is_configured():
+        logger.info(
+            "Verify poller not started: GENLAYER_VERIFY_CONTRACT/GENLAYER_SUBMITTER_KEY unset"
+        )
+        return
+    try:
+        _verify_scheduler = AsyncIOScheduler()
+        _verify_scheduler.add_job(
+            poll_open_cases,
+            trigger=IntervalTrigger(seconds=20),
+            id="verify_poll",
+            name="Gatewayz Verify case poller",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _verify_scheduler.start()
+        logger.info("✅ Verify poller started (every 20s)")
+    except Exception as e:
+        logger.error("❌ Failed to start Verify poller: %s", e)
+
+
+def stop_verify_poller():
+    global _verify_scheduler
+    if _verify_scheduler is None:
+        return
+    try:
+        _verify_scheduler.shutdown(wait=True)
+    except Exception as e:
+        logger.error("❌ Error stopping Verify poller: %s", e)
+    finally:
+        _verify_scheduler = None
+
+
 def start_retention_scheduler():
     """Start the APScheduler for data retention cleanup (app lifespan)."""
     global _retention_scheduler
