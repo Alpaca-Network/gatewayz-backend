@@ -23,7 +23,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from src.db.api_keys import create_api_key
@@ -162,6 +162,7 @@ async def get_job_state(
 @router.post("/jobs/{job_id}/close", tags=["jobs"])
 async def close_job(
     job_id: str,
+    background: BackgroundTasks,
     user_id: int = Depends(job_owner_id),
     _rl: None = Depends(jobs_create_rl),
 ) -> dict[str, Any]:
@@ -172,7 +173,11 @@ async def close_job(
     mark_closed(job["job_id"], job.get("api_key_id"))
     sealed = seal(list_usage(job["job_id"]))
     job = store_seal(job["job_id"], sealed)
-    return {**_job_view(job), "usage": _usage_totals(job)}
+    out = {**_job_view(job), "usage": _usage_totals(job)}
+    from src.services.outbound_webhooks import emit
+
+    background.add_task(emit, user_id, "job.closed", out)
+    return out
 
 
 def _usage_totals(job: dict) -> dict[str, Any]:
