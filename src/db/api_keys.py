@@ -142,8 +142,16 @@ def create_api_key(
     domain_referrers: list[str] | None = None,
     is_primary: bool = False,
     subscription_status: str = "trial",
+    purpose: str | None = None,
 ) -> tuple[str, int]:
-    """Create a new API key for a user"""
+    """Create a new API key for a user
+
+    ``purpose`` must already be normalized (src/services/key_purpose.py): None
+    for a general key, 'validator' for no-logging mode. It is only sent when
+    set, so a general key's insert payload is unchanged -- and a validator key
+    on a database without the column fails loudly instead of being created as
+    a general key.
+    """
     global _encryption_warning_logged
     try:
         client = get_supabase_client()
@@ -262,6 +270,9 @@ def create_api_key(
             "domain_referrers": domain_referrers or [],
             "last_used_at": datetime.now(UTC).isoformat(),
         }
+
+        if purpose is not None:
+            base_api_key_data["purpose"] = purpose
 
         # Add trial data if this is a primary key
         base_api_key_data.update(trial_data)
@@ -444,6 +455,7 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                     "created_at": key.get("created_at"),
                     "updated_at": key.get("updated_at"),
                     "last_used_at": key.get("last_used_at"),
+                    "purpose": key.get("purpose") or "general",
                 }
 
                 keys.append(key_data)
@@ -862,6 +874,7 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
             "ip_allowlist",
             "domain_referrers",
             "is_active",
+            "purpose",
         ]
 
         for field, value in updates.items():
@@ -946,7 +959,9 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
         # is_active flips (deactivation, or reactivation) must be reflected
         # immediately, not up to _user_cache_ttl seconds later -- same
         # revocation-must-be-real fix as delete_api_key.
-        if "is_active" in update_data:
+        # Same for a purpose flip: turning validator (no-logging) mode on must
+        # not keep logging this key from a cached user dict.
+        if "is_active" in update_data or "purpose" in update_data:
             invalidate_user_cache(api_key)
 
         return True
@@ -1139,6 +1154,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
             "created_at": key_data.get("created_at"),
             "updated_at": key_data.get("updated_at"),
             "last_used_at": key_data.get("last_used_at"),
+            "purpose": key_data.get("purpose") or "general",
         }
 
     except Exception as e:

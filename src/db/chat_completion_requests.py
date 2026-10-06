@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.services.key_purpose import suppress_request_logging
 from src.utils.db_safety import DatabaseResultError, safe_get_first
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,14 @@ def save_chat_completion_request(
     Returns:
         Created record or None on error
     """
+    # Validator keys (src/services/key_purpose.py): this row is analytics, not
+    # billing -- credit_transactions/usage_records carry the charge -- so it is
+    # never written, which also keeps the key out of every aggregate built on
+    # this table (rankings, arrivals, per-model/provider stats, tag rollups).
+    if suppress_request_logging():
+        logger.debug("Validator key: skipping chat_completion_requests row %s", request_id)
+        return None
+
     try:
         client = get_supabase_client()
 
@@ -1401,6 +1410,14 @@ def save_chat_completion_request_with_cost(
     Returns:
         Created record or None on error
     """
+    # Validator keys (src/services/key_purpose.py): this row is analytics, not
+    # billing -- credit_transactions/usage_records carry the charge -- so it is
+    # never written, which also keeps the key out of every aggregate built on
+    # this table (rankings, arrivals, per-model/provider stats, tag rollups).
+    if suppress_request_logging():
+        logger.debug("Validator key: skipping chat_completion_requests row %s", request_id)
+        return None
+
     try:
         client = get_supabase_client()
 

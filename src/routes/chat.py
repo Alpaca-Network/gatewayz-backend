@@ -29,6 +29,7 @@ from src.services.anonymous_rate_limiter import (
     validate_anonymous_request,
 )
 from src.services.auth_rate_limiting import get_client_ip
+from src.services.key_purpose import enforce_no_routing_alias, is_validator_key
 from src.services.passive_health_monitor import capture_model_health
 from src.services.prometheus_metrics import record_free_model_usage
 from src.utils.errors import APIExceptions
@@ -414,6 +415,10 @@ async def chat_completions(
     # (gatewayz-backend#2262 #2265, M4 spec §1) -- see enforce_community_auth_gate.
     enforce_community_auth_gate(is_anonymous, model_id=req.model, request_id=request_id)
 
+    # Validator keys (src/services/key_purpose.py) get the model they name or a
+    # 400 -- never a router's pick. Checked before the alias resolver below.
+    enforce_no_routing_alias(identity.user, req.model)
+
     # Resolve `auto`/`router:*` aliases to a real model BEFORE the pricing gate
     # below, which treats req.model as a real catalog/pricing model and 400s
     # otherwise. No-op for explicit models and for anonymous requests (see
@@ -736,6 +741,10 @@ async def chat_completions(
 
         # Get auto_web_search setting (default to "auto")
         auto_web_search = getattr(req, "auto_web_search", "auto")
+        # Validator keys: auto web search would rewrite the prompt (injected
+        # system message) and send it to a search vendor. Never for them.
+        if is_validator_key(user):
+            auto_web_search = False
         web_search_threshold = getattr(req, "web_search_threshold", None)
         if web_search_threshold is None:
             web_search_threshold = 0.5

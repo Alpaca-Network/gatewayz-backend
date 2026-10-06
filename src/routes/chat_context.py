@@ -13,6 +13,7 @@ import logging
 
 from src.db.chat_history import get_chat_session, save_chat_message
 from src.routes.chat_helpers import _to_thread
+from src.services.key_purpose import suppress_request_logging
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,11 @@ async def persist_conversation_turn(
     chat_completions handler (Step 5).
     """
     if not session_id or is_anonymous:
+        return
+
+    # Validator keys (src/services/key_purpose.py): prompt and completion
+    # content is never stored, even when a session_id is supplied.
+    if suppress_request_logging(user):
         return
 
     # Re-validate session_id in case it was modified during request processing
