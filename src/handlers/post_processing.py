@@ -8,6 +8,7 @@ from src.db.api_keys import increment_api_key_usage
 from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.db.chat_history import get_chat_session, save_chat_message
 from src.db.plans import enforce_plan_limits
+from src.services.key_purpose import suppress_request_logging
 from src.services.passive_health_monitor import capture_model_health
 from src.services.pricing import calculate_cost_async
 from src.services.prometheus_metrics import (
@@ -396,6 +397,10 @@ async def _process_stream_completion_background(
                 )
 
             # Save chat history
+            # Validator keys (src/services/key_purpose.py): never store content.
+            if session_id and suppress_request_logging(user):
+                session_id = None
+
             # Validate session_id before attempting to save
             if session_id:
                 if session_id < -2147483648 or session_id > 2147483647:

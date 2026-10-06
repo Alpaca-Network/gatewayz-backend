@@ -466,6 +466,10 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                     user["environment_tag"] = key_data.get("environment_tag", "live")
                     user["scope_permissions"] = key_data.get("scope_permissions")
                     user["is_primary"] = key_data.get("is_primary", False)
+                    # Key purpose (validator = no-logging mode). Read from the
+                    # KEY row, never the users row: purpose is per key. Absent
+                    # column/NULL -> None -> general. See src/services/key_purpose.py.
+                    user["key_purpose"] = key_data.get("purpose")
                     user["api_key"] = api_key  # ensure api_key is always in user dict
                     _migrate_legacy_credit_balance(client, user)
                     return user
