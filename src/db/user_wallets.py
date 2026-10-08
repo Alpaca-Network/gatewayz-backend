@@ -11,6 +11,7 @@ section 4.5.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -113,6 +114,27 @@ def count_all_wallets() -> int:
     except Exception as e:
         logger.warning(f"user_wallets total count failed: {e}")
         return 0
+
+
+def count_wallets_linked_before(cutoff: datetime) -> int | None:
+    """How many wallets were linked at or before ``cutoff`` -- the wallets
+    old enough for the holdings sweep to consider. A count, not a list, for
+    the sweep watchdog in src/services/holdings/alerts.py. None (not 0) on a
+    lookup error, so a failed read is never mistaken for "no eligible
+    wallets"."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_TABLE)
+            .select("id", count="exact")
+            .lte("created_at", cutoff.isoformat())
+            .limit(1)
+            .execute()
+        )
+        return result.count or 0
+    except Exception as e:
+        logger.warning(f"user_wallets eligible count failed: {e}")
+        return None
 
 
 _ALL_WALLETS_ROW_CAP = 10000

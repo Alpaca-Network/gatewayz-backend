@@ -163,6 +163,9 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
         "sweep_write_failed": 0,
         "error": 0,
     }
+    # chain id -> wallets whose read failed on it. Chain ids only, never
+    # addresses: this summary feeds the ops page and the ops alert.
+    failed_chains: dict[int, int] = {}
     considered = 0
     sweeps_recorded = 0
     wallets_recorded = 0
@@ -199,6 +202,8 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
 
         if not result.is_complete:
             skipped["incomplete_read"] += 1
+            for chain_id in result.failed_chain_ids:
+                failed_chains[chain_id] = failed_chains.get(chain_id, 0) + 1
             logger.warning(
                 "holdings_snapshots: skipping %s -- chains %s could not be read, "
                 "a partial total would underpay",
@@ -291,5 +296,6 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
         "rows_recorded": rows_recorded,
         "rows_failed": rows_failed,
         "skipped": skipped,
+        "failed_chains": {str(chain_id): n for chain_id, n in sorted(failed_chains.items())},
         "duration": duration_seconds,
     }

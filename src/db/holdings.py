@@ -311,6 +311,39 @@ def list_wallets_with_sweeps_for_date(day: date) -> list[str]:
     return sorted({str(row["wallet_address"]).lower() for row in rows if row.get("wallet_address")})
 
 
+class HoldingsLookupError(Exception):
+    """A read failed, as opposed to finding nothing. Raised only where the
+    caller must tell the two apart (the sweep watchdog: "no sweep has ever
+    recorded a wallet" is an alert, "the DB did not answer" is not)."""
+
+
+def get_latest_sweep_taken_at() -> datetime | None:
+    """`taken_at` of the newest `wallet_holdings_sweeps` row of any wallet,
+    i.e. the last time any sweep recorded anything. None when the table is
+    empty. One indexed row (idx_whsw_taken_at).
+
+    Unlike the rest of this module this raises HoldingsLookupError on a
+    failed read, because None already means "never recorded" here.
+    """
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_SWEEPS_TABLE)
+            .select("taken_at")
+            .order("taken_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+    except Exception as e:
+        raise HoldingsLookupError(f"wallet_holdings_sweeps latest lookup failed: {e}") from e
+
+    if not rows or not rows[0].get("taken_at"):
+        return None
+    parsed = datetime.fromisoformat(str(rows[0]["taken_at"]).replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
 def list_all_tokens() -> list[dict[str, Any]]:
     """The whole token registry, enabled or not -- the admin view, where a
     disabled row has to stay visible so it can be re-enabled. Empty list on

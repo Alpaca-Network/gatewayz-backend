@@ -1,11 +1,13 @@
 """Tests for src.db.user_wallets (gatewayz-backend#2249 #2250 #2251 #2252)."""
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src.db.user_wallets import (
     count_wallets,
+    count_wallets_linked_before,
     get_wallet,
     get_wallets_for_user,
     link_wallet,
@@ -155,3 +157,28 @@ def test_list_all_wallets_returns_empty_on_error(sb):
     client.table.side_effect = RuntimeError("boom")
     with patch("src.db.user_wallets.get_supabase_client", return_value=client):
         assert list_all_wallets() == []
+
+
+def test_count_wallets_linked_before_counts_at_or_before_the_cutoff(sb):
+    query = MagicMock()
+    query.select.return_value = query
+    query.lte.return_value = query
+    query.limit.return_value = query
+    query.execute.return_value = MagicMock(data=[{"id": 1}], count=7)
+    client = MagicMock()
+    client.table.return_value = query
+    cutoff = datetime(2026, 10, 5, tzinfo=UTC)
+
+    with patch("src.db.user_wallets.get_supabase_client", return_value=client):
+        assert count_wallets_linked_before(cutoff) == 7
+
+    query.select.assert_called_once_with("id", count="exact")
+    query.lte.assert_called_once_with("created_at", cutoff.isoformat())
+
+
+def test_count_wallets_linked_before_is_none_not_zero_on_error(sb):
+    """0 would read as "no eligible wallets" and silence the watchdog."""
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.user_wallets.get_supabase_client", return_value=client):
+        assert count_wallets_linked_before(datetime(2026, 10, 5, tzinfo=UTC)) is None

@@ -68,6 +68,8 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     # hard-coded, so raising the count doesn't make the job read as stale.
     "holdings_snapshots": 1440 // max(1, min(Config.HOLDINGS_SNAPSHOTS_PER_DAY, 24)),
     "holdings_rewards": 1440,
+    # Hourly staleness check on holdings_snapshots (src/services/holdings/alerts.py).
+    "holdings_sweep_watchdog": 60,
 }
 
 # WAYZ token/staking contracts are deployed on Avalanche Fuji testnet.

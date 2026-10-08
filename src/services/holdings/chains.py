@@ -17,10 +17,21 @@ set.
 from __future__ import annotations
 
 import logging
+import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+import requests
 from web3 import Web3
+from web3.exceptions import (
+    BadResponseFormat,
+    ContractLogicError,
+    ProviderConnectionError,
+    TimeExhausted,
+    TooManyRequests,
+    Web3RPCError,
+)
 
 from src.config.config import Config
 
@@ -55,6 +66,49 @@ _RPC_CONFIG_ATTR: dict[int, str] = {
 }
 
 SUPPORTED_CHAIN_IDS: tuple[int, ...] = tuple(sorted(_RPC_CONFIG_ATTR))
+
+# Chain id -> (public default, secondary public endpoint). The default must
+# match that chain's Config default (tests/services/holdings/test_chains.py
+# guards the drift); the secondary is a different operator, so one public
+# provider changing its terms -- polygon-rpc.com starting to answer 401 in
+# Oct 2026 -- does not take the chain down. Each secondary was checked on
+# 2026-10-08 to answer eth_chainId with the right id.
+_PUBLIC_RPC_URLS: dict[int, tuple[str, str]] = {
+    CHAIN_ID_ETHEREUM: ("https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"),
+    CHAIN_ID_BNB_CHAIN: ("https://bsc-dataseed.binance.org", "https://bsc.publicnode.com"),
+    CHAIN_ID_POLYGON: ("https://polygon-bor-rpc.publicnode.com", "https://1rpc.io/matic"),
+    CHAIN_ID_BASE: ("https://mainnet.base.org", "https://base-rpc.publicnode.com"),
+    CHAIN_ID_ARBITRUM_ONE: (
+        "https://arb1.arbitrum.io/rpc",
+        "https://arbitrum-one-rpc.publicnode.com",
+    ),
+    CHAIN_ID_AVALANCHE_C_CHAIN: (
+        "https://api.avax.network/ext/bc/C/rpc",
+        "https://avalanche-c-chain-rpc.publicnode.com",
+    ),
+}
+
+# Chain id -> Alchemy network slug, for https://{slug}.g.alchemy.com/v2/{key}.
+# Slugs from Alchemy's endpoint reference (alchemy.com/docs).
+_ALCHEMY_NETWORKS: dict[int, str] = {
+    CHAIN_ID_ETHEREUM: "eth-mainnet",
+    CHAIN_ID_BNB_CHAIN: "bnb-mainnet",
+    CHAIN_ID_POLYGON: "polygon-mainnet",
+    CHAIN_ID_BASE: "base-mainnet",
+    CHAIN_ID_ARBITRUM_ONE: "arb-mainnet",
+    CHAIN_ID_AVALANCHE_C_CHAIN: "avax-mainnet",
+}
+
+# JSON-RPC error codes that mean "this endpoint is refusing us" rather than
+# anything about the call itself: -32005 (limit exceeded), -32016 (Alchemy
+# over rate limit), 429 (some providers echo the HTTP status as the code).
+_RATE_LIMIT_RPC_CODES = frozenset({-32005, -32016, 429})
+
+# How long an endpoint that just failed on transport is tried *last* rather
+# than first. It is never skipped -- only reordered -- so a chain whose
+# every endpoint had a blip is still attempted on all of them.
+_ENDPOINT_DEMOTION_SECONDS = 300
+_demoted_until: dict[str, float] = {}
 
 # Seconds to wait on a single RPC round trip. Public endpoints are slow and
 # rate-limited; a chain that exceeds this is reported as failed, not as zero.
@@ -133,6 +187,19 @@ class ChainReadFailure:
 
 
 @dataclass(frozen=True)
+class RpcEndpoint:
+    """One RPC URL a chain can be read from, and where it came from.
+
+    ``source`` is ``"env"`` (an explicit <CHAIN>_RPC_URL), ``"alchemy"``
+    (derived from ALCHEMY_API_KEY) or ``"public"``. The URL can embed an API
+    key, so it is excluded from ``repr`` and logs name the source instead.
+    """
+
+    url: str = field(repr=False)
+    source: str
+
+
+@dataclass(frozen=True)
 class BalanceReadResult:
     """Outcome of a multi-chain read.
 
@@ -158,22 +225,118 @@ class BalanceReadResult:
         return not self.failures
 
 
-def rpc_url_for_chain(chain_id: int) -> str:
-    """Return the configured RPC URL for ``chain_id``.
+def rpc_endpoints_for_chain(chain_id: int) -> list[RpcEndpoint]:
+    """Every endpoint ``chain_id`` may be read from, in the order to try them.
+
+    The primary is the first of: an explicit ``<CHAIN>_RPC_URL`` that differs
+    from the public default, the Alchemy URL for ``ALCHEMY_API_KEY``, or the
+    public default. A configured value *equal* to the public default is
+    indistinguishable from leaving it unset and is treated as such, so
+    setting ALCHEMY_API_KEY upgrades it. After the primary come any remaining
+    endpoints from that list plus the secondary public endpoint, which is what
+    :func:`read_balances` falls back to on a transport failure. Endpoints that
+    failed on transport in the last few minutes move to the back.
 
     Raises:
         UnsupportedChainError: if the chain is not one of the supported EVM
-            chains, or its RPC URL has been explicitly configured empty.
+            chains.
     """
     attr = _RPC_CONFIG_ATTR.get(chain_id)
     if attr is None:
         raise UnsupportedChainError(f"Unsupported chain id: {chain_id}")
 
-    url = getattr(Config, attr, None)
-    if not url:
-        raise UnsupportedChainError(f"{attr} is not configured (chain id {chain_id})")
+    public_default, public_secondary = _PUBLIC_RPC_URLS[chain_id]
+    configured = (getattr(Config, attr, None) or "").strip()
+    alchemy_key = (getattr(Config, "ALCHEMY_API_KEY", None) or "").strip()
 
-    return url
+    candidates: list[RpcEndpoint] = []
+    if configured and configured != public_default:
+        candidates.append(RpcEndpoint(url=configured, source="env"))
+    if alchemy_key:
+        network = _ALCHEMY_NETWORKS[chain_id]
+        candidates.append(
+            RpcEndpoint(url=f"https://{network}.g.alchemy.com/v2/{alchemy_key}", source="alchemy")
+        )
+    candidates.append(RpcEndpoint(url=public_default, source="public"))
+    candidates.append(RpcEndpoint(url=public_secondary, source="public"))
+
+    seen: set[str] = set()
+    endpoints: list[RpcEndpoint] = []
+    for endpoint in candidates:
+        if endpoint.url not in seen:
+            seen.add(endpoint.url)
+            endpoints.append(endpoint)
+
+    now = time.monotonic()
+    # Stable sort: healthy endpoints keep precedence order, demoted ones
+    # keep theirs behind them.
+    return sorted(endpoints, key=lambda e: _demoted_until.get(e.url, 0.0) > now)
+
+
+def rpc_url_for_chain(chain_id: int) -> str:
+    """Return the primary RPC URL for ``chain_id`` (see
+    :func:`rpc_endpoints_for_chain` for the precedence).
+
+    Raises:
+        UnsupportedChainError: if the chain is not one of the supported EVM
+            chains.
+    """
+    return rpc_endpoints_for_chain(chain_id)[0].url
+
+
+def is_transport_error(exc: BaseException) -> bool:
+    """True when ``exc`` says the *endpoint* failed, not the call.
+
+    Only these are worth retrying on another endpoint. A contract revert must
+    never count: it is a property of the call, it would revert identically
+    everywhere, and at the raw JSON-RPC layer it looks just like a provider
+    error -- so a JSON-RPC error is only treated as transport when its code is
+    a known rate-limit code. Anything unrecognised is not transport.
+    """
+    if isinstance(exc, ContractLogicError):
+        return False
+    if isinstance(
+        exc,
+        (
+            requests.RequestException,
+            OSError,  # ConnectionError, TimeoutError, socket errors
+            ProviderConnectionError,
+            TooManyRequests,
+            TimeExhausted,
+            BadResponseFormat,  # the endpoint did not speak JSON-RPC at all
+        ),
+    ):
+        return True
+    if isinstance(exc, Web3RPCError):
+        rpc_error = (getattr(exc, "rpc_response", None) or {}).get("error") or {}
+        return isinstance(rpc_error, dict) and rpc_error.get("code") in _RATE_LIMIT_RPC_CODES
+    return False
+
+
+_URL_RE = re.compile(r"(https?://)(?:[^@/\s'\"]*@)?([^/\s'\"]+)[^\s'\"]*")
+
+
+def redact_rpc_error(text: str) -> str:
+    """``text`` with every URL cut down to scheme and host (no path, no
+    userinfo), and the Alchemy
+    key masked wherever it appears. requests' HTTPError embeds the full
+    request URL ("401 Client Error: Unauthorized for url: https://...") and
+    an RPC URL's path can carry an API key, so no error text from this module
+    reaches a log or a :class:`ChainReadFailure` unredacted."""
+    redacted = _URL_RE.sub(r"\1\2/***", text)
+    key = (getattr(Config, "ALCHEMY_API_KEY", None) or "").strip()
+    if key:
+        redacted = redacted.replace(key, "***")
+    return redacted
+
+
+def _demote(endpoint: RpcEndpoint) -> None:
+    _demoted_until[endpoint.url] = time.monotonic() + _ENDPOINT_DEMOTION_SECONDS
+
+
+def reset_endpoint_health() -> None:
+    """Forget every endpoint demotion (tests, or an operator after a fix)."""
+    _demoted_until.clear()
 
 
 def _make_web3(chain_id: int, rpc_url: str) -> Web3:
@@ -205,7 +368,9 @@ def read_balances(wallet_address: str, tokens: list[TokenRef]) -> BalanceReadRes
     so N tokens on one chain cost one connection, not N. Native coins are read
     with ``eth_getBalance``; ERC-20s with a ``balanceOf`` call.
 
-    A chain that errors, times out, or has no configured endpoint is recorded
+    A chain whose endpoint fails on transport is retried on that chain's
+    fallback endpoints first (see :func:`rpc_endpoints_for_chain`). A chain
+    that still errors, times out, or is unsupported is recorded
     in the result's ``failures`` and contributes **no** readings -- the other
     chains are still read and returned. Nothing here raises on an RPC problem;
     the only exception raised is for an invalid wallet address, which is a
@@ -231,28 +396,54 @@ def read_balances(wallet_address: str, tokens: list[TokenRef]) -> BalanceReadRes
 
     for chain_id, chain_tokens in _group_by_chain(tokens).items():
         try:
-            rpc_url = rpc_url_for_chain(chain_id)
-            client = _make_web3(chain_id, rpc_url)
-            # Collected per chain and only merged on full success, so a
-            # mid-chain failure can't leak a partial set into the result.
-            chain_readings = [
-                BalanceReading(
-                    token=token, raw_amount=_read_one_token(client, checksum_address, token)
-                )
-                for token in chain_tokens
-            ]
+            chain_readings = _read_chain(chain_id, checksum_address, chain_tokens)
         except Exception as exc:  # noqa: BLE001 - one bad chain must not sink the rest
+            reason = redact_rpc_error(f"{type(exc).__name__}: {exc}")
             logger.warning(
                 "Holdings balance read failed for chain %s: %s",
                 CHAIN_NAMES.get(chain_id, chain_id),
-                exc,
+                reason,
             )
-            failures.append(ChainReadFailure(chain_id=chain_id, reason=str(exc)))
+            failures.append(ChainReadFailure(chain_id=chain_id, reason=reason))
             continue
 
         result_readings.extend(chain_readings)
 
     return BalanceReadResult(readings=result_readings, failures=failures)
+
+
+def _read_chain(chain_id: int, checksum_address: str, chain_tokens: list[TokenRef]):
+    """Every token on one chain, from the first endpoint that answers.
+
+    A transport failure (see :func:`is_transport_error`) moves on to the
+    chain's next endpoint and re-reads the whole chain there; anything else
+    -- a revert, a bad registry row -- raises at once, because another
+    endpoint would give the same answer. Readings are collected per endpoint
+    and only returned on full success, so a mid-chain failure can't leak a
+    partial set into the result.
+    """
+    endpoints = rpc_endpoints_for_chain(chain_id)
+    for index, endpoint in enumerate(endpoints):
+        try:
+            client = _make_web3(chain_id, endpoint.url)
+            return [
+                BalanceReading(
+                    token=token, raw_amount=_read_one_token(client, checksum_address, token)
+                )
+                for token in chain_tokens
+            ]
+        except Exception as exc:
+            if not is_transport_error(exc) or index == len(endpoints) - 1:
+                raise
+            _demote(endpoint)
+            logger.warning(
+                "Holdings RPC (%s) failed for chain %s, retrying on fallback (%s): %s",
+                endpoint.source,
+                CHAIN_NAMES.get(chain_id, chain_id),
+                endpoints[index + 1].source,
+                redact_rpc_error(f"{type(exc).__name__}: {exc}"),
+            )
+    raise UnsupportedChainError(f"No RPC endpoint for chain id {chain_id}")  # unreachable
 
 
 def _checksum(wallet_address: str) -> str:

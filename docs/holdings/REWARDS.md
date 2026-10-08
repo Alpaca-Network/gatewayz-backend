@@ -12,15 +12,16 @@ build if it creeps back in.
 
 Ships dark. Everything below is inert until `HOLDINGS_REWARDS_ENABLED=true`.
 
-## The two jobs
+## The jobs
 
 | Job | Cadence | Module |
 |---|---|---|
 | `holdings_snapshots` | `HOLDINGS_SNAPSHOTS_PER_DAY` times a day (default 4, at 00:05, 06:05, 12:05, 18:05 UTC) | `src/services/holdings/snapshots.py` |
 | `holdings_rewards` | once a day, 00:40 UTC, paying for yesterday | `src/services/holdings/rewards.py` |
+| `holdings_sweep_watchdog` | hourly, 30 min after the sweep minute | `src/services/holdings/alerts.py` |
 
-Both appear in `/admin/status` and `/admin/wayz/status` job health. Both always
-start and record a `skipped: disabled` run while the feature is off, so they
+All three appear in `/admin/status` and `/admin/wayz/status` job health. They
+always start and record a `skipped: disabled` run while the feature is off, so they
 read as off rather than missing.
 
 ### The sweep
@@ -52,6 +53,101 @@ records nothing.** These are cases where we do not know the total, and "we could
 not measure it" must never be written down as "they held zero" — an RPC outage
 would otherwise zero out every holder's day. A token the wallet holds zero of
 blocks nothing. Skips are logged with a reason and counted in the run summary.
+
+The flip side is that one unreadable chain skips **every** wallet. On
+2026-10-08 prod had recorded zero wallets for three days because
+polygon-rpc.com started answering 401. The RPC fallback and the sweep alerts
+below exist so that cannot happen silently again.
+
+### Supported tokens
+
+The registry is ops-controlled (`/admin/holdings/tokens`), so the live set is
+whatever `GET /admin/holdings/tokens` returns. Migrations add only rows that
+were verified on-chain; they never touch a row ops already created.
+
+| Chain | Token | Contract | Decimals | `price_id` |
+|---|---|---|---|---|
+| Ethereum (1) | stETH | `0xae7ab96520de3a18e5e111b5eaab095312d7fe84` | 18 | `staked-ether` |
+| Ethereum (1) | wstETH | `0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0` | 18 | `wrapped-steth` |
+| Ethereum (1) | rETH | `0xae78736cd615f374d3085123a210448e74fc6393` | 18 | `rocket-pool-eth` |
+| Ethereum (1) | cbETH | `0xbe9895146f7af43049ca1c1ae358b0541ea49704` | 18 | `coinbase-wrapped-staked-eth` |
+| Base (8453) | wstETH | `0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452` | 18 | `wrapped-steth` |
+| Base (8453) | rETH | `0xb6fe221fe9eef5aba221c348ba20a1bf5e73624c` | 18 | `rocket-pool-eth` |
+| Base (8453) | cbETH | `0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22` | 18 | `coinbase-wrapped-staked-eth` |
+| Arbitrum One (42161) | wstETH | `0x5979d7b546e38e414f7e9822514be443a4800529` | 18 | `wrapped-steth` |
+| Arbitrum One (42161) | rETH | `0xec70dcb4a1efa46b8f2d97c310c9c4790ba5ffa8` | 18 | `rocket-pool-eth` |
+| Arbitrum One (42161) | cbETH | `0x1debd73e752beaf79865fd6446b0c970eae7732f` | 18 | `coinbase-wrapped-staked-eth` |
+
+These come from `supabase/migrations/20261008120000_holdings_tokens_liquid_eth.sql`,
+which records how each address was verified. **Each token has its own price
+id, never ETH's.** wstETH, rETH and cbETH do not rebase, and each is worth more
+than one ETH by a growing ratio, so valuing them as ETH underpays every holder.
+stETH rebases, and `balanceOf` already includes the rebase.
+
+### RPC endpoints and fallback
+
+Each chain resolves its endpoints in `src/services/holdings/chains.py`
+(`rpc_endpoints_for_chain`), in this order:
+
+1. `<CHAIN>_RPC_URL` (`ETHEREUM_`, `BNB_CHAIN_`, `POLYGON_`, `BASE_`,
+   `ARBITRUM_`, `AVALANCHE_`), **if it differs from the public default**. A
+   value equal to the default is treated as unset.
+2. Alchemy, if `ALCHEMY_API_KEY` is set: `https://{net}.g.alchemy.com/v2/{key}`
+   with `eth-mainnet`, `bnb-mainnet`, `polygon-mainnet`, `base-mainnet`,
+   `arb-mainnet` or `avax-mainnet`.
+3. The public default, then a secondary public endpoint run by a different
+   operator.
+
+The first entry is the primary. When it fails on **transport** (connection
+error, timeout, an HTTP error such as 401/429/5xx, a non-JSON-RPC response, or
+a JSON-RPC rate-limit code -32005/-32016/429), the whole chain is re-read on the
+next endpoint before it counts as failed. The endpoint that failed then goes to
+the back of the list for 5 minutes. It is only moved back, never dropped.
+**A contract revert never falls over.** A revert comes from the call itself
+and would happen on every endpoint, and at the raw JSON-RPC layer it looks the
+same as a provider error. So any JSON-RPC error without a known rate-limit
+code is treated as not-transport.
+
+The key never reaches a log. Every RPC error is cut down to scheme and host
+before it is logged or stored as a `ChainReadFailure.reason`, and
+`ALCHEMY_API_KEY` is masked wherever it appears. `/admin/status` reports only
+whether the key is present, never its value.
+
+### Sweep alerts
+
+Both alerts are in `src/services/holdings/alerts.py`:
+
+- **Recorded nothing.** Fires right after a sweep that considered eligible
+  wallets (`wallets_considered > 0`) but recorded none
+  (`sweeps_recorded == 0`). The alert gives the skip counts and the failed
+  chains (`summary["failed_chains"]`, chain id to the number of wallets it
+  failed for).
+- **Stale.** An hourly watchdog job, `holdings_sweep_watchdog`, fires when no
+  sweep has recorded any wallet for `HOLDINGS_SWEEP_STALE_HOURS` (default 8)
+  while wallets old enough to be considered exist. This catches the case where
+  the sweep is not running at all. If the registry has never recorded a
+  wallet, the clock starts when the instance first checks, so enabling the
+  feature does not alert before its first sweep.
+
+Each condition alerts at most once per `HOLDINGS_ALERT_COOLDOWN_HOURS`
+(default 12). The claim is a Redis key `ops:alert:holdings:{condition}` set
+with `SET NX EX`, so several instances send one email between them. When
+Redis is down, an in-process fallback takes its place. If delivery fails, the
+claim is released so the next occurrence can retry.
+
+Delivery uses the provider-alert path: `OPS_ALERT_EMAIL` first, then the
+active admin/superadmin staff emails, sent through Resend. Every alert is also
+logged at ERROR, which Sentry captures. With no recipient at all, that ERROR
+plus one "has no recipient: set OPS_ALERT_EMAIL" ERROR is all that happens.
+Alerts carry counts, chain ids and timestamps only. They never include a wallet
+address, an RPC URL or a key.
+
+`GET /admin/status` has a `holdings_sweeps` block: `stale`,
+`last_recorded_at`, `hours_since_last_recorded`, `eligible_wallets`, and
+`last_sweep` (considered, recorded, skipped, failed_chains,
+`recorded_nothing`), plus a single `degraded` flag. The `holdings_snapshots`
+job can read `ok` while skipping every wallet. This block shows when that
+happens.
 
 ### The accrual
 
@@ -130,7 +226,8 @@ of the dict.
 
 The sweep's own summary is broken out the same way: `too_new`, `unknown_age`,
 `incomplete_read`, `missing_price`, `sweep_write_failed`, `error`, alongside
-`sweeps_recorded`. A rise in `incomplete_read` or
+`sweeps_recorded` and `failed_chains` (chain id to the number of wallets whose
+read failed on it). A rise in `incomplete_read` or
 `missing_price` there shows up as a rise in `too_few_batches` here a day later.
 
 ## API
@@ -160,12 +257,14 @@ is capped at the daily ceiling (what would actually be paid);
 
 ## Going live
 
-1. Seed the registry: `POST /admin/holdings/tokens` per asset. The migration
-   deliberately seeds nothing; an empty registry means the sweep no-ops with
-   `skipped: no_tokens`.
-2. Point the six `*_RPC_URL` vars at a paid provider. Public endpoints
-   rate-limit, and a rate-limited chain is a **failed** read, which drops the
-   whole batch for that wallet.
+1. Seed the registry: `POST /admin/holdings/tokens` per asset. The original
+   migration seeds nothing, and an empty registry means the sweep no-ops with
+   `skipped: no_tokens`. The liquid ETH tokens above are added by their own
+   migration.
+2. Set `ALCHEMY_API_KEY`, or point the six `*_RPC_URL` vars at a paid
+   provider. Public endpoints rate-limit, and a chain that fails on every
+   endpoint is a **failed** read, which drops the whole batch for that wallet.
+   Set `OPS_ALERT_EMAIL` so the sweep alerts reach someone.
 3. Set the tiers: `PUT /admin/holdings/rates` with a superadmin key. The
    migration's placeholder pays 0.
 4. Set `HOLDINGS_REWARDS_ENABLED=true` on Railway `api`.

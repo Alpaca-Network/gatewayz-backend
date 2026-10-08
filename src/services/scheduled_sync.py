@@ -1610,6 +1610,7 @@ def holdings_snapshot_cron_hours(snapshots_per_day: int) -> list[int]:
 async def run_scheduled_holdings_snapshots():
     """Run one holdings observation sweep
     (src/services/holdings/snapshots.py::run_holdings_snapshots_once)."""
+    from src.services.holdings.alerts import alert_if_sweep_recorded_nothing
     from src.services.holdings.snapshots import run_holdings_snapshots_once
 
     run_started_at = datetime.now(UTC)
@@ -1622,18 +1623,52 @@ async def run_scheduled_holdings_snapshots():
             return
 
         logger.info(
-            "✅ Holdings snapshots OK | considered=%s recorded=%s empty=%s rows=%s skipped=%s",
+            "✅ Holdings snapshots OK | considered=%s recorded=%s empty=%s rows=%s skipped=%s "
+            "failed_chains=%s",
             result.get("wallets_considered"),
             result.get("wallets_recorded"),
             result.get("wallets_empty"),
             result.get("rows_recorded"),
             result.get("skipped"),
+            result.get("failed_chains"),
         )
         record_job_run("holdings_snapshots", ok=True, summary=result, duration_ms=duration_ms)
+        # A sweep that saw eligible wallets and recorded none is the failure
+        # mode that went unnoticed for three days in Oct 2026 -- tell ops.
+        # Off the event loop: delivery is a synchronous HTTP call. Guarded
+        # separately so an alerting bug can never overwrite this run's record.
+        try:
+            await asyncio.to_thread(alert_if_sweep_recorded_nothing, result)
+        except Exception as e:
+            logger.error("Holdings sweep alert check failed: %s", e)
     except Exception as e:
         logger.warning("Holdings snapshots run failed (non-fatal): %s", e)
         record_job_run(
             "holdings_snapshots",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+async def run_scheduled_holdings_sweep_watchdog():
+    """Hourly: alert when no sweep has recorded a wallet for
+    HOLDINGS_SWEEP_STALE_HOURS while eligible wallets exist
+    (src/services/holdings/alerts.py::check_sweep_staleness). Catches the
+    sweep not running at all, which its own post-run alert cannot."""
+    from src.services.holdings.alerts import check_sweep_staleness
+
+    run_started_at = datetime.now(UTC)
+    try:
+        status = await asyncio.to_thread(check_sweep_staleness)
+        duration_ms = int((datetime.now(UTC) - run_started_at).total_seconds() * 1000)
+        if status.get("stale"):
+            logger.warning("Holdings sweep is stale: %s", status)
+        record_job_run("holdings_sweep_watchdog", ok=True, summary=status, duration_ms=duration_ms)
+    except Exception as e:
+        logger.warning("Holdings sweep watchdog failed (non-fatal): %s", e)
+        record_job_run(
+            "holdings_sweep_watchdog",
             ok=False,
             error=str(e),
             duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
@@ -1712,6 +1747,17 @@ def start_holdings_snapshots_scheduler():
             trigger=CronTrigger(hour=hour_expr, minute=minute, timezone="UTC"),
             id="holdings_snapshots",
             name="Holdings Snapshots Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        # The staleness watchdog shares this scheduler: it exists to watch
+        # this job, and its lifecycle is this job's.
+        _holdings_snapshots_scheduler.add_job(
+            run_scheduled_holdings_sweep_watchdog,
+            trigger=CronTrigger(minute=(minute + 30) % 60, timezone="UTC"),
+            id="holdings_sweep_watchdog",
+            name="Holdings Sweep Watchdog",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
