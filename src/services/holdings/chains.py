@@ -314,20 +314,78 @@ def is_transport_error(exc: BaseException) -> bool:
 
 
 _URL_RE = re.compile(r"(https?://)(?:[^@/\s'\"]*@)?([^/\s'\"]+)[^\s'\"]*")
+# A path-only key segment, as urllib3/requests print it without the host
+# ("Max retries exceeded with url: /v2/<key>", '"POST /v2/<key> HTTP/1.1"').
+# Alchemy and Infura put the key in /v2/ and /v3/ respectively.
+_KEY_PATH_RE = re.compile(r"(/v[23]/)[^\s'\"/?#]+")
 
 
 def redact_rpc_error(text: str) -> str:
     """``text`` with every URL cut down to scheme and host (no path, no
-    userinfo), and the Alchemy
-    key masked wherever it appears. requests' HTTPError embeds the full
-    request URL ("401 Client Error: Unauthorized for url: https://...") and
-    an RPC URL's path can carry an API key, so no error text from this module
-    reaches a log or a :class:`ChainReadFailure` unredacted."""
+    userinfo), every ``/v2/<key>``-style path segment masked, and the Alchemy
+    key masked wherever it appears.
+
+    A defensive scrub, not the main control: this module never logs or stores
+    an RPC exception's text in the first place (see :func:`describe_rpc_error`),
+    because requests embeds the full request URL -- and so the key -- in
+    HTTPError and ConnectionError messages. This catches anything that still
+    gets through, such as web3/urllib3 debug lines (see _SecretScrubFilter).
+    """
     redacted = _URL_RE.sub(r"\1\2/***", text)
+    redacted = _KEY_PATH_RE.sub(r"\1***", redacted)
     key = (getattr(Config, "ALCHEMY_API_KEY", None) or "").strip()
     if key:
         redacted = redacted.replace(key, "***")
     return redacted
+
+
+def describe_rpc_error(exc: BaseException) -> str:
+    """A loggable description of an RPC failure built only from fields that
+    cannot carry a URL: the exception class, the HTTP status, and the
+    JSON-RPC error code. **Never** ``str(exc)`` -- requests' messages embed the
+    request URL, and an RPC URL's path carries the API key ("401 Client
+    Error: Unauthorized for url: https://eth-mainnet.g.alchemy.com/v2/<key>").
+    This is the only form an RPC error takes in logs, in
+    :class:`ChainReadFailure`, and so in anything built from them."""
+    parts = [type(exc).__name__]
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        parts.append(f"HTTP {status}")
+    if isinstance(exc, Web3RPCError):
+        rpc_error = (getattr(exc, "rpc_response", None) or {}).get("error")
+        if isinstance(rpc_error, dict) and isinstance(rpc_error.get("code"), int):
+            parts.append(f"rpc code {rpc_error['code']}")
+    return redact_rpc_error(" ".join(parts))
+
+
+class _SecretScrubFilter(logging.Filter):
+    """Scrubs RPC URLs and keys out of records from the HTTP libraries
+    underneath web3. web3's HTTPProvider and urllib3 log the full endpoint
+    URI at DEBUG; a deploy with LOG_LEVEL=DEBUG would otherwise ship the
+    Alchemy key to the log drain and Sentry breadcrumbs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001 - a broken format must not drop the record
+            return True
+        scrubbed = redact_rpc_error(message)
+        if scrubbed != message:
+            record.msg = scrubbed
+            record.args = None
+        return True
+
+
+_SCRUBBED_LOGGERS = (
+    "web3.providers.HTTPProvider",
+    "web3._utils.http_session_manager.HTTPSessionManager",
+    "urllib3.connectionpool",
+)
+for _name in _SCRUBBED_LOGGERS:
+    _target = logging.getLogger(_name)
+    if not any(isinstance(f, _SecretScrubFilter) for f in _target.filters):
+        _target.addFilter(_SecretScrubFilter())
 
 
 def _demote(endpoint: RpcEndpoint) -> None:
@@ -398,7 +456,7 @@ def read_balances(wallet_address: str, tokens: list[TokenRef]) -> BalanceReadRes
         try:
             chain_readings = _read_chain(chain_id, checksum_address, chain_tokens)
         except Exception as exc:  # noqa: BLE001 - one bad chain must not sink the rest
-            reason = redact_rpc_error(f"{type(exc).__name__}: {exc}")
+            reason = describe_rpc_error(exc)
             logger.warning(
                 "Holdings balance read failed for chain %s: %s",
                 CHAIN_NAMES.get(chain_id, chain_id),
@@ -441,7 +499,7 @@ def _read_chain(chain_id: int, checksum_address: str, chain_tokens: list[TokenRe
                 endpoint.source,
                 CHAIN_NAMES.get(chain_id, chain_id),
                 endpoints[index + 1].source,
-                redact_rpc_error(f"{type(exc).__name__}: {exc}"),
+                describe_rpc_error(exc),
             )
     raise UnsupportedChainError(f"No RPC endpoint for chain id {chain_id}")  # unreachable
 
