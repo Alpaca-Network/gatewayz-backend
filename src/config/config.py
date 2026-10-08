@@ -234,7 +234,9 @@ class Config:
     # Mainnet C-Chain -- distinct from AVALANCHE_FUJI_RPC_URL (testnet, WAYZ staking).
     AVALANCHE_RPC_URL = _get_env_var("AVALANCHE_RPC_URL", "https://api.avax.network/ext/bc/C/rpc")
     BASE_RPC_URL = _get_env_var("BASE_RPC_URL", "https://mainnet.base.org")
-    POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-rpc.com")
+    # polygon-rpc.com started answering 401 (key required), which failed every
+    # holdings sweep: one unreadable chain skips the whole wallet.
+    POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-bor-rpc.publicnode.com")
     ARBITRUM_RPC_URL = _get_env_var("ARBITRUM_RPC_URL", "https://arb1.arbitrum.io/rpc")
     # Ships dark, exactly like STAKING_REWARDS_ENABLED did -- the schema, jobs
     # and endpoints land inert until the rates/caps are a confirmed product
