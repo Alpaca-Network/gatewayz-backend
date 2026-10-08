@@ -103,8 +103,23 @@ class TestResponseShape:
             "wayz",
             "provider_budget",
             "ops_alerts",
+            "holdings_sweeps",
         ):
             assert key in data
+
+    def test_holdings_sweeps_block_reports_coverage(self):
+        health = {"enabled": True, "stale": True, "degraded": True, "last_sweep": {}}
+        with patch("src.routes.admin_status.holdings_sweep_health", return_value=health):
+            response = client.get("/admin/status")
+        assert response.json()["data"]["holdings_sweeps"] == health
+
+    def test_holdings_sweeps_block_degrades_independently(self):
+        with patch(
+            "src.routes.admin_status.holdings_sweep_health", side_effect=RuntimeError("boom")
+        ):
+            response = client.get("/admin/status")
+        assert response.status_code == 200
+        assert response.json()["data"]["holdings_sweeps"] == {"error": "RuntimeError"}
 
     def test_wayz_block_matches_admin_wayz_shape_minus_jobs(self):
         response = client.get("/admin/status")
@@ -129,6 +144,7 @@ class TestResponseShape:
             "gpu_rollup",
             "holdings_snapshots",
             "holdings_rewards",
+            "holdings_sweep_watchdog",
         ):
             assert name in jobs
 

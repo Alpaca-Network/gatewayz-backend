@@ -3,19 +3,33 @@
 Every RPC call is mocked -- these tests must never touch a real node.
 """
 
+import logging
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
+from web3.exceptions import ContractLogicError, Web3RPCError
 
+import src.services.holdings.chains as chains
+from src.config.config import Config
 from src.services.holdings.chains import (
+    CHAIN_ID_ARBITRUM_ONE,
+    CHAIN_ID_AVALANCHE_C_CHAIN,
     CHAIN_ID_BASE,
+    CHAIN_ID_BNB_CHAIN,
     CHAIN_ID_ETHEREUM,
     CHAIN_ID_POLYGON,
+    SUPPORTED_CHAIN_IDS,
     BalanceReadResult,
     InvalidWalletAddressError,
+    RpcEndpoint,
     TokenRef,
     UnsupportedChainError,
+    is_transport_error,
     read_balances,
+    redact_rpc_error,
+    rpc_endpoints_for_chain,
     rpc_url_for_chain,
 )
 
@@ -56,6 +70,15 @@ def sb():
     """No-op fixture whose mere presence bypasses the autouse DB-skip in
     tests/conftest.py -- this is a pure unit test with everything mocked."""
     return None
+
+
+@pytest.fixture(autouse=True)
+def _fresh_endpoint_health():
+    """Endpoint demotion is module-level state; never let one test's failed
+    endpoint reorder another test's endpoints."""
+    chains.reset_endpoint_health()
+    yield
+    chains.reset_endpoint_health()
 
 
 def _fake_client(*, native_balance=0, erc20_balances=None, raises=None):
@@ -270,10 +293,251 @@ def test_real_web3_client_accepts_our_call_shape(sb):
     Getting a connection failure instead proves our call shape is valid --
     and a connection failure is reported as a failed chain, not a zero.
     """
-    unreachable = "http://127.0.0.1:1"
-    with patch("src.services.holdings.chains.rpc_url_for_chain", return_value=unreachable):
+    unreachable = [RpcEndpoint(url="http://127.0.0.1:1", source="public")]
+    with patch("src.services.holdings.chains.rpc_endpoints_for_chain", return_value=unreachable):
         result = read_balances(WALLET, [ETH_NATIVE, USDC_ETH])
 
     assert result.failed_chain_ids == [CHAIN_ID_ETHEREUM]
     assert result.readings == []
     assert "TypeError" not in result.failures[0].reason
+
+
+# ---------------------------------------------------------------------------
+# RPC endpoint precedence: explicit env > Alchemy > public default, then
+# public fallbacks.
+# ---------------------------------------------------------------------------
+
+ALCHEMY_KEY = "alch-test-key-0123456789"
+
+
+def _public(chain_id):
+    return chains._PUBLIC_RPC_URLS[chain_id]
+
+
+class TestEndpointPrecedence:
+    def test_config_defaults_match_the_public_defaults(self, sb):
+        """The public default is how an explicit-but-default value is told
+        apart from a real override, so it must not drift from Config."""
+        for chain_id, attr in chains._RPC_CONFIG_ATTR.items():
+            if os.environ.get(attr):
+                continue  # an operator override in this shell; nothing to compare
+            assert getattr(Config, attr) == _public(chain_id)[0], attr
+
+    def test_no_override_and_no_key_reads_public_then_secondary(self, sb, monkeypatch):
+        monkeypatch.setattr(Config, "ALCHEMY_API_KEY", None)
+        monkeypatch.setattr(Config, "POLYGON_RPC_URL", _public(CHAIN_ID_POLYGON)[0])
+        endpoints = rpc_endpoints_for_chain(CHAIN_ID_POLYGON)
+        assert [e.url for e in endpoints] == list(_public(CHAIN_ID_POLYGON))
+        assert {e.source for e in endpoints} == {"public"}
+
+    def test_alchemy_key_beats_the_public_default(self, sb, monkeypatch):
+        monkeypatch.setattr(Config, "ALCHEMY_API_KEY", ALCHEMY_KEY)
+        monkeypatch.setattr(Config, "ETHEREUM_RPC_URL", _public(CHAIN_ID_ETHEREUM)[0])
+        endpoints = rpc_endpoints_for_chain(CHAIN_ID_ETHEREUM)
+        assert endpoints[0] == RpcEndpoint(
+            url=f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_KEY}", source="alchemy"
+        )
+        # The public endpoints stay behind it as fallbacks.
+        assert [e.url for e in endpoints[1:]] == list(_public(CHAIN_ID_ETHEREUM))
+
+    def test_explicit_override_beats_alchemy(self, sb, monkeypatch):
+        monkeypatch.setattr(Config, "ALCHEMY_API_KEY", ALCHEMY_KEY)
+        monkeypatch.setattr(Config, "BASE_RPC_URL", "https://paid.example/base")
+        endpoints = rpc_endpoints_for_chain(CHAIN_ID_BASE)
+        assert [e.source for e in endpoints] == ["env", "alchemy", "public", "public"]
+        assert endpoints[0].url == "https://paid.example/base"
+        assert rpc_url_for_chain(CHAIN_ID_BASE) == "https://paid.example/base"
+
+    def test_override_equal_to_the_public_default_is_treated_as_unset(self, sb, monkeypatch):
+        """Prod sets POLYGON_RPC_URL to the publicnode default; adding
+        ALCHEMY_API_KEY must still upgrade Polygon to Alchemy."""
+        monkeypatch.setattr(Config, "ALCHEMY_API_KEY", ALCHEMY_KEY)
+        monkeypatch.setattr(Config, "POLYGON_RPC_URL", _public(CHAIN_ID_POLYGON)[0])
+        endpoints = rpc_endpoints_for_chain(CHAIN_ID_POLYGON)
+        assert endpoints[0].source == "alchemy"
+        assert len({e.url for e in endpoints}) == len(endpoints)  # no duplicates
+
+    @pytest.mark.parametrize(
+        ("chain_id", "slug"),
+        [
+            (CHAIN_ID_ETHEREUM, "eth-mainnet"),
+            (CHAIN_ID_BASE, "base-mainnet"),
+            (CHAIN_ID_ARBITRUM_ONE, "arb-mainnet"),
+            (CHAIN_ID_POLYGON, "polygon-mainnet"),
+            (CHAIN_ID_BNB_CHAIN, "bnb-mainnet"),
+            (CHAIN_ID_AVALANCHE_C_CHAIN, "avax-mainnet"),
+        ],
+    )
+    def test_alchemy_network_slug_per_chain(self, sb, monkeypatch, chain_id, slug):
+        monkeypatch.setattr(Config, "ALCHEMY_API_KEY", ALCHEMY_KEY)
+        monkeypatch.setattr(Config, chains._RPC_CONFIG_ATTR[chain_id], None)
+        assert rpc_url_for_chain(chain_id) == f"https://{slug}.g.alchemy.com/v2/{ALCHEMY_KEY}"
+
+    def test_every_supported_chain_has_a_public_default_and_alchemy_slug(self, sb):
+        for chain_id in SUPPORTED_CHAIN_IDS:
+            default, secondary = _public(chain_id)
+            assert default.startswith("https://") and secondary.startswith("https://")
+            assert default != secondary
+            assert chain_id in chains._ALCHEMY_NETWORKS
+
+    def test_endpoint_repr_never_shows_the_url(self, sb):
+        endpoint = RpcEndpoint(url=f"https://x.g.alchemy.com/v2/{ALCHEMY_KEY}", source="alchemy")
+        assert ALCHEMY_KEY not in repr(endpoint)
+
+
+# ---------------------------------------------------------------------------
+# Fallback: transport failures move to the next endpoint, reverts never do.
+# ---------------------------------------------------------------------------
+
+PRIMARY = "https://primary.example/rpc"
+FALLBACK = "https://fallback.example/rpc"
+
+
+def _two_endpoints(chain_id):  # noqa: ARG001
+    return [RpcEndpoint(url=PRIMARY, source="alchemy"), RpcEndpoint(url=FALLBACK, source="public")]
+
+
+def _http_401():
+    response = requests.Response()
+    response.status_code = 401
+    response.url = f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_KEY}"
+    return requests.HTTPError(
+        f"401 Client Error: Unauthorized for url: {response.url}", response=response
+    )
+
+
+def _read_with(clients_by_url, tokens):
+    calls: list[str] = []
+
+    def _make(chain_id, rpc_url):  # noqa: ARG001
+        calls.append(rpc_url)
+        return clients_by_url[rpc_url]
+
+    with (
+        patch("src.services.holdings.chains.rpc_endpoints_for_chain", side_effect=_two_endpoints),
+        patch("src.services.holdings.chains._make_web3", side_effect=_make),
+    ):
+        result = read_balances(WALLET, tokens)
+    return result, calls
+
+
+class TestFallback:
+    @pytest.mark.parametrize(
+        "error",
+        [
+            requests.ConnectionError("connection refused"),
+            requests.Timeout("read timed out"),
+            TimeoutError("rpc timed out"),
+            _http_401(),
+            Web3RPCError("limit exceeded", rpc_response={"error": {"code": -32005}}),
+        ],
+        ids=["connection", "requests-timeout", "timeout", "http-401", "rate-limit-code"],
+    )
+    def test_transport_failure_is_retried_on_the_fallback(self, sb, error):
+        clients = {
+            PRIMARY: _fake_client(raises=error),
+            FALLBACK: _fake_client(native_balance=4, erc20_balances={USDC_ETH.contract_address: 9}),
+        }
+        result, calls = _read_with(clients, [ETH_NATIVE, USDC_ETH])
+
+        assert calls == [PRIMARY, FALLBACK]
+        assert result.is_complete is True
+        assert _readings_by_symbol(result) == {"ETH": 4, "USDC": 9}
+
+    def test_a_revert_is_never_retried_elsewhere(self, sb):
+        """A revert is a property of the call, not the endpoint: it would
+        revert identically on the fallback. Counting it as an endpoint
+        failure is the Alchemy-failover mistake (see the vault note)."""
+        clients = {
+            PRIMARY: _fake_client(raises=ContractLogicError("execution reverted")),
+            FALLBACK: _fake_client(native_balance=4),
+        }
+        result, calls = _read_with(clients, [USDC_ETH])
+
+        assert calls == [PRIMARY]
+        assert result.failed_chain_ids == [CHAIN_ID_ETHEREUM]
+        assert result.readings == []
+
+    def test_an_unrecognised_rpc_error_is_not_treated_as_transport(self, sb):
+        error = Web3RPCError("execution reverted", rpc_response={"error": {"code": 3}})
+        clients = {PRIMARY: _fake_client(raises=error), FALLBACK: _fake_client(native_balance=1)}
+        result, calls = _read_with(clients, [ETH_NATIVE])
+
+        assert calls == [PRIMARY]
+        assert result.failed_chain_ids == [CHAIN_ID_ETHEREUM]
+
+    def test_every_endpoint_failing_is_still_a_failed_chain_not_a_zero(self, sb):
+        clients = {
+            PRIMARY: _fake_client(raises=requests.ConnectionError("down")),
+            FALLBACK: _fake_client(raises=requests.ConnectionError("also down")),
+        }
+        result, calls = _read_with(clients, [ETH_NATIVE, USDC_ETH])
+
+        assert calls == [PRIMARY, FALLBACK]
+        assert result.failed_chain_ids == [CHAIN_ID_ETHEREUM]
+        assert result.readings == []
+
+    def test_a_mid_chain_transport_failure_rereads_the_whole_chain(self, sb):
+        primary = MagicMock()
+        primary.eth.get_balance.return_value = 999  # must NOT leak into the result
+        primary.eth.contract.side_effect = requests.ConnectionError("dropped")
+        clients = {
+            PRIMARY: primary,
+            FALLBACK: _fake_client(native_balance=5, erc20_balances={USDC_ETH.contract_address: 6}),
+        }
+        result, _calls = _read_with(clients, [ETH_NATIVE, USDC_ETH])
+
+        assert _readings_by_symbol(result) == {"ETH": 5, "USDC": 6}
+
+    def test_a_failed_endpoint_is_tried_last_for_a_while(self, sb, monkeypatch):
+        monkeypatch.setattr(Config, "ALCHEMY_API_KEY", ALCHEMY_KEY)
+        monkeypatch.setattr(Config, "ETHEREUM_RPC_URL", "https://paid.example/eth")
+        first = rpc_endpoints_for_chain(CHAIN_ID_ETHEREUM)
+        chains._demote(first[0])
+
+        reordered = rpc_endpoints_for_chain(CHAIN_ID_ETHEREUM)
+        assert reordered[-1] == first[0]  # demoted, not dropped
+        assert reordered[:-1] == first[1:]
+
+        chains.reset_endpoint_health()
+        assert rpc_endpoints_for_chain(CHAIN_ID_ETHEREUM) == first
+
+
+class TestTransportClassification:
+    def test_reverts_and_bad_output_are_not_transport(self, sb):
+        from web3.exceptions import BadFunctionCallOutput
+
+        assert is_transport_error(ContractLogicError("execution reverted")) is False
+        assert is_transport_error(BadFunctionCallOutput("0x")) is False
+        assert is_transport_error(ValueError("bad registry row")) is False
+
+    def test_http_and_socket_failures_are_transport(self, sb):
+        assert is_transport_error(_http_401()) is True
+        assert is_transport_error(ConnectionError("refused")) is True
+        assert is_transport_error(requests.Timeout("slow")) is True
+
+
+class TestKeyNeverLeaks:
+    def test_redaction_strips_url_paths_and_the_key(self, sb, monkeypatch):
+        monkeypatch.setattr(Config, "ALCHEMY_API_KEY", ALCHEMY_KEY)
+        text = redact_rpc_error(
+            f"401 for url: https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_KEY} "
+            f"and https://user:pw@rpc.example/path?k=1 and bare {ALCHEMY_KEY}"
+        )
+        assert ALCHEMY_KEY not in text
+        assert "pw@" not in text and "/path" not in text
+        assert "https://eth-mainnet.g.alchemy.com/***" in text
+
+    def test_failure_reason_and_logs_never_contain_the_key(self, sb, monkeypatch, caplog):
+        monkeypatch.setattr(Config, "ALCHEMY_API_KEY", ALCHEMY_KEY)
+        clients = {
+            PRIMARY: _fake_client(raises=_http_401()),
+            FALLBACK: _fake_client(raises=_http_401()),
+        }
+        with caplog.at_level(logging.DEBUG, logger="src.services.holdings.chains"):
+            result, _calls = _read_with(clients, [ETH_NATIVE])
+
+        assert result.failed_chain_ids == [CHAIN_ID_ETHEREUM]
+        assert ALCHEMY_KEY not in result.failures[0].reason
+        assert "401" in result.failures[0].reason
+        assert ALCHEMY_KEY not in caplog.text

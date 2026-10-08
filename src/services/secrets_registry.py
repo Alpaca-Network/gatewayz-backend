@@ -49,6 +49,7 @@ SECRET_NAMES: list[str] = [
     "SENTRY_DSN",
     "GATEWAYZ_AUTH_BRIDGE_SECRET",
     "UPSTREAM_PSEUDONYM_SECRET",
+    "ALCHEMY_API_KEY",
 ]
 
 # Default salt mixed into the fingerprint below. Overridable via the

@@ -229,12 +229,22 @@ class Config:
     # fresh environment works without configuration; production should point
     # these at a paid provider, since public endpoints rate-limit and a
     # rate-limited chain is reported as a *failed* read (never a zero balance).
+    #
+    # Precedence per chain (src/services/holdings/chains.py): an explicit
+    # <CHAIN>_RPC_URL that differs from the public default below, then an
+    # Alchemy URL derived from ALCHEMY_API_KEY, then the public default. A
+    # transport failure on the chosen endpoint is retried on the public
+    # endpoints before the chain is declared unread. The key is a secret: it
+    # is never logged, and RPC URLs are redacted from every error message.
+    ALCHEMY_API_KEY = _get_env_var("ALCHEMY_API_KEY")
     ETHEREUM_RPC_URL = _get_env_var("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com")
     BNB_CHAIN_RPC_URL = _get_env_var("BNB_CHAIN_RPC_URL", "https://bsc-dataseed.binance.org")
     # Mainnet C-Chain -- distinct from AVALANCHE_FUJI_RPC_URL (testnet, WAYZ staking).
     AVALANCHE_RPC_URL = _get_env_var("AVALANCHE_RPC_URL", "https://api.avax.network/ext/bc/C/rpc")
     BASE_RPC_URL = _get_env_var("BASE_RPC_URL", "https://mainnet.base.org")
-    POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-rpc.com")
+    # polygon-rpc.com started answering 401 (key required), which failed every
+    # holdings sweep: one unreadable chain skips the whole wallet.
+    POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-bor-rpc.publicnode.com")
     ARBITRUM_RPC_URL = _get_env_var("ARBITRUM_RPC_URL", "https://arb1.arbitrum.io/rpc")
     # Ships dark, exactly like STAKING_REWARDS_ENABLED did -- the schema, jobs
     # and endpoints land inert until the rates/caps are a confirmed product
@@ -298,6 +308,13 @@ class Config:
     # starts exactly on a UTC day boundary where its taken_at could land on
     # either side of the day it is meant to belong to.
     HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC = int(_get_env_var("HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC", "5"))
+    # Ops alerting for the observation sweep (src/services/holdings/alerts.py).
+    # A sweep that considered wallets but recorded none alerts immediately; a
+    # watchdog alerts when no sweep has recorded a wallet for this many hours
+    # while eligible wallets exist. Each condition alerts at most once per
+    # HOLDINGS_ALERT_COOLDOWN_HOURS.
+    HOLDINGS_SWEEP_STALE_HOURS = float(_get_env_var("HOLDINGS_SWEEP_STALE_HOURS", "8"))
+    HOLDINGS_ALERT_COOLDOWN_HOURS = float(_get_env_var("HOLDINGS_ALERT_COOLDOWN_HOURS", "12"))
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.

@@ -294,6 +294,25 @@ class TestIncompleteReadDropsBatch:
         assert result["skipped"]["incomplete_read"] == 1
         assert result["wallets_recorded"] == 1
 
+    def test_failed_chains_are_counted_by_chain_id_without_addresses(self, wired):
+        """The ops alert and /admin/status need to say WHICH chain is down --
+        the Oct 2026 outage was one chain (Polygon) skipping every wallet."""
+        wired.wallets = [_wallet_row(WALLET), _wallet_row(OTHER_WALLET)]
+        wired.balances[WALLET] = BalanceReadResult(
+            readings=[],
+            failures=[
+                ChainReadFailure(chain_id=137, reason="401"),
+                ChainReadFailure(chain_id=1, reason="timeout"),
+            ],
+        )
+        wired.balances[OTHER_WALLET] = BalanceReadResult(
+            readings=[], failures=[ChainReadFailure(chain_id=137, reason="401")]
+        )
+        result = snapshots.run_holdings_snapshots_once(now=NOW)
+        assert result["failed_chains"] == {"1": 1, "137": 2}
+        assert result["sweeps_recorded"] == 0
+        assert WALLET not in str(result) and OTHER_WALLET not in str(result)
+
 
 class TestMissingPriceDropsBatch:
     def test_held_token_without_a_fresh_price_drops_the_whole_batch(self, wired):
