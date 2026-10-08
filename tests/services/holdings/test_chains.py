@@ -267,7 +267,9 @@ def test_failures_carry_a_reason_for_logging(sb):
     assert len(result.failures) == 1
     failure = result.failures[0]
     assert failure.chain_id == CHAIN_ID_ETHEREUM
-    assert "rpc timed out" in failure.reason
+    # Class only, never the exception text: requests embeds the URL (and so
+    # the API key) in its messages.
+    assert failure.reason == "TimeoutError"
 
 
 def test_wallet_address_is_checksummed_before_use(sb):

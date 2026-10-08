@@ -108,10 +108,17 @@ and would happen on every endpoint, and at the raw JSON-RPC layer it looks the
 same as a provider error. So any JSON-RPC error without a known rate-limit
 code is treated as not-transport.
 
-The key never reaches a log. Every RPC error is cut down to scheme and host
-before it is logged or stored as a `ChainReadFailure.reason`, and
-`ALCHEMY_API_KEY` is masked wherever it appears. `/admin/status` reports only
-whether the key is present, never its value.
+The key never reaches a log. requests puts the request URL, and so the key,
+in its exception messages. So an RPC error is never logged or stored as
+`str(exc)`. `describe_rpc_error` reduces it to the exception class, the HTTP
+status and the JSON-RPC code, and that is all that reaches a log, a
+`ChainReadFailure.reason`, a sweep summary or an alert. web3 and urllib3 log
+the endpoint URL at DEBUG, so their loggers carry a filter that masks URL
+paths, `/v2/<key>` segments and `ALCHEMY_API_KEY`.
+`tests/services/holdings/test_secret_hygiene.py` runs a full sweep and its
+alert against errors that contain a fake key, and checks the key appears in
+none of the logs, the summary, the failure reasons or the alert email.
+`/admin/status` reports only whether the key is present.
 
 ### Sweep alerts
 
