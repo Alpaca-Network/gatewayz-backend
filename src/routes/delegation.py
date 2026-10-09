@@ -40,7 +40,7 @@ from src.db.delegation import (
     replace_active_rate,
     resume_accruals,
 )
-from src.db.user_wallets import get_wallets_for_user
+from src.db.user_wallets import get_wallets_for_user, is_cardano_wallet
 from src.schemas.delegation import (
     ResumeDelegationRequest,
     RunDelegationRequest,
@@ -150,10 +150,15 @@ async def get_delegation_rewards(
     estimate_inputs: list[tuple[str, Decimal]] = []
     accruals: list[dict[str, Any]] = []
 
+    linked: list[dict[str, str]] = []
     for wallet in get_wallets_for_user(user["id"]):
         address = str(wallet.get("wallet_address") or "")
         if not address:
             continue
+        # Linked right away, before the first measurement sweep sees it.
+        linked.append(
+            {"asset": "ada" if is_cardano_wallet(wallet) else "eth", "wallet_address": address}
+        )
         for row in get_latest_measurements(address):
             asset = str(row.get("asset"))
             usd = _decimal(row.get("usd_value"))
@@ -171,8 +176,10 @@ async def get_delegation_rewards(
         accruals.extend(list_accruals_for_wallet(address, limit=_TOTALS_ROW_LIMIT))
 
     per_day = estimate_daily_credits(estimate_inputs, rates)
+    # "claimed" = reserved for this account, payment in flight.
     pending = sum(
-        (_decimal(a.get("credits")) for a in accruals if a.get("status") == "pending"), Decimal(0)
+        (_decimal(a.get("credits")) for a in accruals if a.get("status") in ("pending", "claimed")),
+        Decimal(0),
     )
     paid = sum(
         (_decimal(a.get("credits")) for a in accruals if a.get("status") == "paid"), Decimal(0)
@@ -188,6 +195,7 @@ async def get_delegation_rewards(
         "success": True,
         "data": {
             "enabled": bool(Config.DELEGATED_STAKING_ENABLED),
+            "linked_wallets": linked,
             "positions": positions,
             "allowance": {
                 "credits_per_day_estimate": _num(per_day),

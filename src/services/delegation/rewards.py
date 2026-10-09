@@ -20,11 +20,15 @@ reused rather than reinvented:
   Idempotent twice over: UNIQUE (wallet_address, asset, reward_date), and
   the credit ledger's unique (UUID) request_id. The account cap is checked
   again at payment time, so pending rows paid on link cannot stack.
-* **Two ceilings in code**: DELEGATION_DAILY_CAP_CREDITS per account per day
-  (all its wallets and assets together) and DELEGATION_GLOBAL_DAILY_BUDGET_
-  CREDITS per day across everyone. Budget order rotates daily
-  (holdings' budget_order); accruals already decided for the date consume
-  budget first, so a re-run cannot grant a second budget.
+* **Two ceilings, enforced atomically in SQL**: DELEGATION_DAILY_CAP_CREDITS
+  per account per day (all its wallets and assets together, attributed by
+  decision-time account, paid account and currently linked wallets) and
+  DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS per day across every account and
+  asset. delegation_reserve_accrual (insert) and delegation_claim_accrual
+  (pay) check and write under one per-date advisory lock, so two runs, or a
+  run and a pay-on-link, can never both see "under cap" -- there is no
+  read-then-write in Python. Budget order rotates daily (holdings'
+  budget_order); everything already reserved for the date counts first.
 * **Fail closed per asset.** An asset whose accruals reconciliation paused
   (delegation_controls) gets no new accrual and no pending payout until an
   admin resumes it; an unreadable controls table pauses everything.
@@ -42,20 +46,18 @@ from src.config.config import Config
 from src.db.credit_transactions import TransactionType
 from src.db.delegation import (
     ASSETS,
-    create_accrual,
+    claim_accrual,
     get_accrual,
     get_active_rates,
     get_controls,
     get_measurements_for_date,
-    list_accruals_for_date,
-    list_accruals_for_wallet_date,
     list_measured_pairs_for_date,
     list_pending_accruals,
     list_pending_accruals_since,
     mark_accrual_paid,
-    void_accrual,
+    reserve_accrual,
 )
-from src.db.user_wallets import get_wallet, get_wallets_for_user
+from src.db.user_wallets import get_wallet
 from src.db.users import add_credits_to_user
 from src.services.delegation.measurements import ada_configured, eth_configured
 from src.services.holdings.rewards import budget_order
@@ -153,81 +155,56 @@ def _resolve_user_id(wallet_address: str) -> int | None:
     return row.get("user_id")
 
 
-def _account_headroom(
-    user_id: int, reward_date_str: str, wallet: str, asset: str
-) -> Decimal | None:
-    """What the account may still earn on the date, after every accrual its
-    wallets already hold for it (any asset) except this (wallet, asset).
-    None when any lookup failed -- the caller skips rather than guess."""
-    spent = Decimal(0)
-    for row in get_wallets_for_user(user_id):
-        address = str(row.get("wallet_address") or "").lower()
-        if not address:
-            continue
-        accruals = list_accruals_for_wallet_date(address, reward_date_str)
-        if accruals is None:
-            return None
-        for accrual in accruals:
-            if address == wallet and accrual.get("asset") == asset:
-                continue
-            if accrual.get("status") in ("pending", "paid"):
-                spent += _decimal(accrual.get("credits"))
-    return daily_cap() - spent
-
-
-def _paid_headroom(user_id: int, reward_date_str: str, wallet: str, asset: str) -> Decimal | None:
-    """The account's remaining cap for the date counting only PAID accruals
-    of its other wallet-assets. Checked again at payment time because an
-    accrual decided while its wallet was unlinked was capped on its own:
-    several such wallets relinked to one account would otherwise each pay a
-    full cap. None when a lookup failed."""
-    paid = Decimal(0)
-    for row in get_wallets_for_user(user_id):
-        address = str(row.get("wallet_address") or "").lower()
-        if not address:
-            continue
-        accruals = list_accruals_for_wallet_date(address, reward_date_str)
-        if accruals is None:
-            return None
-        for accrual in accruals:
-            if address == wallet and accrual.get("asset") == asset:
-                continue
-            if accrual.get("status") == "paid":
-                paid += _decimal(accrual.get("credits"))
-    return daily_cap() - paid
-
-
 def _pay_or_leave_pending(
     accrual: dict[str, Any], user_id: int | None = None
 ) -> tuple[str, Decimal]:
-    """Pay one pending accrual if its wallet belongs to an account, else
-    leave it pending. An accrual that no longer fits the account's daily cap
-    is voided (never paid, no longer counted as granted). Never raises: a
-    failed credit write leaves the row pending, which is exactly the
-    retryable state."""
+    """Pay one accrual. Returns (outcome, credits_paid); outcome is one of
+    paid | pending | void | paused | already. Never raises.
+
+    A 'pending' row is first CLAIMED for the wallet's current account by
+    delegation_claim_accrual, which -- atomically, under the reward date's
+    advisory lock -- re-checks the asset pause and the account's daily cap
+    (claimed + paid rows only) and voids a row that no longer fits. Only then
+    do credits move, to the claimed account, with the deterministic UUID
+    request_id, and the row is marked paid. A row already 'claimed' (a crash
+    between claim and pay) is paid to its claimed account; the ledger's
+    request_id makes that retry idempotent.
+    """
+    status = accrual.get("status")
+    if status == "pending":
+        if user_id is None:
+            user_id = _resolve_user_id(str(accrual["wallet_address"]).lower())
+        if user_id is None:
+            return "pending", Decimal(0)
+        result = claim_accrual(accrual["id"], user_id, daily_cap())
+        if result is None:
+            return "pending", Decimal(0)
+        claim_status = result.get("status")
+        if claim_status == "void":
+            logger.info("delegation_rewards: voided an accrual over the account cap")
+            return "void", Decimal(0)
+        if claim_status == "paused":
+            return "paused", Decimal(0)
+        if claim_status == "paid":
+            return "already", Decimal(0)
+        if claim_status != "claimed" or not result.get("accrual"):
+            return "pending", Decimal(0)
+        accrual = result["accrual"]
+    elif status != "claimed":
+        return "already", Decimal(0)
+
     wallet = str(accrual["wallet_address"]).lower()
     asset = str(accrual["asset"])
     reward_date_str = _day_str(accrual["reward_date"])
-    if user_id is None:
-        user_id = _resolve_user_id(wallet)
-    if user_id is None:
-        return "pending", Decimal(0)
+    payee = accrual.get("paid_user_id")
     credits = _decimal(accrual.get("credits"))
-    if credits <= 0:
+    if payee is None or credits <= 0:
         return "pending", Decimal(0)
-
-    headroom = _paid_headroom(user_id, reward_date_str, wallet, asset)
-    if headroom is None:
-        return "pending", Decimal(0)
-    if credits > headroom:
-        void_accrual(accrual["id"])
-        logger.info("delegation_rewards: voided an accrual over the account cap (%s)", asset)
-        return "void", Decimal(0)
 
     request_id = request_id_for(asset, wallet, reward_date_str)
     try:
         add_credits_to_user(
-            user_id=user_id,
+            user_id=int(payee),
             credits=float(credits),
             transaction_type=TransactionType.DELEGATION_REWARD,
             description=f"Delegated staking inference allowance ({asset.upper()}) for "
@@ -255,7 +232,14 @@ def _pay_or_leave_pending(
 
 def run_delegation_accruals_once(reward_date: date | None = None) -> dict[str, Any]:
     """One pass of the daily accrual for `reward_date` (default yesterday
-    UTC). Idempotent. ``{"skipped": "disabled"}`` while the feature is off."""
+    UTC). Idempotent. ``{"skipped": "disabled"}`` while the feature is off.
+
+    The cap and budget decision is never made here: each wallet-asset-day is
+    RESERVED by delegation_reserve_accrual, which computes the account's spend
+    and the date's committed total and inserts the pending row in one
+    transaction under the date's advisory lock. Python only decides the
+    uncapped amount (lowest-of-day x rate) and skips what obviously cannot
+    pay (unconfigured, paused, no rate, too few measurements)."""
     started = datetime.now(UTC)
     if not Config.DELEGATED_STAKING_ENABLED:
         return {"skipped": "disabled"}
@@ -267,12 +251,6 @@ def run_delegation_accruals_once(reward_date: date | None = None) -> dict[str, A
     if not pairs:
         raise DelegationMeasurementsMissingError(f"no delegation measurements for {day}")
 
-    already_decided = list_accruals_for_date(effective)
-    if already_decided is None:
-        # Budget accounting needs the date's existing accruals; guessing zero
-        # could grant a second budget.
-        raise RuntimeError(f"could not read existing delegation accruals for {day}")
-
     paused = paused_assets(get_controls())
     rates = get_active_rates()
     configured = {a: asset_configured(a) for a in ASSETS}
@@ -280,27 +258,26 @@ def run_delegation_accruals_once(reward_date: date | None = None) -> dict[str, A
     budget = _decimal(Config.DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS)
     required = required_measurements()
 
-    committed = sum(
-        (
-            _decimal(r.get("credits"))
-            for r in already_decided
-            if r.get("status") in ("pending", "paid")
-        ),
-        Decimal(0),
-    )
-    counts = {"paid": 0, "pending": 0, "void": 0, "already": 0, "errors": 0, "capped": 0}
+    counts = {
+        "paid": 0,
+        "pending": 0,
+        "void": 0,
+        "already": 0,
+        "errors": 0,
+        "capped": 0,
+    }
     skipped = {
         "unconfigured": 0,
         "paused": 0,
         "no_rate": 0,
         "no_measurements": 0,
         "too_few_measurements": 0,
-        "cap_lookup_failed": 0,
+        "over_cap": 0,
         "zero_credits": 0,
         "budget_exhausted": 0,
     }
     credits_paid = Decimal(0)
-    credits_by_asset = {a: Decimal(0) for a in ASSETS}
+    credits_granted = {a: Decimal(0) for a in ASSETS}
     budget_exhausted = False
 
     for key in budget_order([f"{asset}:{wallet}" for wallet, asset in pairs], day):
@@ -308,14 +285,12 @@ def run_delegation_accruals_once(reward_date: date | None = None) -> dict[str, A
         try:
             existing = get_accrual(wallet, asset, day)
             if existing is not None:
-                if existing.get("status") != "pending":
-                    counts["already"] += 1
-                elif asset in paused:
+                outcome, paid = _pay_or_leave_pending(existing)
+                if outcome == "paused":
                     skipped["paused"] += 1
                 else:
-                    outcome, paid = _pay_or_leave_pending(existing)
                     counts[outcome] += 1
-                    credits_paid += paid
+                credits_paid += paid
                 continue
 
             if not configured[asset]:
@@ -342,44 +317,41 @@ def run_delegation_accruals_once(reward_date: date | None = None) -> dict[str, A
 
             basis = min(values)
             credits = credits_for(basis, rate)
-            user_id = _resolve_user_id(wallet)
-            ceiling = _account_headroom(user_id, day, wallet, asset) if user_id else cap
-            if ceiling is None:
-                skipped["cap_lookup_failed"] += 1
-                continue
-            was_capped = credits > ceiling
-            if was_capped:
-                credits = _quantize(max(ceiling, Decimal(0)))
             if credits <= 0:
                 skipped["zero_credits"] += 1
                 continue
-
-            if budget_exhausted or committed + credits > budget:
-                # Stop granting once one wallet does not fit, so who gets paid
+            if budget_exhausted:
+                # Once one wallet did not fit, stop granting, so who gets paid
                 # never depends on how much budget happened to be left.
-                if not budget_exhausted:
-                    budget_exhausted = True
-                    logger.warning("delegation_rewards: global daily budget %s exhausted", budget)
                 skipped["budget_exhausted"] += 1
                 continue
 
-            created = create_accrual(wallet, asset, effective, basis, credits, rate, user_id)
-            if created is None:
-                created = get_accrual(wallet, asset, day)
-                if created is None:
-                    counts["errors"] += 1
-                    continue
-                committed += _decimal(created.get("credits"))
-                if created.get("status") != "pending":
-                    counts["already"] += 1
-                    continue
-            else:
-                committed += credits
-                credits_by_asset[asset] += credits
-                counts["capped"] += 1 if was_capped else 0
+            user_id = _resolve_user_id(wallet)
+            result = reserve_accrual(
+                wallet, asset, effective, basis, credits, rate, user_id, cap, budget
+            )
+            status = (result or {}).get("status")
+            if status == "budget_exhausted":
+                budget_exhausted = True
+                logger.warning("delegation_rewards: global daily budget %s exhausted", budget)
+                skipped["budget_exhausted"] += 1
+                continue
+            if status in ("over_cap", "paused"):
+                skipped[status] += 1
+                continue
+            if status not in ("created", "exists") or not result.get("accrual"):
+                counts["errors"] += 1
+                continue
+            accrual = result["accrual"]
+            if status == "created":
+                credits_granted[asset] += _decimal(accrual.get("credits"))
+                counts["capped"] += 1 if result.get("capped") else 0
 
-            outcome, paid = _pay_or_leave_pending(created, user_id=user_id)
-            counts[outcome] += 1
+            outcome, paid = _pay_or_leave_pending(accrual, user_id=user_id)
+            if outcome == "paused":
+                skipped["paused"] += 1
+            else:
+                counts[outcome] += 1
             credits_paid += paid
         except Exception as e:  # noqa: BLE001 - one bad wallet must not sink the run
             counts["errors"] += 1
@@ -397,7 +369,7 @@ def run_delegation_accruals_once(reward_date: date | None = None) -> dict[str, A
         "paused_assets": sorted(paused),
         "budget_exhausted": budget_exhausted,
         "required_measurements": required,
-        "credits_granted": {a: str(v) for a, v in credits_by_asset.items()},
+        "credits_granted": {a: str(v) for a, v in credits_granted.items()},
         "credits_paid": str(credits_paid),
         "retried_paid": retried_paid,
         "duration": (datetime.now(UTC) - started).total_seconds(),
@@ -405,8 +377,9 @@ def run_delegation_accruals_once(reward_date: date | None = None) -> dict[str, A
 
 
 def _sweep_pending(effective: date, paused: set[str]) -> tuple[int, Decimal]:
-    """Retry pending accruals from the last 30 days (failed credit writes,
-    wallets linked since), skipping paused assets."""
+    """Retry pending/claimed accruals from the last 30 days (failed credit
+    writes, wallets linked since). The pause and cap are re-checked by the
+    claim itself; skipping paused assets here only saves the round trip."""
     floor = (effective - timedelta(days=_PENDING_RETRY_WINDOW_DAYS)).isoformat()
     day = effective.isoformat()
     paid_count = 0
@@ -423,14 +396,13 @@ def _sweep_pending(effective: date, paused: set[str]) -> tuple[int, Decimal]:
 
 def pay_pending_delegation_for_wallet(address: str, user_id: int) -> None:
     """Pay any pending accruals for a wallet that was just linked. Called
-    inline from the link request path, so it never raises."""
+    inline from the link request path, so it never raises. Each row goes
+    through the atomic claim, so relinking several wallets to one account
+    can never pay more than its daily cap."""
     if not Config.DELEGATED_STAKING_ENABLED:
         return
     try:
-        paused = paused_assets(get_controls())
         for accrual in list_pending_accruals(address):
-            if accrual.get("asset") in paused:
-                continue
             _pay_or_leave_pending(accrual, user_id=user_id)
     except Exception as e:  # noqa: BLE001
         logger.warning("pay_pending_delegation_for_wallet failed: %s", type(e).__name__)

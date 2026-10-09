@@ -61,7 +61,15 @@ stake. `tests/routes/test_delegation.py::TestGuardrail` greps the route module.
    measurements. `credits = basis / 1000 × rate`, capped per account per day
    (`DELEGATION_DAILY_CAP_CREDITS`, all wallets and assets together) and by a
    global daily budget (`DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS`, rotating
-   order). Written `pending` first, then `add_credits_to_user(transaction_type=
+   order). **Cap and budget are enforced atomically in SQL**:
+   `delegation_reserve_accrual` caps the credits at the account's remaining
+   headroom (decision-time account, paid account and currently linked wallets,
+   all assets), refuses past the global budget or on a paused asset, and inserts
+   the `pending` row — all under one per-date `pg_advisory_xact_lock`. Paying
+   goes through `delegation_claim_accrual`, which re-checks pause and cap under
+   the same lock (`pending → claimed`, or `void` if it no longer fits) before any
+   credit moves. No cap/budget decision is read-then-write in Python.
+   Written `pending` first, then `add_credits_to_user(transaction_type=
    "delegation_reward", request_id=uuid5("delegation:{asset}:{wallet}:{date}"))`
    (the ledger column is UUID-typed; the readable key is in the metadata as
    `grant_key`), then marked paid. Pending rows are retried for 30 days and paid
@@ -136,9 +144,8 @@ Mutations are superadmin-only and audited. `/admin/status` has a `delegation` bl
 
 ## Known residuals
 
-- Same concurrency residual as holdings: no interlock between the scheduled
-  accrual and a superadmin `run accrue` for the same date; the wallet-asset-day
-  UNIQUE index still prevents a literal double pay.
+- Reproduce the SQL concurrency check with
+  `scripts/checks/delegation_reserve_concurrency.sh` (scratch Postgres).
 - Cardano rewards come from the stake snapshot two epochs earlier; credits are
   paid on the day's measured live stake, so day-level credits and revenue are
   not aligned — reconciliation is cumulative for that reason.

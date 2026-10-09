@@ -41,7 +41,7 @@ def test_sum_granted_credits_pages_through_everything(sb, monkeypatch):
     with patch.object(db, "get_supabase_client", return_value=client):
         assert db.sum_granted_credits("eth") == Decimal("6.5")
     assert query.range.call_args_list[1].args == (2, 3)
-    query.in_.assert_called_with("status", ["pending", "paid"])
+    query.in_.assert_called_with("status", ["pending", "claimed", "paid"])
 
 
 def test_sums_are_none_not_zero_on_error(sb):
@@ -84,19 +84,58 @@ def test_record_measurement_writes_zero(sb):
     }
 
 
-def test_create_accrual_is_pending(sb):
-    client, query = _query([[{"id": 9, "status": "pending"}]])
+def test_reserve_accrual_calls_the_atomic_rpc(sb):
+    client = MagicMock()
+    client.rpc.return_value.execute.return_value = MagicMock(
+        data={"status": "created", "accrual": {"id": 9}}
+    )
     with patch.object(db, "get_supabase_client", return_value=client):
-        row = db.create_accrual(
-            "0xA", "ada", date(2026, 10, 7), Decimal(1), Decimal(2), Decimal(3), 5
+        result = db.reserve_accrual(
+            "0xA",
+            "ada",
+            date(2026, 10, 7),
+            Decimal(1),
+            Decimal(2),
+            Decimal(3),
+            5,
+            Decimal(5),
+            Decimal(50),
         )
-    assert row["id"] == 9
-    payload = query.insert.call_args.args[0]
-    assert payload["status"] == "pending" and payload["ledger_request_id"] is None
-    assert payload["wallet_address"] == "0xa" and payload["user_id"] == 5
+    assert result == {"status": "created", "accrual": {"id": 9}}
+    name, params = client.rpc.call_args.args
+    assert name == "delegation_reserve_accrual"
+    assert params["p_wallet_address"] == "0xa" and params["p_user_id"] == 5
+    assert params["p_account_cap"] == "5" and params["p_global_budget"] == "50"
 
 
-def test_list_accruals_for_wallet_date_is_none_on_error(sb):
-    with patch.object(db, "get_supabase_client", return_value=_broken()):
-        assert db.list_accruals_for_wallet_date("0xa", "2026-10-07") is None
-        assert db.list_accruals_for_date("2026-10-07") is None
+def test_rpc_failures_reserve_and_claim_nothing(sb):
+    with patch.object(db, "get_supabase_client", return_value=_broken_rpc()):
+        assert (
+            db.reserve_accrual(
+                "0xa",
+                "eth",
+                date(2026, 10, 7),
+                Decimal(1),
+                Decimal(1),
+                Decimal(1),
+                None,
+                Decimal(5),
+                Decimal(50),
+            )
+            is None
+        )
+        assert db.claim_accrual(1, 2, Decimal(5)) is None
+
+
+def _broken_rpc():
+    client = MagicMock()
+    client.rpc.side_effect = RuntimeError("function does not exist")
+    return client
+
+
+def test_mark_paid_only_moves_a_claimed_row(sb):
+    client, query = _query([[{"id": 1, "status": "paid"}]])
+    query.update.return_value = query
+    with patch.object(db, "get_supabase_client", return_value=client):
+        db.mark_accrual_paid(1, "uuid")
+    query.eq.assert_any_call("status", "claimed")

@@ -260,40 +260,16 @@ def get_accrual(wallet_address: str, asset: str, reward_date: date | str) -> dic
         return None
 
 
-def list_accruals_for_wallet_date(
-    wallet_address: str, reward_date: date | str
-) -> list[dict[str, Any]] | None:
-    """Every asset's accrual for one wallet-day. None on error, because the
-    per-account cap is computed from it and must not read a failure as zero."""
-    try:
-        client = get_supabase_client()
-        result = (
-            client.table(_ACCRUALS_TABLE)
-            .select("*")
-            .eq("wallet_address", wallet_address.lower())
-            .eq("reward_date", _day_str(reward_date))
-            .execute()
-        )
-        return result.data or []
-    except Exception as e:
-        logger.warning(f"delegation_accruals wallet-day lookup failed: {e}")
-        return None
+def _rpc_payload(data: Any) -> dict[str, Any] | None:
+    if isinstance(data, list):
+        data = data[0] if data else None
+    if isinstance(data, dict) and len(data) == 1 and not data.get("status"):
+        # Some PostgREST versions wrap a scalar jsonb return as {fn_name: value}.
+        data = next(iter(data.values()))
+    return data if isinstance(data, dict) else None
 
 
-def list_accruals_for_date(reward_date: date | str) -> list[dict[str, Any]] | None:
-    """Every accrual already decided for a date (budget accounting). None on
-    error."""
-    day = _day_str(reward_date)
-    try:
-        return _select_all(
-            lambda c: c.table(_ACCRUALS_TABLE).select("*").eq("reward_date", day).order("id")
-        )
-    except Exception as e:
-        logger.warning(f"delegation_accruals date listing failed: {e}")
-        return None
-
-
-def create_accrual(
+def reserve_accrual(
     wallet_address: str,
     asset: str,
     reward_date: date,
@@ -301,32 +277,52 @@ def create_accrual(
     credits: Decimal,
     rate: Decimal,
     user_id: int | None,
+    account_cap: Decimal,
+    global_budget: Decimal,
 ) -> dict[str, Any] | None:
-    """Insert the wallet-asset-day accrual as 'pending', before any credit
-    is granted. None on any failure, including the UNIQUE conflict a
-    concurrent run produces -- callers re-read with get_accrual()."""
+    """Atomically reserve one wallet-asset-day accrual (supabase function
+    delegation_reserve_accrual): under the date's advisory lock it caps the
+    credits at the account's remaining headroom, refuses when the global
+    budget would be exceeded or the asset is paused, and inserts the row as
+    'pending'. Returns {status, accrual?, capped?}; None on any failure,
+    which callers treat as "nothing reserved"."""
     try:
         client = get_supabase_client()
-        result = (
-            client.table(_ACCRUALS_TABLE)
-            .insert(
-                {
-                    "wallet_address": wallet_address.lower(),
-                    "asset": asset,
-                    "reward_date": _day_str(reward_date),
-                    "usd_basis": str(usd_basis),
-                    "credits": str(credits),
-                    "rate_credits_per_1k_usd": str(rate),
-                    "user_id": user_id,
-                    "status": "pending",
-                    "ledger_request_id": None,
-                }
-            )
-            .execute()
-        )
-        return (result.data or [None])[0]
+        result = client.rpc(
+            "delegation_reserve_accrual",
+            {
+                "p_wallet_address": wallet_address.lower(),
+                "p_asset": asset,
+                "p_reward_date": _day_str(reward_date),
+                "p_usd_basis": str(usd_basis),
+                "p_credits": str(credits),
+                "p_rate": str(rate),
+                "p_user_id": user_id,
+                "p_account_cap": str(account_cap),
+                "p_global_budget": str(global_budget),
+            },
+        ).execute()
+        return _rpc_payload(result.data)
     except Exception as e:
-        logger.warning(f"delegation_accruals insert failed ({asset}): {e}")
+        logger.warning(f"delegation_reserve_accrual failed ({asset}): {e}")
+        return None
+
+
+def claim_accrual(accrual_id: int, user_id: int, account_cap: Decimal) -> dict[str, Any] | None:
+    """Atomically claim a pending accrual for payment to `user_id`
+    (supabase function delegation_claim_accrual): re-checks the pause and the
+    account cap under the date's advisory lock, voids a row that no longer
+    fits, else flips it to 'claimed'. Returns {status, accrual?}; None on any
+    failure (the row stays pending)."""
+    try:
+        client = get_supabase_client()
+        result = client.rpc(
+            "delegation_claim_accrual",
+            {"p_accrual_id": accrual_id, "p_user_id": user_id, "p_account_cap": str(account_cap)},
+        ).execute()
+        return _rpc_payload(result.data)
+    except Exception as e:
+        logger.warning(f"delegation_claim_accrual failed for id={accrual_id}: {e}")
         return None
 
 
@@ -343,7 +339,7 @@ def mark_accrual_paid(accrual_id: int, ledger_request_id: str) -> dict[str, Any]
                 }
             )
             .eq("id", accrual_id)
-            .eq("status", "pending")
+            .eq("status", "claimed")
             .execute()
         )
         return (result.data or [None])[0]
@@ -352,27 +348,13 @@ def mark_accrual_paid(accrual_id: int, ledger_request_id: str) -> dict[str, Any]
         return None
 
 
-def void_accrual(accrual_id: int) -> bool:
-    """Flip a pending accrual to 'void' -- decided, never to be paid, and no
-    longer counted as granted."""
-    try:
-        client = get_supabase_client()
-        client.table(_ACCRUALS_TABLE).update(
-            {"status": "void", "updated_at": datetime.now(UTC).isoformat()}
-        ).eq("id", accrual_id).eq("status", "pending").execute()
-        return True
-    except Exception as e:
-        logger.warning(f"delegation_accruals void failed for id={accrual_id}: {e}")
-        return False
-
-
 def list_pending_accruals_since(min_reward_date: date | str) -> list[dict[str, Any]]:
     try:
         client = get_supabase_client()
         result = (
             client.table(_ACCRUALS_TABLE)
             .select("*")
-            .eq("status", "pending")
+            .in_("status", ["pending", "claimed"])
             .gte("reward_date", _day_str(min_reward_date))
             .order("reward_date", desc=False)
             .limit(_ROW_CAP)
@@ -391,7 +373,7 @@ def list_pending_accruals(wallet_address: str) -> list[dict[str, Any]]:
             client.table(_ACCRUALS_TABLE)
             .select("*")
             .eq("wallet_address", wallet_address.lower())
-            .eq("status", "pending")
+            .in_("status", ["pending", "claimed"])
             .order("reward_date", desc=False)
             .limit(_ROW_CAP)
             .execute()
@@ -420,7 +402,7 @@ def list_accruals_for_wallet(wallet_address: str, limit: int = 30) -> list[dict[
 
 
 def sum_granted_credits(asset: str) -> Decimal | None:
-    """All credits ever committed for `asset` (pending + paid). None -- never
+    """All credits ever committed for `asset` (pending + claimed + paid). None -- never
     0 -- on a failed read: reconciliation must not see an unknown cost as
     free."""
     try:
@@ -428,7 +410,7 @@ def sum_granted_credits(asset: str) -> Decimal | None:
             lambda c: c.table(_ACCRUALS_TABLE)
             .select("credits")
             .eq("asset", asset)
-            .in_("status", ["pending", "paid"])
+            .in_("status", ["pending", "claimed", "paid"])
             .order("id")
         )
         total = Decimal(0)

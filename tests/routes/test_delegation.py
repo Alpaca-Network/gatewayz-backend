@@ -173,6 +173,7 @@ class TestRewards:
             patch.object(delegation_routes, "list_accruals_for_wallet", return_value=accruals),
         ):
             data = client.get("/delegation/rewards").json()["data"]
+        assert data["linked_wallets"] == [{"asset": "eth", "wallet_address": WALLET}]
         assert data["positions"] == [
             {
                 "asset": "eth",

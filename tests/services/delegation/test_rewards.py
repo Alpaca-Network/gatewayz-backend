@@ -8,6 +8,8 @@ paused (or unknown-pause) asset accrues and pays nothing.
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import date
 from decimal import Decimal
 
@@ -23,6 +25,16 @@ ADA1 = "stake1uyehkck0lajq8gr28t9uxnuvgcqrc6070x3k9r8048z8y5gh6ffgw"
 
 
 class FakeDB:
+    """In-memory stand-in for src.db.delegation + user_wallets + users.
+
+    reserve_accrual / claim_accrual mirror the SQL functions in
+    20261008230000_delegated_staking.sql (section 6) line for line, including
+    the per-date lock -- a threading.Lock here -- so the module under test can
+    only stay inside the cap if it leaves every cap/budget decision to them.
+    `race_delay` sleeps inside the plain reads, widening any read-then-write
+    window a caller might still have.
+    """
+
     def __init__(self):
         self.rates = {
             "eth": {"asset": "eth", "credits_per_1k_usd_per_day": "1.000000"},
@@ -33,75 +45,50 @@ class FakeDB:
         self.controls: dict | None = {"eth": {}, "ada": {}}
         self.linked: dict[str, dict] = {}
         self.credit_calls: list[dict] = []
+        self.ledger: set[str] = set()
         self.events: list[str] = []
         self.fail_credit = False
+        self.race_delay = 0.0
         self._id = 1
+        self._date_lock = threading.Lock()
+        self._mutex = threading.RLock()
 
+    def _sleep(self):
+        if self.race_delay:
+            time.sleep(self.race_delay)
+
+    # -- plain reads ----------------------------------------------------------
     def list_measured_pairs_for_date(self, day):
         return sorted(self.measurements)
 
     def get_measurements_for_date(self, wallet, asset, day):
         return list(self.measurements.get((wallet, asset), []))
 
-    def list_accruals_for_date(self, day):
-        return [dict(r) for r in self.accruals.values() if r["reward_date"] == str(day)]
-
-    def list_accruals_for_wallet_date(self, wallet, day):
-        return [
-            dict(r)
-            for r in self.accruals.values()
-            if r["wallet_address"] == wallet and r["reward_date"] == str(day)
-        ]
-
     def get_accrual(self, wallet, asset, day):
-        row = self.accruals.get((wallet, asset, str(day)))
-        return dict(row) if row else None
-
-    def create_accrual(self, wallet, asset, day, basis, credits, rate, user_id):
-        key = (wallet, asset, str(day))
-        if key in self.accruals:
-            return None
-        row = {
-            "id": self._id,
-            "wallet_address": wallet,
-            "asset": asset,
-            "reward_date": str(day),
-            "usd_basis": str(basis),
-            "credits": str(credits),
-            "status": "pending",
-            "user_id": user_id,
-        }
-        self._id += 1
-        self.accruals[key] = row
-        self.events.append(f"create:{asset}:{wallet}")
-        return dict(row)
-
-    def mark_accrual_paid(self, accrual_id, request_id):
-        for row in self.accruals.values():
-            if row["id"] == accrual_id:
-                row["status"] = "paid"
-                row["ledger_request_id"] = request_id
-                return dict(row)
-        return None
+        with self._mutex:
+            row = self.accruals.get((wallet, asset, str(day)))
+            row = dict(row) if row else None
+        self._sleep()
+        return row
 
     def list_pending_accruals_since(self, floor):
-        return [dict(r) for r in self.accruals.values() if r["status"] == "pending"]
+        with self._mutex:
+            return [
+                dict(r) for r in self.accruals.values() if r["status"] in ("pending", "claimed")
+            ]
 
     def list_pending_accruals(self, wallet):
-        return [
-            dict(r)
-            for r in self.accruals.values()
-            if r["wallet_address"] == wallet and r["status"] == "pending"
-        ]
+        with self._mutex:
+            rows = [
+                dict(r)
+                for r in self.accruals.values()
+                if r["wallet_address"] == wallet and r["status"] in ("pending", "claimed")
+            ]
+        self._sleep()
+        return rows
 
     def get_active_rates(self):
         return dict(self.rates)
-
-    def void_accrual(self, accrual_id):
-        for row in self.accruals.values():
-            if row["id"] == accrual_id:
-                row["status"] = "void"
-        return True
 
     def get_controls(self):
         return self.controls
@@ -109,14 +96,120 @@ class FakeDB:
     def get_wallet(self, address):
         return self.linked.get(address)
 
-    def get_wallets_for_user(self, user_id):
-        return [r for r in self.linked.values() if r["user_id"] == user_id]
+    def _paused(self, asset):
+        return bool(((self.controls or {}).get(asset) or {}).get("accruals_paused"))
+
+    # -- the SQL functions ----------------------------------------------------
+    def _account_spent(self, user_id, day, statuses, exclude_id=None):
+        wallets = {w for w, r in self.linked.items() if r["user_id"] == user_id}
+        return sum(
+            (
+                Decimal(r["credits"])
+                for r in self.accruals.values()
+                if r["reward_date"] == day
+                and r["status"] in statuses
+                and r["id"] != exclude_id
+                and (
+                    r.get("user_id") == user_id
+                    or r.get("paid_user_id") == user_id
+                    or r["wallet_address"] in wallets
+                )
+            ),
+            Decimal(0),
+        )
+
+    def reserve_accrual(self, wallet, asset, day, basis, credits, rate, user_id, cap, budget):
+        day = str(day)
+        with self._date_lock:
+            key = (wallet, asset, day)
+            if key in self.accruals:
+                return {"status": "exists", "accrual": dict(self.accruals[key])}
+            if self._paused(asset):
+                return {"status": "paused"}
+            spent = (
+                self._account_spent(user_id, day, ("pending", "claimed", "paid"))
+                if user_id is not None
+                else Decimal(0)
+            )
+            grant = min(Decimal(credits), Decimal(cap) - spent)
+            if grant <= 0:
+                return {"status": "over_cap"}
+            committed = sum(
+                (
+                    Decimal(r["credits"])
+                    for r in self.accruals.values()
+                    if r["reward_date"] == day and r["status"] in ("pending", "claimed", "paid")
+                ),
+                Decimal(0),
+            )
+            self._sleep()
+            if committed + grant > Decimal(budget):
+                return {"status": "budget_exhausted"}
+            with self._mutex:
+                row = {
+                    "id": self._id,
+                    "wallet_address": wallet,
+                    "asset": asset,
+                    "reward_date": day,
+                    "usd_basis": str(basis),
+                    "credits": str(grant),
+                    "status": "pending",
+                    "user_id": user_id,
+                    "paid_user_id": None,
+                }
+                self._id += 1
+                self.accruals[key] = row
+            self.events.append(f"create:{asset}:{wallet}")
+            return {"status": "created", "accrual": dict(row), "capped": grant < Decimal(credits)}
+
+    def claim_accrual(self, accrual_id, user_id, cap):
+        with self._date_lock:
+            row = next((r for r in self.accruals.values() if r["id"] == accrual_id), None)
+            if row is None:
+                return {"status": "not_found"}
+            if row["status"] in ("paid", "void", "claimed"):
+                return {"status": row["status"], "accrual": dict(row)}
+            if self._paused(row["asset"]):
+                return {"status": "paused"}
+            spent = self._account_spent(
+                user_id, row["reward_date"], ("claimed", "paid"), exclude_id=row["id"]
+            )
+            self._sleep()
+            if Decimal(row["credits"]) > Decimal(cap) - spent:
+                row["status"] = "void"
+                return {"status": "void", "accrual": dict(row)}
+            row["status"] = "claimed"
+            row["paid_user_id"] = user_id
+            return {"status": "claimed", "accrual": dict(row)}
+
+    def mark_accrual_paid(self, accrual_id, request_id):
+        with self._mutex:
+            for row in self.accruals.values():
+                if row["id"] == accrual_id and row["status"] == "claimed":
+                    row["status"] = "paid"
+                    row["ledger_request_id"] = request_id
+                    return dict(row)
+        return None
 
     def add_credits_to_user(self, **kwargs):
         if self.fail_credit:
             raise RuntimeError("ledger down")
-        self.events.append(f"credit:{kwargs['request_id']}")
-        self.credit_calls.append(kwargs)
+        with self._mutex:
+            if kwargs["request_id"] in self.ledger:  # the ledger's unique request_id
+                return
+            self.ledger.add(kwargs["request_id"])
+            self.events.append(f"credit:{kwargs['request_id']}")
+            self.credit_calls.append(kwargs)
+
+    def paid_total(self, user_id=None):
+        return sum(
+            (
+                Decimal(str(c["credits"]))
+                for c in self.credit_calls
+                if user_id is None or c["user_id"] == user_id
+            ),
+            Decimal(0),
+        )
 
 
 @pytest.fixture
@@ -125,19 +218,16 @@ def db(monkeypatch):
     for name in (
         "list_measured_pairs_for_date",
         "get_measurements_for_date",
-        "list_accruals_for_date",
-        "list_accruals_for_wallet_date",
         "get_accrual",
-        "create_accrual",
+        "reserve_accrual",
+        "claim_accrual",
         "mark_accrual_paid",
         "list_pending_accruals_since",
         "list_pending_accruals",
         "get_active_rates",
         "get_controls",
         "get_wallet",
-        "get_wallets_for_user",
         "add_credits_to_user",
-        "void_accrual",
     ):
         monkeypatch.setattr(rewards, name, getattr(fake, name))
     monkeypatch.setattr(rewards.Config, "DELEGATED_STAKING_ENABLED", True)
@@ -306,7 +396,9 @@ def test_failed_credit_write_stays_pending_and_is_retried(db):
     db.fail_credit = True
     summary = rewards.run_delegation_accruals_once(DAY)
     assert summary["pending"] == 1
-    assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "pending"
+    # Reserved for the account (claimed) but not paid; the retry pays it to
+    # that same account, idempotent on the ledger request_id.
+    assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "claimed"
     db.fail_credit = False
     summary = rewards.run_delegation_accruals_once(DAY)
     assert summary["paid"] == 1
@@ -343,3 +435,138 @@ def test_estimate_is_capped(db):
         [("eth", Decimal(4000)), ("ada", Decimal(4000))], db.rates
     )
     assert estimate == Decimal("5.000000")
+
+
+# -- security regressions: cap / budget bypasses ----------------------------------
+
+W3 = "0x" + "3" * 40
+
+
+def test_a_cap_is_per_account_across_n_wallets_and_both_assets(db):
+    """(a) N wallets x 2 assets for one account still earn one cap."""
+    wallets = ["0x" + str(i) * 40 for i in range(1, 7)]
+    for w in wallets:
+        _link(db, w, 7)
+        db.measurements[(w, "eth")] = [Decimal(5000)] * 2
+    _link(db, ADA1, 7)
+    db.measurements[(ADA1, "ada")] = [Decimal(5000)] * 2
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.paid_total(7) == Decimal(5)
+    live = [r for r in db.accruals.values() if r["status"] in ("pending", "claimed", "paid")]
+    assert sum(Decimal(r["credits"]) for r in live) == Decimal(5)
+
+
+def test_b_pending_paid_on_link_is_capped_at_pay_time(db):
+    """(b) Accruals decided while unlinked are each capped alone; paying them
+    on link must still respect the account's cap for that date."""
+    for w in (W1, W2, W3):
+        db.measurements[(w, "eth")] = [Decimal(4000)] * 2  # 4 credits each, unlinked
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.paid_total() == 0
+    for w in (W1, W2, W3):
+        _link(db, w, 9)
+        rewards.pay_pending_delegation_for_wallet(w, 9)
+    assert db.paid_total(9) == Decimal(4)
+    rewards.run_delegation_accruals_once(DAY)  # the retry sweep must not top it up
+    assert db.paid_total(9) == Decimal(4)
+
+
+def test_c_same_stake_relinked_to_another_account_pays_once(db):
+    """(c) One wallet-asset-day is one accrual, attributed to one account: a
+    wallet paid to A, unlinked and relinked to B, never pays again."""
+    _link(db, W1, 1)
+    db.measurements[(W1, "eth")] = [Decimal(3000)] * 2
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.paid_total(1) == Decimal(3)
+    del db.linked[W1]
+    _link(db, W1, 2)
+    rewards.pay_pending_delegation_for_wallet(W1, 2)
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.paid_total(2) == 0
+    assert db.paid_total() == Decimal(3)
+
+
+def test_c_moved_wallet_counts_against_the_new_account_too(db):
+    """(c) B inherits a wallet already paid to A for the date: that day's
+    credits count against B's cap as well, so B cannot add a full cap on top
+    from another wallet."""
+    _link(db, W1, 1)
+    db.measurements[(W1, "eth")] = [Decimal(4000)] * 2
+    rewards.run_delegation_accruals_once(DAY)
+    del db.linked[W1]
+    _link(db, W1, 2)
+    _link(db, W2, 2)
+    db.measurements[(W2, "eth")] = [Decimal(5000)] * 2
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.paid_total(2) == Decimal(1)
+
+
+def test_d_concurrent_runs_and_pay_on_link_never_exceed_cap_or_budget(db, monkeypatch):
+    """(d) Two accrual runs plus pay-on-link racing on the same date. The
+    reads are slowed down to widen any read-then-write window; the cap and
+    budget hold because the decision lives in the atomic reserve/claim."""
+    monkeypatch.setattr(rewards.Config, "DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS", Decimal("12"))
+    db.race_delay = 0.002
+    for i in range(12):
+        w = f"0x{i:040x}"
+        _link(db, w, 100 + i % 3)  # three accounts, four wallets each
+        db.measurements[(w, "eth")] = [Decimal(3000)] * 2
+    unlinked = [f"0x{0xF00 + i:040x}" for i in range(4)]
+    for w in unlinked:
+        db.measurements[(w, "eth")] = [Decimal(3000)] * 2
+
+    errors: list[BaseException] = []
+
+    def guarded(fn, *args):
+        try:
+            fn(*args)
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [
+        threading.Thread(target=guarded, args=(rewards.run_delegation_accruals_once, DAY))
+        for _ in range(3)
+    ]
+    for w in unlinked:
+        threads.append(
+            threading.Thread(
+                target=guarded, args=(rewards.pay_pending_delegation_for_wallet, w, 100)
+            )
+        )
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    for account in (100, 101, 102):
+        assert db.paid_total(account) <= Decimal(5)
+    live = [r for r in db.accruals.values() if r["status"] in ("pending", "claimed", "paid")]
+    assert sum(Decimal(r["credits"]) for r in live) <= Decimal(12)
+    assert db.paid_total() <= Decimal(12)
+    assert len(db.ledger) == len(db.credit_calls)  # no double grant
+
+
+def test_e_budget_is_global_across_assets(db, monkeypatch):
+    """(e) One budget for the date across ETH and ADA, not one per asset."""
+    monkeypatch.setattr(rewards.Config, "DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS", Decimal("6"))
+    _link(db, W1, 1)
+    _link(db, ADA1, 2)
+    db.measurements[(W1, "eth")] = [Decimal(4000)] * 2  # 4 credits
+    db.measurements[(ADA1, "ada")] = [Decimal(2000)] * 2  # 4 credits at the ADA rate
+    summary = rewards.run_delegation_accruals_once(DAY)
+    assert db.paid_total() == Decimal(4)
+    assert summary["skipped"]["budget_exhausted"] == 1
+
+
+def test_e_pause_is_rechecked_at_pay_time(db):
+    """(e) A pending accrual whose asset was paused after it was decided is
+    not paid -- not by the run's retry sweep, not on link."""
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    rewards.run_delegation_accruals_once(DAY)  # unlinked -> pending
+    db.controls = {"eth": {"accruals_paused": True}, "ada": {}}
+    _link(db, W1, 5)
+    rewards.pay_pending_delegation_for_wallet(W1, 5)
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.paid_total() == 0
+    assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "pending"

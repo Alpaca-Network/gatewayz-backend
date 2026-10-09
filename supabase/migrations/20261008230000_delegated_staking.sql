@@ -17,6 +17,8 @@
 --     written 'pending' BEFORE any credit moves; the credit ledger's partial
 --     unique index on credit_transactions.request_id is the second guard.
 --   * Ships inert: every allowance rate is seeded at 0 and inactive.
+--   * The per-account cap and global budget are enforced atomically in SQL
+--     (delegation_reserve_accrual / delegation_claim_accrual, section 6).
 --
 -- Idempotent throughout (IF NOT EXISTS, guarded seeds, drop-then-add for the
 -- one constraint it replaces), so a re-run is a no-op.
@@ -113,7 +115,11 @@ create table if not exists public.delegation_accruals (
   credits numeric(18,6) not null check (credits >= 0),
   rate_credits_per_1k_usd numeric(18,6) not null,
   user_id bigint null,                    -- the account at decision time, if linked
-  status text not null default 'pending' check (status in ('pending', 'paid', 'void')),
+  -- pending -> claimed (reserved for paid_user_id under the account cap) -> paid.
+  -- void = decided, never to be paid (did not fit the account cap at pay time).
+  status text not null default 'pending'
+    check (status in ('pending', 'claimed', 'paid', 'void')),
+  paid_user_id bigint null,               -- the account the credits went / are going to
   ledger_request_id text null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -162,6 +168,164 @@ create table if not exists public.delegation_controls (
 insert into public.delegation_controls (asset)
 select a.asset from (values ('eth'), ('ada')) as a(asset)
 where not exists (select 1 from public.delegation_controls c where c.asset = a.asset);
+
+-- 6. Atomic check-and-reserve. The per-account daily cap and the global
+--    daily budget are enforced HERE, inside one transaction holding a per-date
+--    advisory lock, never by read-then-write in Python: two accrual runs, or a
+--    run and a pay-on-link, would otherwise both read "under cap" and both pay.
+--    Every reservation and every claim for a reward date takes the same lock,
+--    so they serialize; the lock is released at commit.
+--
+--    An account's spend for a date is every live accrual (pending, claimed,
+--    paid) attributed to it: by the account at decision time (user_id), the
+--    account paid (paid_user_id), or a wallet it has linked now. A wallet that
+--    moved between accounts therefore counts against both -- conservative.
+
+create or replace function public.delegation_account_spent(
+  p_user_id bigint, p_reward_date date, p_statuses text[],
+  p_exclude_id bigint default null
+) returns numeric
+language sql
+stable
+set search_path = public, pg_temp
+as $$
+  select coalesce(sum(a.credits), 0)
+  from public.delegation_accruals a
+  where a.reward_date = p_reward_date
+    and a.status = any(p_statuses)
+    and (p_exclude_id is null or a.id <> p_exclude_id)
+    and (
+      a.user_id = p_user_id
+      or a.paid_user_id = p_user_id
+      or a.wallet_address in (
+        select w.wallet_address from public.user_wallets w where w.user_id = p_user_id
+      )
+    );
+$$;
+
+-- Reserve (insert pending) one wallet-asset-day accrual, capped by the
+-- account's remaining headroom and refused when the global budget would be
+-- exceeded or the asset is paused. Returns {status, accrual?, capped?} with
+-- status in created | exists | over_cap | budget_exhausted | paused.
+create or replace function public.delegation_reserve_accrual(
+  p_wallet_address text, p_asset text, p_reward_date date,
+  p_usd_basis numeric, p_credits numeric, p_rate numeric, p_user_id bigint,
+  p_account_cap numeric, p_global_budget numeric
+) returns jsonb
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  v_existing public.delegation_accruals;
+  v_row public.delegation_accruals;
+  v_committed numeric;
+  v_spent numeric := 0;
+  v_grant numeric;
+begin
+  perform pg_advisory_xact_lock(hashtext('delegation_accruals:' || p_reward_date::text));
+
+  select * into v_existing from public.delegation_accruals
+  where wallet_address = lower(p_wallet_address) and asset = p_asset
+    and reward_date = p_reward_date;
+  if found then
+    return jsonb_build_object('status', 'exists', 'accrual', to_jsonb(v_existing));
+  end if;
+
+  if exists (select 1 from public.delegation_controls c
+             where c.asset = p_asset and c.accruals_paused) then
+    return jsonb_build_object('status', 'paused');
+  end if;
+
+  if p_user_id is not null then
+    v_spent := public.delegation_account_spent(
+      p_user_id, p_reward_date, array['pending', 'claimed', 'paid']);
+  end if;
+  v_grant := least(p_credits, p_account_cap - v_spent);
+  if v_grant <= 0 then
+    return jsonb_build_object('status', 'over_cap');
+  end if;
+
+  select coalesce(sum(credits), 0) into v_committed from public.delegation_accruals
+  where reward_date = p_reward_date and status in ('pending', 'claimed', 'paid');
+  if v_committed + v_grant > p_global_budget then
+    return jsonb_build_object('status', 'budget_exhausted');
+  end if;
+
+  insert into public.delegation_accruals (
+    wallet_address, asset, reward_date, usd_basis, credits,
+    rate_credits_per_1k_usd, user_id, status
+  ) values (
+    lower(p_wallet_address), p_asset, p_reward_date, p_usd_basis, v_grant,
+    p_rate, p_user_id, 'pending'
+  ) returning * into v_row;
+
+  return jsonb_build_object(
+    'status', 'created', 'accrual', to_jsonb(v_row), 'capped', v_grant < p_credits);
+end;
+$$;
+
+-- Claim a pending accrual for payment to p_user_id: re-checks the pause and
+-- the account cap (counting claimed + paid rows only, i.e. money already
+-- committed to this account) and flips pending -> claimed. A row that no
+-- longer fits is voided. A row already claimed is returned as-is so a crashed
+-- payment can be resumed (the ledger's UUID request_id keeps that idempotent).
+-- Returns {status, accrual?} with status in claimed | paid | void | paused |
+-- not_found.
+create or replace function public.delegation_claim_accrual(
+  p_accrual_id bigint, p_user_id bigint, p_account_cap numeric
+) returns jsonb
+language plpgsql
+set search_path = public, pg_temp
+as $$
+declare
+  v_row public.delegation_accruals;
+  v_spent numeric;
+begin
+  select * into v_row from public.delegation_accruals where id = p_accrual_id;
+  if not found then
+    return jsonb_build_object('status', 'not_found');
+  end if;
+  perform pg_advisory_xact_lock(hashtext('delegation_accruals:' || v_row.reward_date::text));
+  -- Re-read under the lock: a concurrent claim may have moved it.
+  select * into v_row from public.delegation_accruals where id = p_accrual_id for update;
+
+  if v_row.status in ('paid', 'void', 'claimed') then
+    return jsonb_build_object('status', v_row.status, 'accrual', to_jsonb(v_row));
+  end if;
+
+  if exists (select 1 from public.delegation_controls c
+             where c.asset = v_row.asset and c.accruals_paused) then
+    return jsonb_build_object('status', 'paused');
+  end if;
+
+  v_spent := public.delegation_account_spent(
+    p_user_id, v_row.reward_date, array['claimed', 'paid'], v_row.id);
+  if v_row.credits > p_account_cap - v_spent then
+    update public.delegation_accruals set status = 'void', updated_at = now()
+    where id = v_row.id returning * into v_row;
+    return jsonb_build_object('status', 'void', 'accrual', to_jsonb(v_row));
+  end if;
+
+  update public.delegation_accruals
+  set status = 'claimed', paid_user_id = p_user_id, updated_at = now()
+  where id = v_row.id returning * into v_row;
+  return jsonb_build_object('status', 'claimed', 'accrual', to_jsonb(v_row));
+end;
+$$;
+
+revoke all on function public.delegation_account_spent(bigint, date, text[], bigint)
+  from public, anon, authenticated;
+revoke all on function public.delegation_reserve_accrual(
+  text, text, date, numeric, numeric, numeric, bigint, numeric, numeric)
+  from public, anon, authenticated;
+revoke all on function public.delegation_claim_accrual(bigint, bigint, numeric)
+  from public, anon, authenticated;
+grant execute on function public.delegation_account_spent(bigint, date, text[], bigint)
+  to service_role;
+grant execute on function public.delegation_reserve_accrual(
+  text, text, date, numeric, numeric, numeric, bigint, numeric, numeric) to service_role;
+grant execute on function public.delegation_claim_accrual(bigint, bigint, numeric)
+  to service_role;
 
 comment on table public.delegation_measurements is
   'One row per (wallet, asset, measurement sweep) of stake delegated to the Gatewayz StakeWise vault / Cardano pool, zero included. The daily accrual pays on the day''s MINIMUM.';
