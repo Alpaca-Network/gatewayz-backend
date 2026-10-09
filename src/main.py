@@ -558,6 +558,14 @@ def create_app() -> FastAPI:
             "Wallet Auth",
         ),  # SIWE wallet sign-in/sign-up + linking (gatewayz-backend#2249-#2252)
         (
+            "wallet_auth_cardano",
+            "Cardano Wallet Link",
+        ),  # CIP-30 signData stake-address linking (delegated staking)
+        (
+            "delegation",
+            "Delegated Staking",
+        ),  # Inference allowance for stake delegated to the Gatewayz vault / pool
+        (
             "gpu",
             "GPU Marketplace",
         ),  # Provider/node registry, node auth, heartbeats (gatewayz-backend#2262)

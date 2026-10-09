@@ -20,6 +20,28 @@ logger = logging.getLogger(__name__)
 
 _TABLE = "user_wallets"
 
+# user_wallets.chain_namespace values (CAIP-2 namespaces). Every wallet linked
+# before delegated staking is an EVM wallet; Cardano stake addresses linked
+# with a CIP-30 signData proof carry "cip34" (src/routes/wallet_auth_cardano.py).
+EVM_NAMESPACE = "eip155"
+CARDANO_NAMESPACE = "cip34"
+
+
+def wallet_namespace(row: dict[str, Any]) -> str:
+    """The row's chain namespace. A row (or a test double) without the
+    column predates it and is EVM, which is also the column default."""
+    return str(row.get("chain_namespace") or EVM_NAMESPACE)
+
+
+def is_evm_wallet(row: dict[str, Any]) -> bool:
+    """True for an EVM (0x...) wallet. Jobs that read EVM balances must skip
+    every other namespace: a Cardano stake address is not an EVM address."""
+    return wallet_namespace(row) == EVM_NAMESPACE
+
+
+def is_cardano_wallet(row: dict[str, Any]) -> bool:
+    return wallet_namespace(row) == CARDANO_NAMESPACE
+
 
 def get_wallets_for_user(user_id: int) -> list[dict[str, Any]]:
     """All wallets linked to a user, most-recently-linked first. Empty list
@@ -72,6 +94,7 @@ def link_wallet(
     source: str,
     wallet_client_type: str | None = None,
     make_primary: bool = False,
+    chain_namespace: str = EVM_NAMESPACE,
 ) -> dict[str, Any] | None:
     """Link a wallet to a user. Returns the created row, or None on any
     failure -- including the wallet_address UNIQUE conflict (address
@@ -80,22 +103,22 @@ def link_wallet(
     someone else" (409) must call get_wallet(address) first and branch on
     that, since a unique-violation and a transient DB error both collapse
     to None here (same safe-default convention as every other DB module).
+
+    `chain_namespace` is only written when it is not the column default
+    ("eip155"), so an EVM link inserts exactly the row it always did.
     """
+    row = {
+        "user_id": user_id,
+        "wallet_address": address.lower(),
+        "source": source,
+        "wallet_client_type": wallet_client_type,
+        "is_primary": make_primary,
+    }
+    if chain_namespace != EVM_NAMESPACE:
+        row["chain_namespace"] = chain_namespace
     try:
         client = get_supabase_client()
-        result = (
-            client.table(_TABLE)
-            .insert(
-                {
-                    "user_id": user_id,
-                    "wallet_address": address.lower(),
-                    "source": source,
-                    "wallet_client_type": wallet_client_type,
-                    "is_primary": make_primary,
-                }
-            )
-            .execute()
-        )
+        result = client.table(_TABLE).insert(row).execute()
         if not result.data:
             return None
         return result.data[0]
@@ -117,16 +140,18 @@ def count_all_wallets() -> int:
 
 
 def count_wallets_linked_before(cutoff: datetime) -> int | None:
-    """How many wallets were linked at or before ``cutoff`` -- the wallets
-    old enough for the holdings sweep to consider. A count, not a list, for
-    the sweep watchdog in src/services/holdings/alerts.py. None (not 0) on a
-    lookup error, so a failed read is never mistaken for "no eligible
-    wallets"."""
+    """How many EVM wallets were linked at or before ``cutoff`` -- the
+    wallets old enough for the holdings sweep to consider (it reads EVM
+    balances only, so a Cardano link is never eligible). A count, not a
+    list, for the sweep watchdog in src/services/holdings/alerts.py. None
+    (not 0) on a lookup error, so a failed read is never mistaken for "no
+    eligible wallets"."""
     try:
         client = get_supabase_client()
         result = (
             client.table(_TABLE)
             .select("id", count="exact")
+            .eq("chain_namespace", EVM_NAMESPACE)
             .lte("created_at", cutoff.isoformat())
             .limit(1)
             .execute()

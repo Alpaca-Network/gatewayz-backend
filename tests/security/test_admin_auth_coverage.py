@@ -82,6 +82,10 @@ def _route_has_auth_in_signature(source: str, method: str, path: str) -> bool:
     return (
         "require_admin" in func_params
         or "require_admin_or_env_key" in func_params
+        # Stricter than require_admin (superadmin role only). Before this was
+        # listed, superadmin-only routes passed only when the 2000-char window
+        # happened to reach a neighbouring route's require_admin* dependency.
+        or "require_superadmin" in func_params
         or "get_admin_key" in func_params
     )
 

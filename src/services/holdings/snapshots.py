@@ -52,7 +52,7 @@ from typing import Any
 
 from src.config.config import Config
 from src.db.holdings import list_enabled_tokens, record_snapshot, record_sweep
-from src.db.user_wallets import list_all_wallets
+from src.db.user_wallets import is_evm_wallet, list_all_wallets
 from src.services.holdings.chains import BalanceReading, TokenRef, read_balances
 from src.services.holdings.prices import get_usd_prices
 
@@ -176,6 +176,10 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
     for wallet_row in list_all_wallets():
         address = str(wallet_row.get("wallet_address") or "")
         if not address:
+            continue
+        # EVM balances only. A Cardano stake address (delegated staking) is
+        # not readable here and must not be counted as a failed read.
+        if not is_evm_wallet(wallet_row):
             continue
 
         age_ok = _wallet_age_ok(wallet_row.get("created_at"), started, min_age_days)

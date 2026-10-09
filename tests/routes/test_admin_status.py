@@ -104,6 +104,7 @@ class TestResponseShape:
             "provider_budget",
             "ops_alerts",
             "holdings_sweeps",
+            "delegation",
         ):
             assert key in data
 
@@ -145,6 +146,9 @@ class TestResponseShape:
             "holdings_snapshots",
             "holdings_rewards",
             "holdings_sweep_watchdog",
+            "delegation_measurements",
+            "delegation_accruals",
+            "delegation_reconciliation",
         ):
             assert name in jobs
 

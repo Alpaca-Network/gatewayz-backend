@@ -315,6 +315,69 @@ class Config:
     # HOLDINGS_ALERT_COOLDOWN_HOURS.
     HOLDINGS_SWEEP_STALE_HOURS = float(_get_env_var("HOLDINGS_SWEEP_STALE_HOURS", "8"))
     HOLDINGS_ALERT_COOLDOWN_HOURS = float(_get_env_var("HOLDINGS_ALERT_COOLDOWN_HOURS", "12"))
+    # Delegated staking (src/services/delegation/, docs/delegation/README.md):
+    # users stake ETH from their own wallet into a Gatewayz-run StakeWise V3
+    # vault, or delegate ADA to a Gatewayz Cardano pool. Non-custodial -- the
+    # stake never leaves the user's control -- and the staking rewards accrue
+    # to us through the vault fee / pool margin. We grant inference credits
+    # at an admin-set, changeable rate; never a fixed or guaranteed return.
+    #
+    # Ships dark: off by default, and with the vault address and pool id unset
+    # every reader and job no-ops for that asset even if the flag is on.
+    DELEGATED_STAKING_ENABLED = _get_env_var("DELEGATED_STAKING_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    STAKEWISE_VAULT_ADDRESS = (_get_env_var("STAKEWISE_VAULT_ADDRESS", "") or "").strip() or None
+    STAKEWISE_VAULT_CHAIN_ID = _int_env("STAKEWISE_VAULT_CHAIN_ID", 1)
+    # bech32 pool id (pool1...).
+    CARDANO_POOL_ID = (_get_env_var("CARDANO_POOL_ID", "") or "").strip() or None
+    KOIOS_BASE_URL = _get_env_var("KOIOS_BASE_URL", "https://api.koios.rest/api/v1")
+    # Optional bearer token for Koios' paid tiers. A secret: never logged.
+    KOIOS_API_KEY = _get_env_var("KOIOS_API_KEY")
+    # Accept stake_test1... addresses when linking a Cardano wallet. Never on
+    # in production: a testnet stake key proves nothing about mainnet ADA.
+    DELEGATION_ALLOW_CARDANO_TESTNET = _get_env_var(
+        "DELEGATION_ALLOW_CARDANO_TESTNET", "false"
+    ).lower() in {"1", "true", "yes"}
+    # m in A = R / (1 - m): our gross margin on inference. A credit costs us
+    # (1 - m) dollars, which is what reconciliation charges against revenue.
+    DELEGATION_INFERENCE_MARGIN = _decimal_env("DELEGATION_INFERENCE_MARGIN", "0.20")
+    # R: expected staking revenue to us per USD staked per day, per asset.
+    # Only feeds the SUGGESTED rate shown to admins; the paid rate is always
+    # the one an admin set in delegation_allowance_rates. 0 = no suggestion.
+    DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ETH = _decimal_env(
+        "DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ETH", "0"
+    )
+    DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ADA = _decimal_env(
+        "DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ADA", "0"
+    )
+    # Per-account daily ceiling (all wallets and assets together) and a global
+    # daily budget across every account. Conservative placeholders.
+    DELEGATION_DAILY_CAP_CREDITS = _decimal_env("DELEGATION_DAILY_CAP_CREDITS", "5")
+    DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS = _decimal_env(
+        "DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS", "50"
+    )
+    # Measurement sweeps per UTC day, and how many a day needs before it can be
+    # paid (lowest-of-day only resists farming with several readings).
+    DELEGATION_MEASUREMENTS_PER_DAY = _int_env("DELEGATION_MEASUREMENTS_PER_DAY", 4)
+    DELEGATION_MIN_MEASUREMENTS_PER_DAY = _int_env("DELEGATION_MIN_MEASUREMENTS_PER_DAY", 2)
+    # Reconciliation fails closed when the cost of credits granted exceeds
+    # revenue x (1 + tolerance) + grace. Grace is an absolute USD allowance for
+    # the revenue lag at launch (Cardano rewards land ~2 epochs late); 0 means
+    # any unbacked grant pauses the asset.
+    DELEGATION_RECONCILIATION_TOLERANCE = _decimal_env(
+        "DELEGATION_RECONCILIATION_TOLERANCE", "0.05"
+    )
+    DELEGATION_RECONCILIATION_GRACE_USD = _decimal_env("DELEGATION_RECONCILIATION_GRACE_USD", "0")
+    DELEGATION_MEASUREMENT_CRON_MINUTE_UTC = _int_env("DELEGATION_MEASUREMENT_CRON_MINUTE_UTC", 10)
+    DELEGATION_ACCRUAL_CRON_HOUR_UTC = _int_env("DELEGATION_ACCRUAL_CRON_HOUR_UTC", 0)
+    DELEGATION_ACCRUAL_CRON_MINUTE_UTC = _int_env("DELEGATION_ACCRUAL_CRON_MINUTE_UTC", 50)
+    DELEGATION_RECONCILIATION_CRON_HOUR_UTC = _int_env("DELEGATION_RECONCILIATION_CRON_HOUR_UTC", 0)
+    DELEGATION_RECONCILIATION_CRON_MINUTE_UTC = _int_env(
+        "DELEGATION_RECONCILIATION_CRON_MINUTE_UTC", 30
+    )
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.
