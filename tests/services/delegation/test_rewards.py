@@ -47,6 +47,7 @@ class FakeDB:
             "ada": {"accruals_paused": False},
         }
         self.linked: dict[str, dict] = {}
+        self.inactive_users: set[int] = set()
         self.credit_calls: list[dict] = []
         self.ledger: set[str] = set()
         self.events: list[str] = []
@@ -98,6 +99,9 @@ class FakeDB:
 
     def get_wallet(self, address):
         return self.linked.get(address)
+
+    def get_user_by_id(self, user_id):
+        return {"id": user_id, "is_active": user_id not in self.inactive_users}
 
     def _paused(self, asset):
         # Mirrors the SQL: only an explicit "not paused" row is not paused.
@@ -180,6 +184,8 @@ class FakeDB:
             linked = self.linked.get(row["wallet_address"]) or {}
             if user_id is None or linked.get("user_id") != user_id:
                 return {"status": "not_linked"}
+            if user_id in self.inactive_users:
+                return {"status": "inactive_user"}
             spent = self._account_spent(
                 user_id, row["reward_date"], ("claimed", "paid"), exclude_id=row["id"]
             )
@@ -250,6 +256,7 @@ def db(monkeypatch):
         "get_active_rates",
         "get_controls",
         "get_wallet",
+        "get_user_by_id",
         "add_credits_to_user",
     ):
         monkeypatch.setattr(rewards, name, getattr(fake, name))
@@ -781,3 +788,43 @@ def test_g_resolve_user_id_fails_closed(monkeypatch):
         assert rewards._resolve_user_id(W1) is None
     monkeypatch.setattr(rewards, "get_wallet", lambda a: {"user_id": 7})
     assert rewards._resolve_user_id(W1) == 7
+
+
+def test_g_inactive_user_is_never_credited(db):
+    """A deactivated account is refused by the SQL claim."""
+    _link(db, W1, 7)
+    db.inactive_users.add(7)
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    rewards.run_delegation_accruals_once(DAY)
+    rewards.pay_pending_delegation_for_wallet(W1, 7)
+    assert db.credit_calls == []
+    assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "pending"
+
+
+@pytest.mark.parametrize(
+    "user_lookup",
+    [
+        lambda uid: {"id": uid, "is_active": False},  # deactivated after the claim
+        lambda uid: None,  # deleted, or the lookup failed (db layer returns None)
+        _boom,  # lookup raised
+        lambda uid: "garbage",
+    ],
+)
+def test_g_payee_account_rechecked_right_before_the_credit(db, monkeypatch, user_lookup):
+    """The SQL claim passed, then the account check right before the credit
+    write fails: the claim is released and nothing is credited."""
+    _link(db, W1, 7)
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    monkeypatch.setattr(rewards, "get_user_by_id", user_lookup)
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.credit_calls == []
+    row = db.accruals[(W1, "eth", DAY_STR)]
+    assert row["status"] == "pending" and row["paid_user_id"] is None
+
+
+def test_g_none_user_id_is_never_claimed_or_paid(db):
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    rewards.run_delegation_accruals_once(DAY)  # unlinked: user_id None
+    row = db.accruals[(W1, "eth", DAY_STR)]
+    assert db.claim_accrual(row["id"], None, Decimal(5))["status"] == "not_linked"
+    assert db.credit_calls == []
