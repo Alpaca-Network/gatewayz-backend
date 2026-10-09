@@ -14,7 +14,6 @@ from decimal import Decimal
 import pytest
 
 import src.services.delegation.rewards as rewards
-from src.services.delegation.rewards import DelegationMeasurementsMissingError
 
 DAY = date(2026, 10, 7)
 DAY_STR = "2026-10-07"
@@ -98,6 +97,12 @@ class FakeDB:
     def get_active_rates(self):
         return dict(self.rates)
 
+    def void_accrual(self, accrual_id):
+        for row in self.accruals.values():
+            if row["id"] == accrual_id:
+                row["status"] = "void"
+        return True
+
     def get_controls(self):
         return self.controls
 
@@ -132,6 +137,7 @@ def db(monkeypatch):
         "get_wallet",
         "get_wallets_for_user",
         "add_credits_to_user",
+        "void_accrual",
     ):
         monkeypatch.setattr(rewards, name, getattr(fake, name))
     monkeypatch.setattr(rewards.Config, "DELEGATED_STAKING_ENABLED", True)
@@ -156,7 +162,7 @@ def test_disabled_is_a_no_op(db, monkeypatch):
 
 
 def test_no_measurements_raises(db):
-    with pytest.raises(DelegationMeasurementsMissingError):
+    with pytest.raises(rewards.DelegationMeasurementsMissingError):
         rewards.run_delegation_accruals_once(DAY)
 
 
@@ -190,8 +196,34 @@ def test_pending_is_written_before_credits_and_request_id_is_namespaced(db):
     _link(db, W1, 7)
     db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
     rewards.run_delegation_accruals_once(DAY)
-    assert db.events == [f"create:eth:{W1}", f"credit:delegation:eth:{W1}:{DAY_STR}"]
+    request_id = rewards.request_id_for("eth", W1, DAY_STR)
+    assert db.events == [f"create:eth:{W1}", f"credit:{request_id}"]
     assert db.credit_calls[0]["transaction_type"] == "delegation_reward"
+    assert db.credit_calls[0]["metadata"]["grant_key"] == f"delegation:eth:{W1}:{DAY_STR}"
+    assert db.accruals[(W1, "eth", DAY_STR)]["ledger_request_id"] == request_id
+
+
+def test_ledger_request_id_is_a_deterministic_uuid():
+    import uuid
+
+    first = rewards.request_id_for("eth", W1.upper().replace("0X", "0x"), DAY)
+    assert uuid.UUID(first).version == 5
+    assert first == rewards.request_id_for("eth", W1, DAY_STR)
+    assert first != rewards.request_id_for("ada", W1, DAY_STR)
+
+
+def test_relinking_several_pending_wallets_cannot_exceed_the_cap(db):
+    # Measured, then unlinked before the accrual: each is capped on its own.
+    db.measurements[(W1, "eth")] = [Decimal(5000)] * 2
+    db.measurements[(W2, "eth")] = [Decimal(5000)] * 2
+    rewards.run_delegation_accruals_once(DAY)
+    assert {r["status"] for r in db.accruals.values()} == {"pending"}
+    for wallet in (W1, W2):
+        _link(db, wallet, 9)
+        rewards.pay_pending_delegation_for_wallet(wallet, 9)
+    paid = [r for r in db.accruals.values() if r["status"] == "paid"]
+    assert sum(Decimal(r["credits"]) for r in paid) == Decimal(5)
+    assert [r["status"] for r in db.accruals.values()].count("void") == 1
 
 
 def test_rerun_is_idempotent(db):

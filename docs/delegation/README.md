@@ -62,8 +62,11 @@ stake. `tests/routes/test_delegation.py::TestGuardrail` greps the route module.
    (`DELEGATION_DAILY_CAP_CREDITS`, all wallets and assets together) and by a
    global daily budget (`DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS`, rotating
    order). Written `pending` first, then `add_credits_to_user(transaction_type=
-   "delegation_reward", request_id="delegation:{asset}:{wallet}:{date}")`, then
-   marked paid. Pending rows are retried for 30 days and paid on link.
+   "delegation_reward", request_id=uuid5("delegation:{asset}:{wallet}:{date}"))`
+   (the ledger column is UUID-typed; the readable key is in the metadata as
+   `grant_key`), then marked paid. Pending rows are retried for 30 days and paid
+   on link; the account cap is re-checked at payment time (counting paid rows)
+   and a pending row that no longer fits is voided.
 
 ## Fail-closed rules
 

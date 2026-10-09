@@ -352,6 +352,20 @@ def mark_accrual_paid(accrual_id: int, ledger_request_id: str) -> dict[str, Any]
         return None
 
 
+def void_accrual(accrual_id: int) -> bool:
+    """Flip a pending accrual to 'void' -- decided, never to be paid, and no
+    longer counted as granted."""
+    try:
+        client = get_supabase_client()
+        client.table(_ACCRUALS_TABLE).update(
+            {"status": "void", "updated_at": datetime.now(UTC).isoformat()}
+        ).eq("id", accrual_id).eq("status", "pending").execute()
+        return True
+    except Exception as e:
+        logger.warning(f"delegation_accruals void failed for id={accrual_id}: {e}")
+        return False
+
+
 def list_pending_accruals_since(min_reward_date: date | str) -> list[dict[str, Any]]:
     try:
         client = get_supabase_client()

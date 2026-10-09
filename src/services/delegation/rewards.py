@@ -16,9 +16,10 @@ reused rather than reinvented:
   day) or it is skipped -- lowest-of-day with one reading is just a moment.
 * **Pending before pay.** The accrual row is written 'pending' before any
   credit moves, then add_credits_to_user(request_id=
-  "delegation:{asset}:{wallet}:{date}"), then marked paid. Idempotent twice
-  over: UNIQUE (wallet_address, asset, reward_date), and the credit ledger's
-  unique request_id.
+  uuid5("delegation:{asset}:{wallet}:{date}")), then marked paid.
+  Idempotent twice over: UNIQUE (wallet_address, asset, reward_date), and
+  the credit ledger's unique (UUID) request_id. The account cap is checked
+  again at payment time, so pending rows paid on link cannot stack.
 * **Two ceilings in code**: DELEGATION_DAILY_CAP_CREDITS per account per day
   (all its wallets and assets together) and DELEGATION_GLOBAL_DAILY_BUDGET_
   CREDITS per day across everyone. Budget order rotates daily
@@ -32,6 +33,7 @@ reused rather than reinvented:
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import Any
@@ -51,6 +53,7 @@ from src.db.delegation import (
     list_pending_accruals,
     list_pending_accruals_since,
     mark_accrual_paid,
+    void_accrual,
 )
 from src.db.user_wallets import get_wallet, get_wallets_for_user
 from src.db.users import add_credits_to_user
@@ -61,6 +64,13 @@ logger = logging.getLogger(__name__)
 
 _CREDITS_DP = Decimal("0.000001")
 _PENDING_RETRY_WINDOW_DAYS = 30
+# credit_transactions.request_id (and atomic_add_credits.p_request_id) is a
+# UUID column, so the logical grant key is mapped to a deterministic UUIDv5 --
+# the same pattern as src/services/billing/payments.py. A non-UUID string
+# would be rejected by both the atomic RPC and the ledger insert, silently
+# losing the ledger-side idempotency guard. Never change this namespace, or
+# existing keys shift.
+_LEDGER_KEY_NAMESPACE = uuid.UUID("2b0f4a4e-6f1d-5c1e-9a57-5d3c8e0a7d21")
 
 
 class DelegationMeasurementsMissingError(Exception):
@@ -87,8 +97,14 @@ def _decimal(value: Any, default: Decimal = Decimal(0)) -> Decimal:
         return default
 
 
-def request_id_for(asset: str, wallet_address: str, reward_date: date | str) -> str:
+def grant_key_for(asset: str, wallet_address: str, reward_date: date | str) -> str:
+    """The human-readable logical grant key, kept in the ledger metadata."""
     return f"delegation:{asset}:{wallet_address.lower()}:{_day_str(reward_date)}"
+
+
+def request_id_for(asset: str, wallet_address: str, reward_date: date | str) -> str:
+    """The ledger idempotency key: a deterministic UUIDv5 of the grant key."""
+    return str(uuid.uuid5(_LEDGER_KEY_NAMESPACE, grant_key_for(asset, wallet_address, reward_date)))
 
 
 def daily_cap() -> Decimal:
@@ -159,12 +175,36 @@ def _account_headroom(
     return daily_cap() - spent
 
 
+def _paid_headroom(user_id: int, reward_date_str: str, wallet: str, asset: str) -> Decimal | None:
+    """The account's remaining cap for the date counting only PAID accruals
+    of its other wallet-assets. Checked again at payment time because an
+    accrual decided while its wallet was unlinked was capped on its own:
+    several such wallets relinked to one account would otherwise each pay a
+    full cap. None when a lookup failed."""
+    paid = Decimal(0)
+    for row in get_wallets_for_user(user_id):
+        address = str(row.get("wallet_address") or "").lower()
+        if not address:
+            continue
+        accruals = list_accruals_for_wallet_date(address, reward_date_str)
+        if accruals is None:
+            return None
+        for accrual in accruals:
+            if address == wallet and accrual.get("asset") == asset:
+                continue
+            if accrual.get("status") == "paid":
+                paid += _decimal(accrual.get("credits"))
+    return daily_cap() - paid
+
+
 def _pay_or_leave_pending(
     accrual: dict[str, Any], user_id: int | None = None
 ) -> tuple[str, Decimal]:
     """Pay one pending accrual if its wallet belongs to an account, else
-    leave it pending. Never raises: a failed credit write leaves the row
-    pending, which is exactly the retryable state."""
+    leave it pending. An accrual that no longer fits the account's daily cap
+    is voided (never paid, no longer counted as granted). Never raises: a
+    failed credit write leaves the row pending, which is exactly the
+    retryable state."""
     wallet = str(accrual["wallet_address"]).lower()
     asset = str(accrual["asset"])
     reward_date_str = _day_str(accrual["reward_date"])
@@ -175,6 +215,14 @@ def _pay_or_leave_pending(
     credits = _decimal(accrual.get("credits"))
     if credits <= 0:
         return "pending", Decimal(0)
+
+    headroom = _paid_headroom(user_id, reward_date_str, wallet, asset)
+    if headroom is None:
+        return "pending", Decimal(0)
+    if credits > headroom:
+        void_accrual(accrual["id"])
+        logger.info("delegation_rewards: voided an accrual over the account cap (%s)", asset)
+        return "void", Decimal(0)
 
     request_id = request_id_for(asset, wallet, reward_date_str)
     try:
@@ -189,6 +237,7 @@ def _pay_or_leave_pending(
                 "asset": asset,
                 "reward_date": reward_date_str,
                 "usd_basis": str(accrual.get("usd_basis")),
+                "grant_key": grant_key_for(asset, wallet, reward_date_str),
             },
             request_id=request_id,
         )
@@ -239,7 +288,7 @@ def run_delegation_accruals_once(reward_date: date | None = None) -> dict[str, A
         ),
         Decimal(0),
     )
-    counts = {"paid": 0, "pending": 0, "already": 0, "errors": 0, "capped": 0}
+    counts = {"paid": 0, "pending": 0, "void": 0, "already": 0, "errors": 0, "capped": 0}
     skipped = {
         "unconfigured": 0,
         "paused": 0,
