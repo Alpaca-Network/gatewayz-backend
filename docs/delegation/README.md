@@ -139,9 +139,16 @@ stake. `tests/routes/test_delegation.py::TestGuardrail` greps the route module.
    met. Rewards land ~2 epochs (~10 days) after the stake snapshot, so set
    `DELEGATION_RECONCILIATION_GRACE_USD` to cover ~3 epochs of grants at launch
    or ADA will pause on day one.
-3. Then: set the rate (`PUT /admin/delegation/rates`, superadmin) → set the env
-   vars → `DELEGATED_STAKING_ENABLED=true` → `POST /admin/delegation/run
-   {"job":"measure"}` and check row counts in `/admin/status.delegation`.
+3. Then: set the env vars (vault / pool first — a positive rate for an
+   unconfigured asset is refused with 422) → set the rate (`PUT
+   /admin/delegation/rates`, superadmin) → `DELEGATED_STAKING_ENABLED=true` →
+   `POST /admin/delegation/run {"job":"measure"}` and check row counts in
+   `/admin/status.delegation`.
+
+Go-live runbooks: [RUNBOOK_STAKEWISE_VAULT.md](RUNBOOK_STAKEWISE_VAULT.md),
+[RUNBOOK_CARDANO_POOL.md](RUNBOOK_CARDANO_POOL.md),
+[LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md), and the questions for outside
+counsel in [COUNSEL_BRIEF.md](COUNSEL_BRIEF.md).
 
 ## Endpoints
 
