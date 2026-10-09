@@ -5,6 +5,7 @@ Tracks all credit additions and deductions with full audit trail
 """
 
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -147,6 +148,25 @@ class TransactionType:
     SUBSCRIPTION_DOWNGRADE = "subscription_downgrade"  # Allowance reset on tier downgrade
     STAKING_REWARD = "staking_reward"  # Daily WAYZ staking payout (inference credits)
     HOLDINGS_REWARD = "holdings_reward"  # Daily payout for tokens held in a proven wallet
+
+
+# Fixed namespace for deterministic ledger keys of reward grants. Never change
+# it: a different namespace would mint new keys for already-paid days.
+_REWARD_REQUEST_NAMESPACE = uuid.UUID("5f0d2c1e-8b7a-4c3d-9e21-6a4b7c8d9e10")
+
+
+def reward_request_uuid(key: str) -> str:
+    """Deterministic UUID for a reward grant's ledger ``request_id``.
+
+    ``credit_transactions.request_id`` (and ``atomic_add_credits.p_request_id``)
+    are UUID columns. Passing a readable key such as
+    ``"holdings_reward:<wallet>:<date>"`` makes the atomic RPC reject the call
+    and the legacy fallback credit the balance before its ledger insert fails,
+    so the accrual stays pending and is paid again on the next run. The same
+    ``key`` always maps to the same UUID, which keeps the ledger's unique index
+    an idempotency guard.
+    """
+    return str(uuid.uuid5(_REWARD_REQUEST_NAMESPACE, key))
 
 
 def get_transaction_by_request_id(request_id: str) -> dict[str, Any] | None:
