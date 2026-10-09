@@ -271,7 +271,7 @@ $$;
 -- longer fits is voided. A row already claimed is returned as-is so a crashed
 -- payment can be resumed (the ledger's UUID request_id keeps that idempotent).
 -- Returns {status, accrual?} with status in claimed | paid | void | paused |
--- not_linked | not_found. The pause is fail-closed (a missing controls row is
+-- not_linked | inactive_user | not_found. The pause is fail-closed (a missing controls row is
 -- paused) and the payee must be the wallet's CURRENT account.
 create or replace function public.delegation_claim_accrual(
   p_accrual_id bigint, p_user_id bigint, p_account_cap numeric
@@ -307,6 +307,15 @@ begin
     where w.wallet_address = v_row.wallet_address and w.user_id = p_user_id
   ) then
     return jsonb_build_object('status', 'not_linked');
+  end if;
+  -- ...and an account that exists and is not deactivated. Read through
+  -- to_jsonb so a schema without users.is_active cannot break the claim
+  -- (a missing flag means active, as everywhere else in the backend).
+  if not exists (
+    select 1 from public.users u
+    where u.id = p_user_id and coalesce((to_jsonb(u) ->> 'is_active')::boolean, true)
+  ) then
+    return jsonb_build_object('status', 'inactive_user');
   end if;
 
   v_spent := public.delegation_account_spent(

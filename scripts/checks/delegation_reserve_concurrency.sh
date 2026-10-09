@@ -21,7 +21,7 @@ until pg_isready -h 127.0.0.1 -p "$PORT" >/dev/null; do sleep 0.3; done
 run() { psql -h 127.0.0.1 -p "$PORT" -U postgres -v ON_ERROR_STOP=1 -q -At "$@"; }
 
 run -c "create role anon; create role authenticated; create role service_role;
-        create table public.users(id bigserial primary key);"
+        create table public.users(id bigserial primary key, is_active boolean default true);"
 run -f "$ROOT/supabase/migrations/20260903000000_user_wallets.sql"
 run -f "$ROOT/supabase/migrations/20261008230000_delegated_staking.sql" >/dev/null
 run -f "$ROOT/supabase/migrations/20261008230000_delegated_staking.sql" >/dev/null 2>&1
@@ -68,5 +68,13 @@ run -c "insert into delegation_controls(asset, accruals_paused) values ('eth', f
 id=$(run -c "select (public.delegation_reserve_accrual('nobody','eth','2026-10-09',1000,1,1,null,5,50)->'accrual'->>'id');")
 st=$(run -c "select public.delegation_claim_accrual($id, 1, 5)->>'status';")
 echo "claim for an account that does not own the wallet: $st"
+[ "$st" = "not_linked" ]
+run -c "insert into users(is_active) values (false);
+        insert into user_wallets(user_id, wallet_address, source) values (2, 'nobody', 'siwe');"
+st=$(run -c "select public.delegation_claim_accrual($id, 2, 5)->>'status';")
+echo "claim for a deactivated account: $st"
+[ "$st" = "inactive_user" ]
+st=$(run -c "select public.delegation_claim_accrual($id, null, 5)->>'status';")
+echo "claim for a null user id: $st"
 [ "$st" = "not_linked" ]
 echo "OK"
