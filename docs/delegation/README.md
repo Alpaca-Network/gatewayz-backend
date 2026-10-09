@@ -90,8 +90,16 @@ stake. `tests/routes/test_delegation.py::TestGuardrail` greps the route module.
   no new accrual and no pending payout. Only `POST /admin/delegation/resume
   {asset}` (superadmin, audited) un-pauses it; the next run re-pauses if the
   overspend persists.
-- An unreadable controls table pauses every asset; an unreadable sum is reported
-  `unknown` (never zero).
+- The pause fails closed: an unreadable controls table, a missing row, or a row
+  without an explicit `accruals_paused = false` is **paused** — in Python and in
+  the SQL reserve/claim functions. A failed reserve/claim (cap or budget read)
+  reserves and pays nothing. An unreadable sum is reported `unknown` (never zero).
+- Authorization fails closed: credits only go to the account the wallet is
+  linked to **right now**. The SQL claim refuses (`not_linked`) unless the
+  wallet is linked to the payee; immediately before the credit write the link is
+  re-verified, and anything else (unlinked, inactive, moved to another account,
+  lookup error, missing/malformed user id) releases the claim back to `pending`
+  without paying.
 - ETH revenue is the day-over-day growth of `getShares(feeRecipient)`. The first
   reading — and the first after `feeRecipient` changes — is a zero baseline;
   shares moved out count as zero, never negative. ADA revenue is recorded once

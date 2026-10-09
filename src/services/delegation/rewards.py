@@ -55,6 +55,7 @@ from src.db.delegation import (
     list_pending_accruals,
     list_pending_accruals_since,
     mark_accrual_paid,
+    release_claim,
     reserve_accrual,
 )
 from src.db.user_wallets import get_wallet
@@ -123,11 +124,13 @@ def asset_configured(asset: str) -> bool:
 
 
 def paused_assets(controls: dict[str, dict[str, Any]] | None) -> set[str]:
-    """Assets whose new accruals and pending payouts are blocked. An
-    unreadable controls table blocks every asset."""
-    if controls is None:
+    """Assets whose new accruals and pending payouts are blocked. Fails
+    closed: an unreadable controls table, a missing row for an asset, or a
+    row without an explicit ``accruals_paused = false`` all count as paused.
+    (The SQL reserve/claim functions apply the same rule themselves.)"""
+    if not isinstance(controls, dict):
         return set(ASSETS)
-    return {a for a in ASSETS if (controls.get(a) or {}).get("accruals_paused")}
+    return {a for a in ASSETS if (controls.get(a) or {}).get("accruals_paused") is not False}
 
 
 def rate_for(rates: dict[str, dict[str, Any]], asset: str) -> Decimal:
@@ -149,10 +152,17 @@ def suggested_rate(expected_daily_revenue_per_usd: Decimal) -> Decimal:
 
 
 def _resolve_user_id(wallet_address: str) -> int | None:
-    row = get_wallet(wallet_address)
-    if row is None or row.get("is_active") is False:
+    """The account the wallet is linked to right now, or None when it is
+    unlinked, inactive, or the lookup failed in any way -- callers never pay
+    without an account."""
+    try:
+        row = get_wallet(wallet_address)
+    except Exception:  # noqa: BLE001 - a failed lookup is "no account"
         return None
-    return row.get("user_id")
+    if not isinstance(row, dict) or row.get("is_active") is False:
+        return None
+    user_id = row.get("user_id")
+    return int(user_id) if isinstance(user_id, int) and not isinstance(user_id, bool) else None
 
 
 def _pay_or_leave_pending(
@@ -187,6 +197,10 @@ def _pay_or_leave_pending(
             return "paused", Decimal(0)
         if claim_status == "paid":
             return "already", Decimal(0)
+        if claim_status == "not_linked":
+            # The SQL re-check found the wallet is not linked to this account
+            # right now (unlinked or moved since we looked). Never pay.
+            return "pending", Decimal(0)
         if claim_status != "claimed" or not result.get("accrual"):
             return "pending", Decimal(0)
         accrual = result["accrual"]
@@ -199,6 +213,14 @@ def _pay_or_leave_pending(
     payee = accrual.get("paid_user_id")
     credits = _decimal(accrual.get("credits"))
     if payee is None or credits <= 0:
+        return "pending", Decimal(0)
+    # Re-verify immediately before the credit write: the claim checked the
+    # link under the lock, but an unlink or a move to another account may
+    # have landed since. Anything other than "still linked to the payee"
+    # -- including a failed lookup -- releases the claim and pays nothing.
+    if _resolve_user_id(wallet) != payee:
+        release_claim(accrual["id"], payee)
+        logger.info("delegation_rewards: payee no longer owns the wallet; claim released")
         return "pending", Decimal(0)
 
     request_id = request_id_for(asset, wallet, reward_date_str)

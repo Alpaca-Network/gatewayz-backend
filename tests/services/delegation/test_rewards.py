@@ -42,7 +42,10 @@ class FakeDB:
         }
         self.measurements: dict[tuple[str, str], list[Decimal]] = {}
         self.accruals: dict[tuple[str, str, str], dict] = {}
-        self.controls: dict | None = {"eth": {}, "ada": {}}
+        self.controls: dict | None = {
+            "eth": {"accruals_paused": False},
+            "ada": {"accruals_paused": False},
+        }
         self.linked: dict[str, dict] = {}
         self.credit_calls: list[dict] = []
         self.ledger: set[str] = set()
@@ -97,7 +100,10 @@ class FakeDB:
         return self.linked.get(address)
 
     def _paused(self, asset):
-        return bool(((self.controls or {}).get(asset) or {}).get("accruals_paused"))
+        # Mirrors the SQL: only an explicit "not paused" row is not paused.
+        if not isinstance(self.controls, dict):
+            return True
+        return (self.controls.get(asset) or {}).get("accruals_paused") is not False
 
     # -- the SQL functions ----------------------------------------------------
     def _account_spent(self, user_id, day, statuses, exclude_id=None):
@@ -171,6 +177,9 @@ class FakeDB:
                 return {"status": row["status"], "accrual": dict(row)}
             if self._paused(row["asset"]):
                 return {"status": "paused"}
+            linked = self.linked.get(row["wallet_address"]) or {}
+            if user_id is None or linked.get("user_id") != user_id:
+                return {"status": "not_linked"}
             spent = self._account_spent(
                 user_id, row["reward_date"], ("claimed", "paid"), exclude_id=row["id"]
             )
@@ -181,6 +190,19 @@ class FakeDB:
             row["status"] = "claimed"
             row["paid_user_id"] = user_id
             return {"status": "claimed", "accrual": dict(row)}
+
+    def release_claim(self, accrual_id, user_id):
+        with self._mutex:
+            for row in self.accruals.values():
+                if (
+                    row["id"] == accrual_id
+                    and row["status"] == "claimed"
+                    and row["paid_user_id"] == user_id
+                ):
+                    row["status"] = "pending"
+                    row["paid_user_id"] = None
+                    return True
+        return False
 
     def mark_accrual_paid(self, accrual_id, request_id):
         with self._mutex:
@@ -221,6 +243,7 @@ def db(monkeypatch):
         "get_accrual",
         "reserve_accrual",
         "claim_accrual",
+        "release_claim",
         "mark_accrual_paid",
         "list_pending_accruals_since",
         "list_pending_accruals",
@@ -360,7 +383,7 @@ def test_existing_accruals_consume_budget_on_rerun(db, monkeypatch):
 def test_paused_asset_accrues_nothing(db):
     _link(db, W1, 7)
     _link(db, ADA1, 8)
-    db.controls = {"eth": {"accruals_paused": True}, "ada": {}}
+    db.controls = {"eth": {"accruals_paused": True}, "ada": {"accruals_paused": False}}
     db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
     db.measurements[(ADA1, "ada")] = [Decimal(1000)] * 2
     summary = rewards.run_delegation_accruals_once(DAY)
@@ -410,6 +433,7 @@ def test_unlinked_wallet_accrues_pending_and_is_paid_on_link(db):
     summary = rewards.run_delegation_accruals_once(DAY)
     assert summary["pending"] == 1
     assert db.credit_calls == []
+    _link(db, W1, 9)
     rewards.pay_pending_delegation_for_wallet(W1, 9)
     assert db.credit_calls[0]["user_id"] == 9
     assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "paid"
@@ -527,12 +551,13 @@ def test_d_concurrent_runs_and_pay_on_link_never_exceed_cap_or_budget(db, monkey
         threading.Thread(target=guarded, args=(rewards.run_delegation_accruals_once, DAY))
         for _ in range(3)
     ]
+
+    def link_then_pay(w):
+        _link(db, w, 100)
+        rewards.pay_pending_delegation_for_wallet(w, 100)
+
     for w in unlinked:
-        threads.append(
-            threading.Thread(
-                target=guarded, args=(rewards.pay_pending_delegation_for_wallet, w, 100)
-            )
-        )
+        threads.append(threading.Thread(target=guarded, args=(link_then_pay, w)))
     for t in threads:
         t.start()
     for t in threads:
@@ -564,9 +589,195 @@ def test_e_pause_is_rechecked_at_pay_time(db):
     not paid -- not by the run's retry sweep, not on link."""
     db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
     rewards.run_delegation_accruals_once(DAY)  # unlinked -> pending
-    db.controls = {"eth": {"accruals_paused": True}, "ada": {}}
+    db.controls = {"eth": {"accruals_paused": True}, "ada": {"accruals_paused": False}}
     _link(db, W1, 5)
     rewards.pay_pending_delegation_for_wallet(W1, 5)
     rewards.run_delegation_accruals_once(DAY)
     assert db.paid_total() == 0
     assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "pending"
+
+
+def test_a_two_evm_wallets_and_a_stake_address_share_one_cap(db):
+    """(a) 2 EVM wallets + 1 Cardano stake address on one account, both
+    assets, one reward date: one cap in total."""
+    _link(db, W1, 7)
+    _link(db, W2, 7)
+    _link(db, ADA1, 7)
+    db.measurements[(W1, "eth")] = [Decimal(3000)] * 2  # 3 credits
+    db.measurements[(W2, "eth")] = [Decimal(3000)] * 2  # 3 credits
+    db.measurements[(ADA1, "ada")] = [Decimal(1500)] * 2  # 3 credits at the ADA rate
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.paid_total(7) == Decimal(5)
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.paid_total(7) == Decimal(5)
+
+
+# -- fail-closed pause / budget reads ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "controls",
+    [
+        None,  # read failed
+        {},  # read returned nothing
+        {"eth": {}, "ada": {}},  # rows without an explicit flag
+        {"ada": {"accruals_paused": False}},  # ETH row missing
+        {"eth": {"accruals_paused": None}, "ada": {"accruals_paused": None}},
+    ],
+)
+def test_f_unknown_pause_state_pays_nothing(db, controls):
+    _link(db, W1, 7)
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    db.controls = controls
+    rewards.run_delegation_accruals_once(DAY)
+    rewards.pay_pending_delegation_for_wallet(W1, 7)
+    assert db.credit_calls == []
+
+
+def test_f_pause_flag_read_failing_after_reserve_blocks_the_payout(db, monkeypatch):
+    """The pause is re-read inside the claim: a controls read that starts
+    failing between reserve and pay still pays nothing."""
+    _link(db, W1, 7)
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    real_reserve = db.reserve_accrual
+
+    def reserve_then_break(*args):
+        result = real_reserve(*args)
+        db.controls = None
+        return result
+
+    monkeypatch.setattr(rewards, "reserve_accrual", reserve_then_break)
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.credit_calls == []
+    assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "pending"
+
+
+def test_f_budget_or_reserve_failure_pays_nothing(db, monkeypatch):
+    """The cap/budget read lives in the reserve; if it fails, nothing is
+    reserved and nothing is paid."""
+    _link(db, W1, 7)
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    monkeypatch.setattr(rewards, "reserve_accrual", lambda *a: None)
+    summary = rewards.run_delegation_accruals_once(DAY)
+    assert db.credit_calls == [] and db.accruals == {}
+    assert summary["errors"] == 1
+
+
+def test_f_claim_failure_pays_nothing(db, monkeypatch):
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    rewards.run_delegation_accruals_once(DAY)  # unlinked -> pending
+    _link(db, W1, 7)
+    monkeypatch.setattr(rewards, "claim_accrual", lambda *a: None)
+    rewards.pay_pending_delegation_for_wallet(W1, 7)
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.credit_calls == []
+    assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "pending"
+
+
+# -- fail-closed authorization -----------------------------------------------------
+
+
+def _boom(*_a, **_k):
+    raise RuntimeError("user_wallets lookup timed out")
+
+
+@pytest.mark.parametrize(
+    "lookup",
+    [
+        _boom,  # lookup raised
+        lambda a: None,  # unlinked / failed (db layer returns None on error)
+        lambda a: {"wallet_address": a, "user_id": 7, "is_active": False},  # inactive
+        lambda a: {"wallet_address": a, "user_id": None},  # no account
+        lambda a: {"wallet_address": a, "user_id": "7"},  # malformed id
+        lambda a: {"wallet_address": a},  # missing id
+    ],
+)
+def test_g_wallet_to_account_lookup_problems_never_credit(db, monkeypatch, lookup):
+    _link(db, W1, 7)  # what the SQL side would see
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    monkeypatch.setattr(rewards, "get_wallet", lookup)
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.credit_calls == []
+
+
+def test_g_payout_to_an_account_that_does_not_own_the_wallet_is_refused(db):
+    """pay-on-link called for account 9 while the wallet is linked to 8 (or
+    to nobody): the SQL claim refuses, nothing is credited."""
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    rewards.run_delegation_accruals_once(DAY)
+    rewards.pay_pending_delegation_for_wallet(W1, 9)  # not linked at all
+    _link(db, W1, 8)
+    rewards.pay_pending_delegation_for_wallet(W1, 9)  # linked to someone else
+    assert db.credit_calls == []
+    rewards.pay_pending_delegation_for_wallet(W1, 8)
+    assert [c["user_id"] for c in db.credit_calls] == [8]
+
+
+def test_g_unlink_racing_the_payout_releases_the_claim_and_pays_nothing(db, monkeypatch):
+    """The wallet moves to another account between the claim and the credit
+    write: the pre-write re-verification releases the claim, no credit."""
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    rewards.run_delegation_accruals_once(DAY)
+    _link(db, W1, 7)
+    real_claim = db.claim_accrual
+
+    def claim_then_move(accrual_id, user_id, cap):
+        result = real_claim(accrual_id, user_id, cap)
+        _link(db, W1, 8)  # moved to account 8 right after the claim
+        return result
+
+    monkeypatch.setattr(rewards, "claim_accrual", claim_then_move)
+    rewards.pay_pending_delegation_for_wallet(W1, 7)
+    assert db.credit_calls == []
+    row = db.accruals[(W1, "eth", DAY_STR)]
+    assert row["status"] == "pending" and row["paid_user_id"] is None
+    # The new owner can be paid once, through a fresh claim under its own cap.
+    monkeypatch.setattr(rewards, "claim_accrual", real_claim)
+    rewards.pay_pending_delegation_for_wallet(W1, 8)
+    assert [c["user_id"] for c in db.credit_calls] == [8]
+
+
+def test_g_resumed_claim_is_reverified_before_paying(db):
+    """A claim left by a crashed payment is only paid if its payee still owns
+    the wallet; otherwise it is released."""
+    _link(db, W1, 7)
+    db.measurements[(W1, "eth")] = [Decimal(1000)] * 2
+    db.fail_credit = True
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "claimed"
+    db.fail_credit = False
+    del db.linked[W1]  # unlinked before the retry
+    rewards.run_delegation_accruals_once(DAY)
+    assert db.credit_calls == []
+    assert db.accruals[(W1, "eth", DAY_STR)]["status"] == "pending"
+
+
+@pytest.mark.parametrize(
+    "controls,expected",
+    [
+        (None, {"eth", "ada"}),
+        ({}, {"eth", "ada"}),
+        ({"eth": {}, "ada": {"accruals_paused": False}}, {"eth"}),
+        ({"eth": {"accruals_paused": None}, "ada": {"accruals_paused": False}}, {"eth"}),
+        ({"eth": {"accruals_paused": False}, "ada": {"accruals_paused": False}}, set()),
+        ("garbage", {"eth", "ada"}),
+    ],
+)
+def test_f_paused_assets_fails_closed(controls, expected):
+    assert rewards.paused_assets(controls) == expected
+
+
+def test_g_resolve_user_id_fails_closed(monkeypatch):
+    monkeypatch.setattr(rewards, "get_wallet", _boom)
+    assert rewards._resolve_user_id(W1) is None
+    for row in (
+        None,
+        {"user_id": 7, "is_active": False},
+        {"user_id": "7"},
+        {"user_id": True},
+        {},
+    ):
+        monkeypatch.setattr(rewards, "get_wallet", lambda a, row=row: row)
+        assert rewards._resolve_user_id(W1) is None
+    monkeypatch.setattr(rewards, "get_wallet", lambda a: {"user_id": 7})
+    assert rewards._resolve_user_id(W1) == 7

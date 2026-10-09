@@ -103,22 +103,20 @@ def _build_delegation_block() -> dict[str, Any]:
     per-asset cost vs revenue. Cheap reads only; the full ledger comparison
     is GET /admin/delegation/reconciliation."""
     from src.db.delegation import ASSETS, get_controls, get_latest_measurement_taken_at
-    from src.services.delegation.rewards import asset_configured
+    from src.services.delegation.rewards import asset_configured, paused_assets
     from src.services.ops.job_runs import get_job_runs
 
     controls = get_controls()
+    paused = paused_assets(controls)
     latest = get_latest_measurement_taken_at()
     return {
         "enabled": bool(Config.DELEGATED_STAKING_ENABLED),
         "assets": {
             asset: {
                 "configured": asset_configured(asset),
-                # An unreadable controls table means "treated as paused".
-                "paused": (
-                    True
-                    if controls is None
-                    else bool((controls.get(asset) or {}).get("accruals_paused"))
-                ),
+                # The payout rule: unreadable / missing / not explicitly
+                # unpaused all mean paused.
+                "paused": asset in paused,
                 "paused_reason": ((controls or {}).get(asset) or {}).get("paused_reason"),
             }
             for asset in ASSETS

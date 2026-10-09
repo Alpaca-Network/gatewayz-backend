@@ -6,7 +6,8 @@
 # migration (twice, to prove idempotency), then fires 40 parallel sessions at
 # delegation_reserve_accrual and delegation_claim_accrual and asserts the
 # per-account cap (5) and global budget (50) held. Needs initdb/pg_ctl/psql on
-# PATH. Never touches a real database.
+# PATH. Never touches a real database. Also checks the fail-closed pause
+# (missing controls row) and the payee-must-own-the-wallet claim rule.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -57,4 +58,15 @@ claimed=$(run -c "select coalesce(sum(credits),0) from delegation_accruals
                   where reward_date='2026-10-08' and status='claimed';")
 echo "pay-time cap: claimed $claimed (cap 5)"
 [ "$(run -c "select ($claimed)::numeric <= 5")" = "t" ]
+# 4. Fail closed: a missing controls row is paused; a claim for an account the
+#    wallet is not linked to is refused.
+run -c "delete from delegation_controls where asset='eth';"
+st=$(run -c "select public.delegation_reserve_accrual('w1','eth','2026-10-09',1000,1,1,1,5,50)->>'status';")
+echo "missing controls row: $st"
+[ "$st" = "paused" ]
+run -c "insert into delegation_controls(asset, accruals_paused) values ('eth', false);"
+id=$(run -c "select (public.delegation_reserve_accrual('nobody','eth','2026-10-09',1000,1,1,null,5,50)->'accrual'->>'id');")
+st=$(run -c "select public.delegation_claim_accrual($id, 1, 5)->>'status';")
+echo "claim for an account that does not own the wallet: $st"
+[ "$st" = "not_linked" ]
 echo "OK"

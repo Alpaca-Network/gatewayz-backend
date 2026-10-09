@@ -326,6 +326,22 @@ def claim_accrual(accrual_id: int, user_id: int, account_cap: Decimal) -> dict[s
         return None
 
 
+def release_claim(accrual_id: int, user_id: int) -> bool:
+    """Put a claimed accrual back to pending (supabase function
+    delegation_release_claim) when its payee could not be re-verified as the
+    wallet's current account. False on failure -- the row then stays claimed
+    and unpaid, and is re-verified on the next attempt."""
+    try:
+        client = get_supabase_client()
+        result = client.rpc(
+            "delegation_release_claim", {"p_accrual_id": accrual_id, "p_user_id": user_id}
+        ).execute()
+        return bool(result.data)
+    except Exception as e:
+        logger.warning(f"delegation_release_claim failed for id={accrual_id}: {e}")
+        return False
+
+
 def mark_accrual_paid(accrual_id: int, ledger_request_id: str) -> dict[str, Any] | None:
     try:
         client = get_supabase_client()

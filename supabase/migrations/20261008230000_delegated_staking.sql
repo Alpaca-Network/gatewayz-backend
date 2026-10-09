@@ -231,8 +231,9 @@ begin
     return jsonb_build_object('status', 'exists', 'accrual', to_jsonb(v_existing));
   end if;
 
-  if exists (select 1 from public.delegation_controls c
-             where c.asset = p_asset and c.accruals_paused) then
+  -- Fail closed: anything but an explicit "not paused" row is paused.
+  if not exists (select 1 from public.delegation_controls c
+                 where c.asset = p_asset and c.accruals_paused = false) then
     return jsonb_build_object('status', 'paused');
   end if;
 
@@ -270,7 +271,8 @@ $$;
 -- longer fits is voided. A row already claimed is returned as-is so a crashed
 -- payment can be resumed (the ledger's UUID request_id keeps that idempotent).
 -- Returns {status, accrual?} with status in claimed | paid | void | paused |
--- not_found.
+-- not_linked | not_found. The pause is fail-closed (a missing controls row is
+-- paused) and the payee must be the wallet's CURRENT account.
 create or replace function public.delegation_claim_accrual(
   p_accrual_id bigint, p_user_id bigint, p_account_cap numeric
 ) returns jsonb
@@ -293,9 +295,18 @@ begin
     return jsonb_build_object('status', v_row.status, 'accrual', to_jsonb(v_row));
   end if;
 
-  if exists (select 1 from public.delegation_controls c
-             where c.asset = v_row.asset and c.accruals_paused) then
+  if not exists (select 1 from public.delegation_controls c
+                 where c.asset = v_row.asset and c.accruals_paused = false) then
     return jsonb_build_object('status', 'paused');
+  end if;
+
+  -- Authorization, checked under the lock: the payee must be the account the
+  -- wallet is linked to right now. Unlinked, moved or never linked -> no claim.
+  if p_user_id is null or not exists (
+    select 1 from public.user_wallets w
+    where w.wallet_address = v_row.wallet_address and w.user_id = p_user_id
+  ) then
+    return jsonb_build_object('status', 'not_linked');
   end if;
 
   v_spent := public.delegation_account_spent(
@@ -313,6 +324,29 @@ begin
 end;
 $$;
 
+-- Undo a claim whose payee no longer owns the wallet (or could not be
+-- re-verified) right before the credit write. Back to pending, so the next
+-- payment attempt claims it for the current owner under the cap again. If the
+-- credit had in fact been written before a crash, the ledger's UUID
+-- request_id makes the re-payment an idempotent no-op.
+create or replace function public.delegation_release_claim(
+  p_accrual_id bigint, p_user_id bigint
+) returns boolean
+language sql
+set search_path = public, pg_temp
+as $$
+  with released as (
+    update public.delegation_accruals
+    set status = 'pending', paid_user_id = null, updated_at = now()
+    where id = p_accrual_id and status = 'claimed' and paid_user_id = p_user_id
+    returning 1
+  )
+  select exists (select 1 from released);
+$$;
+
+revoke all on function public.delegation_release_claim(bigint, bigint)
+  from public, anon, authenticated;
+grant execute on function public.delegation_release_claim(bigint, bigint) to service_role;
 revoke all on function public.delegation_account_spent(bigint, date, text[], bigint)
   from public, anon, authenticated;
 revoke all on function public.delegation_reserve_accrual(

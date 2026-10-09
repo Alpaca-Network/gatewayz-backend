@@ -204,13 +204,16 @@ def run_delegation_reconciliation_once(today: date | None = None) -> dict[str, A
 
 def reconciliation_view() -> dict[str, Any]:
     """Read-only reconciliation state for the admin API and /admin/status."""
+    from src.services.delegation.rewards import paused_assets
+
     controls = get_controls()
+    paused = paused_assets(controls)  # the same fail-closed rule payouts use
     view: dict[str, Any] = {"enabled": bool(Config.DELEGATED_STAKING_ENABLED)}
     for asset in ASSETS:
         control = (controls or {}).get(asset) or {}
         view[asset] = {
             "configured": {"eth": eth_configured, "ada": ada_configured}[asset](),
-            "paused": True if controls is None else bool(control.get("accruals_paused")),
+            "paused": asset in paused,
             "paused_reason": control.get("paused_reason"),
             "paused_at": control.get("paused_at"),
             **compare_asset(asset),
