@@ -38,7 +38,7 @@ from src.db.staking_rewards import (
     mark_accrual_paid,
     mark_accrual_pending_failed,
 )
-from src.db.user_wallets import get_wallet, get_wallets_for_user
+from src.db.user_wallets import get_wallet, get_wallets_for_user, is_evm_wallet
 from src.db.users import add_credits_to_user
 from src.db.wallet_stakes import get_max_last_synced_at, get_wallet_stake, list_wallets_with_stake
 
@@ -409,6 +409,8 @@ def get_rewards_view_for_user(user_id: int) -> dict[str, Any]:
 
     wallets_out = []
     for w in get_wallets_for_user(user_id):
+        if not is_evm_wallet(w):
+            continue
         address = w["wallet_address"]
         stake_row = get_wallet_stake(address)
         staked_amount_wei = stake_row["staked_amount"] if stake_row else "0"

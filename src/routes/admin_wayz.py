@@ -70,6 +70,11 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     "holdings_rewards": 1440,
     # Hourly staleness check on holdings_snapshots (src/services/holdings/alerts.py).
     "holdings_sweep_watchdog": 60,
+    # Delegated staking (src/services/delegation/): the measurement sweep runs
+    # DELEGATION_MEASUREMENTS_PER_DAY times a day; accrual and reconciliation daily.
+    "delegation_measurements": 1440 // max(1, min(Config.DELEGATION_MEASUREMENTS_PER_DAY, 24)),
+    "delegation_accruals": 1440,
+    "delegation_reconciliation": 1440,
 }
 
 # WAYZ token/staking contracts are deployed on Avalanche Fuji testnet.

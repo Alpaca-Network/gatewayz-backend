@@ -1829,6 +1829,138 @@ def stop_holdings_rewards_scheduler():
         _holdings_rewards_scheduler = None
 
 
+# ============================================================================
+# Delegated staking (src/services/delegation/) -- an inference allowance for
+# stake delegated to the Gatewayz StakeWise vault / Cardano pool. Three jobs on
+# one scheduler:
+#
+#   delegation_measurements -- DELEGATION_MEASUREMENTS_PER_DAY sweeps a day at
+#     evenly spaced hours (same spacing as holdings), recording each linked
+#     wallet's delegated amount, zero included.
+#   delegation_reconciliation -- daily: record the revenue that reached us and
+#     pause an asset whose granted cost outran it (fail closed).
+#   delegation_accruals -- daily, after reconciliation, paying for YESTERDAY.
+#
+# Always started; every job no-ops (records "skipped: disabled") while
+# DELEGATED_STAKING_ENABLED is off, and per asset while its vault / pool is
+# unset, so the ops page shows them as off rather than missing.
+# ============================================================================
+_delegation_scheduler: AsyncIOScheduler | None = None
+
+
+async def _run_delegation_job(name: str, fn, *args) -> dict[str, Any] | None:
+    """Run one delegation job off the event loop and record it. Never raises."""
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(fn, *args)
+        duration_ms = int((datetime.now(UTC) - run_started_at).total_seconds() * 1000)
+        if not result.get("skipped"):
+            logger.info("✅ %s OK | %s", name, result)
+        record_job_run(name, ok=True, summary=result, duration_ms=duration_ms)
+        return result
+    except Exception as e:
+        logger.warning("%s run failed (non-fatal): %s", name, e)
+        record_job_run(
+            name,
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+        return None
+
+
+async def run_scheduled_delegation_measurements():
+    from src.services.delegation.alerts import alert_if_measured_nothing
+    from src.services.delegation.measurements import run_delegation_measurements_once
+
+    result = await _run_delegation_job("delegation_measurements", run_delegation_measurements_once)
+    if result:
+        try:
+            await asyncio.to_thread(alert_if_measured_nothing, result)
+        except Exception as e:
+            logger.error("Delegation measurement alert check failed: %s", e)
+
+
+async def run_scheduled_delegation_accruals():
+    from src.services.delegation.rewards import run_delegation_accruals_once
+
+    await _run_delegation_job("delegation_accruals", run_delegation_accruals_once)
+
+
+async def run_scheduled_delegation_reconciliation():
+    from src.services.delegation.reconciliation import run_delegation_reconciliation_once
+
+    await _run_delegation_job("delegation_reconciliation", run_delegation_reconciliation_once)
+
+
+def start_delegation_scheduler():
+    """Start the delegated-staking jobs (app lifespan). Always starts."""
+    global _delegation_scheduler
+
+    hours = holdings_snapshot_cron_hours(Config.DELEGATION_MEASUREMENTS_PER_DAY)
+    hour_expr = ",".join(str(h) for h in hours)
+    try:
+        _delegation_scheduler = AsyncIOScheduler()
+        _delegation_scheduler.add_job(
+            run_scheduled_delegation_measurements,
+            trigger=CronTrigger(
+                hour=hour_expr,
+                minute=Config.DELEGATION_MEASUREMENT_CRON_MINUTE_UTC,
+                timezone="UTC",
+            ),
+            id="delegation_measurements",
+            name="Delegation Measurements Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _delegation_scheduler.add_job(
+            run_scheduled_delegation_reconciliation,
+            trigger=CronTrigger(
+                hour=Config.DELEGATION_RECONCILIATION_CRON_HOUR_UTC,
+                minute=Config.DELEGATION_RECONCILIATION_CRON_MINUTE_UTC,
+                timezone="UTC",
+            ),
+            id="delegation_reconciliation",
+            name="Delegation Reconciliation Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _delegation_scheduler.add_job(
+            run_scheduled_delegation_accruals,
+            trigger=CronTrigger(
+                hour=Config.DELEGATION_ACCRUAL_CRON_HOUR_UTC,
+                minute=Config.DELEGATION_ACCRUAL_CRON_MINUTE_UTC,
+                timezone="UTC",
+            ),
+            id="delegation_accruals",
+            name="Delegation Accruals Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _delegation_scheduler.start()
+        logger.info("✅ Delegation scheduler started (measurements at UTC hours %s)", hour_expr)
+    except Exception as e:
+        logger.error("❌ Failed to start delegation scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_delegation_scheduler():
+    global _delegation_scheduler
+
+    if _delegation_scheduler is None:
+        return
+    try:
+        _delegation_scheduler.shutdown(wait=True)
+        logger.info("✅ Delegation scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping delegation scheduler: %s", e)
+    finally:
+        _delegation_scheduler = None
+
+
 def get_pricing_drift_status() -> dict[str, Any]:
     """Get the current status of the pricing-drift monitor (for health monitoring)."""
     return {

@@ -162,6 +162,7 @@ def test_list_all_wallets_returns_empty_on_error(sb):
 def test_count_wallets_linked_before_counts_at_or_before_the_cutoff(sb):
     query = MagicMock()
     query.select.return_value = query
+    query.eq.return_value = query
     query.lte.return_value = query
     query.limit.return_value = query
     query.execute.return_value = MagicMock(data=[{"id": 1}], count=7)
@@ -174,6 +175,8 @@ def test_count_wallets_linked_before_counts_at_or_before_the_cutoff(sb):
 
     query.select.assert_called_once_with("id", count="exact")
     query.lte.assert_called_once_with("created_at", cutoff.isoformat())
+    # The holdings sweep reads EVM balances only; a Cardano link is never eligible.
+    query.eq.assert_called_once_with("chain_namespace", "eip155")
 
 
 def test_count_wallets_linked_before_is_none_not_zero_on_error(sb):

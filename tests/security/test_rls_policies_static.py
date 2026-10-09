@@ -97,6 +97,14 @@ TARGET_TABLES = frozenset(
         # posture, added in 20260913120000_emission_rewards.sql.
         "emission_epochs",
         "provider_scores",
+        # Delegated staking (inference-as-yield v2) -- same service-role-only,
+        # RLS-enabled-with-explicit-REVOKE posture, added in
+        # 20261008230000_delegated_staking.sql.
+        "delegation_measurements",
+        "delegation_allowance_rates",
+        "delegation_accruals",
+        "delegation_revenue",
+        "delegation_controls",
     }
 )
 
