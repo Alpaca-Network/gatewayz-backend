@@ -73,7 +73,7 @@ from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import Any
 
 from src.config.config import Config
-from src.db.credit_transactions import TransactionType
+from src.db.credit_transactions import TransactionType, reward_request_uuid
 from src.db.holdings import (
     create_holdings_accrual,
     get_active_holdings_rates,
@@ -129,7 +129,7 @@ def _decimal(value: Any, default: Decimal = Decimal(0)) -> Decimal:
 
 
 def _request_id(wallet_address: str, reward_date_str: str) -> str:
-    return f"holdings_reward:{wallet_address}:{reward_date_str}"
+    return reward_request_uuid(f"holdings_reward:{wallet_address}:{reward_date_str}")
 
 
 def _daily_cap() -> Decimal:

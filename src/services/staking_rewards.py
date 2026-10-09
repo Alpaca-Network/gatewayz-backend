@@ -27,7 +27,11 @@ from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 from src.config.config import Config
-from src.db.credit_transactions import TransactionType, get_transaction_by_request_id
+from src.db.credit_transactions import (
+    TransactionType,
+    get_transaction_by_request_id,
+    reward_request_uuid,
+)
 from src.db.staking_rewards import (
     create_accrual,
     get_accrual,
@@ -110,8 +114,12 @@ def is_stake_sync_stale() -> bool:
     return _is_sync_stale()
 
 
+def _staking_request_id(wallet_address: str, reward_date_str: str) -> str:
+    return reward_request_uuid(f"staking_reward:{wallet_address}:{reward_date_str}")
+
+
 def _find_ledger_id(wallet_address: str, reward_date_str: str) -> int | None:
-    row = get_transaction_by_request_id(f"staking_reward:{wallet_address}:{reward_date_str}")
+    row = get_transaction_by_request_id(_staking_request_id(wallet_address, reward_date_str))
     return row.get("id") if row else None
 
 
@@ -147,7 +155,7 @@ def _pay_or_leave_pending(accrual: dict[str, Any], capped: bool = False) -> tupl
                 "rate_id": accrual["rate_id"],
                 "capped": capped,
             },
-            request_id=f"staking_reward:{wallet_address}:{reward_date_str}",
+            request_id=_staking_request_id(wallet_address, reward_date_str),
         )
     except Exception as e:
         mark_accrual_pending_failed(accrual["id"], type(e).__name__)
