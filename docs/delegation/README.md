@@ -95,11 +95,12 @@ stake. `tests/routes/test_delegation.py::TestGuardrail` greps the route module.
   the SQL reserve/claim functions. A failed reserve/claim (cap or budget read)
   reserves and pays nothing. An unreadable sum is reported `unknown` (never zero).
 - Authorization fails closed: credits only go to the account the wallet is
-  linked to **right now**. The SQL claim refuses (`not_linked`) unless the
-  wallet is linked to the payee; immediately before the credit write the link is
-  re-verified, and anything else (unlinked, inactive, moved to another account,
-  lookup error, missing/malformed user id) releases the claim back to `pending`
-  without paying.
+  linked to **right now**, and only to an existing, non-deactivated account. The
+  SQL claim refuses (`not_linked` / `inactive_user`) unless the wallet is linked
+  to the payee and `users.is_active` is not false; immediately before the credit
+  write both are re-verified, and anything else (unlinked, inactive wallet or
+  account, moved to another account, lookup error, missing/malformed user id)
+  releases the claim back to `pending` without paying.
 - ETH revenue is the day-over-day growth of `getShares(feeRecipient)`. The first
   reading — and the first after `feeRecipient` changes — is a zero baseline;
   shares moved out count as zero, never negative. ADA revenue is recorded once

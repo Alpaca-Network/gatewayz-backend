@@ -59,7 +59,7 @@ from src.db.delegation import (
     reserve_accrual,
 )
 from src.db.user_wallets import get_wallet
-from src.db.users import add_credits_to_user
+from src.db.users import add_credits_to_user, get_user_by_id
 from src.services.delegation.measurements import ada_configured, eth_configured
 from src.services.holdings.rewards import budget_order
 
@@ -165,6 +165,19 @@ def _resolve_user_id(wallet_address: str) -> int | None:
     return int(user_id) if isinstance(user_id, int) and not isinstance(user_id, bool) else None
 
 
+def _payee_verified(wallet_address: str, payee: int) -> bool:
+    """True only when, right now, the wallet is linked (and active) to
+    `payee` AND `payee` is an existing, non-deactivated account. Any lookup
+    error, missing row or mismatch is False -- never pay on doubt."""
+    if _resolve_user_id(wallet_address) != payee:
+        return False
+    try:
+        user = get_user_by_id(payee)
+    except Exception:  # noqa: BLE001 - a failed lookup is "not verified"
+        return False
+    return isinstance(user, dict) and user.get("is_active") is not False
+
+
 def _pay_or_leave_pending(
     accrual: dict[str, Any], user_id: int | None = None
 ) -> tuple[str, Decimal]:
@@ -197,9 +210,10 @@ def _pay_or_leave_pending(
             return "paused", Decimal(0)
         if claim_status == "paid":
             return "already", Decimal(0)
-        if claim_status == "not_linked":
+        if claim_status in ("not_linked", "inactive_user"):
             # The SQL re-check found the wallet is not linked to this account
-            # right now (unlinked or moved since we looked). Never pay.
+            # right now (unlinked or moved since we looked), or the account is
+            # deactivated. Never pay.
             return "pending", Decimal(0)
         if claim_status != "claimed" or not result.get("accrual"):
             return "pending", Decimal(0)
@@ -215,10 +229,11 @@ def _pay_or_leave_pending(
     if payee is None or credits <= 0:
         return "pending", Decimal(0)
     # Re-verify immediately before the credit write: the claim checked the
-    # link under the lock, but an unlink or a move to another account may
-    # have landed since. Anything other than "still linked to the payee"
-    # -- including a failed lookup -- releases the claim and pays nothing.
-    if _resolve_user_id(wallet) != payee:
+    # link and the account under the lock, but an unlink, a move to another
+    # account or a deactivation may have landed since. Anything other than
+    # "still linked to an active payee" -- including a failed lookup --
+    # releases the claim and pays nothing.
+    if not _payee_verified(wallet, payee):
         release_claim(accrual["id"], payee)
         logger.info("delegation_rewards: payee no longer owns the wallet; claim released")
         return "pending", Decimal(0)
