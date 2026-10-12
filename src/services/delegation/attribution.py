@@ -16,7 +16,9 @@ with revenue valued at the price when it was recorded, and
   basis. The row for day D is the fee-recipient share growth read at
   ~00:30 D, i.e. rewards earned over D-1. Total = vault totalAssets minus the
   fee recipient's own assets at that reading (delegation_revenue.
-  stake_total_native).
+  stake_total_native) -- or at the previous day's reading if that was larger,
+  so a stake that exits just before a reading cannot shrink the denominator
+  of the period it earned in.
 * **ADA** -- stake = the wallet's ACTIVE stake in the epoch's snapshot (Koios
   ``pool_delegators_history?_epoch_no=``, the stake the epoch's rewards were
   earned on). Total = the pool's ``active_stake`` for the epoch (Koios
@@ -193,6 +195,19 @@ def _ada_total_from_koios(pool_id: str, epoch_key: str, cache: dict[str, Any]) -
     return Decimal(lovelace) / _LOVELACE_PER_ADA if lovelace > 0 else None
 
 
+def _previous_eth_totals(rows: list[dict[str, Any]]) -> dict[str, Decimal]:
+    """{period_key: stake_total_native of the reading the day before} for ETH
+    revenue rows (oldest first). A missing or unreadable previous reading is
+    absent -- the period then divides by its own reading alone."""
+    by_date = {_day(r["revenue_date"]): _decimal(r.get("stake_total_native")) for r in rows}
+    out: dict[str, Decimal] = {}
+    for r in rows:
+        prev = by_date.get(_day(r["revenue_date"]) - timedelta(days=1))
+        if prev is not None and prev > 0:
+            out[str(r.get("period_key"))] = prev
+    return out
+
+
 # -- grant ----------------------------------------------------------------------------
 
 
@@ -289,10 +304,13 @@ def run_delegation_attribution_once(today: date | None = None) -> dict[str, Any]
         if asset in paused:
             skipped["paused"] += 1
             continue
-        rows = list_revenue_since(asset, floor)
+        # One extra day so the window's first ETH row has its previous reading.
+        rows = list_revenue_since(asset, floor - timedelta(days=1))
         if rows is None:
             counts["errors"] += 1
             continue
+        previous_total = _previous_eth_totals(rows) if asset == "eth" else {}
+        rows = [r for r in rows if _day(r["revenue_date"]) >= floor]
         pool_id = cardano_pool_id() if asset == "ada" else None
         if asset == "ada" and linked_cardano is None:
             linked_cardano = {
@@ -327,9 +345,14 @@ def run_delegation_attribution_once(today: date | None = None) -> dict[str, Any]
             if total is None or total <= 0:
                 skipped["no_denominator"] += 1
                 continue
-            # Never let a wallet's share exceed its stake's: if the reading's
-            # total is below the sum of the stakes we measured (someone exited
-            # at the reading), divide by the larger.
+            # ETH: the period runs from the previous reading to this one, and a
+            # stake that left the vault just before this reading earned in the
+            # period yet is missing from its total -- which would shrink the
+            # denominator and inflate everyone else's share. Use the larger of
+            # the two bracketing readings.
+            total = max(total, previous_total.get(period_key, Decimal(0)))
+            # Never let a wallet's share exceed its stake's: if the total is
+            # still below the sum of the stakes we measured, divide by the larger.
             total = max(total, sum(stakes.values(), Decimal(0)))
 
             for key in budget_order(list(stakes), f"{reward_date}:{asset}:{period_key}"):

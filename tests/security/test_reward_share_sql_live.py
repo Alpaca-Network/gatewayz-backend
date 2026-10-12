@@ -105,6 +105,27 @@ def test_apply_min_of_cost_and_balance_idempotent_then_reverse_once():
     assert balance(2) == "1.020000"
 
 
+def test_idempotency_is_bound_to_account_and_cost():
+    """Security review: one request_id can never fund a second request -- a
+    reuse by another account or for another cost gets no discount."""
+    psql("insert into users (id) values (13), (14)")
+    psql(f"select discount_grant(13, 50, '{u()}', 'r', '{{}}')")
+    psql(f"select discount_grant(14, 50, '{u()}', 'r', '{{}}')")
+    rid = u()
+    assert psql(f"select discount_apply(13, 2, 0.99, '{rid}', '{{}}')") == "1.980000"
+    assert psql(f"select discount_apply(13, 2.00000000, 0.99, '{rid}', '{{}}')") == "1.980000"
+    assert psql(f"select discount_apply(13, 3, 0.99, '{rid}', '{{}}')") == "0"
+    assert psql(f"select discount_apply(14, 2, 0.99, '{rid}', '{{}}')") == "0"
+    assert balance(13) == "48.020000" and balance(14) == "50.000000"
+
+
+def test_discount_percent_is_capped_below_one():
+    psql("insert into users (id) values (15)")
+    psql(f"select discount_grant(15, 50, '{u()}', 'r', '{{}}')")
+    assert psql(f"select discount_apply(15, 2, 1, '{u()}', '{{}}')") == "1.980000"
+    assert psql(f"select discount_apply(15, 2, 7, '{u()}', '{{}}')") == "1.980000"
+
+
 def test_concurrent_applies_never_overdraw():
     psql("insert into users (id) values (10)")
     psql(f"select discount_grant(10, 5, '{u()}', 'r', '{{}}')")

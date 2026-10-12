@@ -1145,7 +1145,7 @@ def deduct_credits(
         from src.services.delegation.discount import discount_enabled
 
         if discount_enabled():
-            from src.services.delegation.discount import apply_for_request
+            from src.services.delegation.discount import apply_for_request, reverse_for_request
 
             discount_key = request_id or (metadata or {}).get("request_id")
             cost_list = Decimal(repr(tokens)).quantize(LEDGER_UNIT)
@@ -1160,20 +1160,19 @@ def deduct_credits(
                 },
             )
             charged = cost_list - discount_applied
+            if charged <= 0:
+                # Unreachable (d is capped below 1), and never allowed: every
+                # billed request writes its credit row and passes the daily
+                # limit. Charge full price instead.
+                reverse_for_request(discount_key)
+                discount_applied = Decimal(0)
+                charged = cost_list
             metadata = {
                 **(metadata or {}),
                 "cost_list_usd": str(cost_list),
                 "discount_usd": str(discount_applied),
                 "charged_usd": str(charged),
             }
-            if charged <= 0:
-                logger.info(
-                    "Inference discount covered the full $%s for user %s; no credits charged",
-                    sanitize_for_logging(f"{cost_list}"),
-                    sanitize_for_logging(str(user_id)),
-                )
-                invalidate_user_cache(api_key)
-                return
             tokens = float(charged)
 
         # CHECK DAILY USAGE LIMIT (NEW - 2026-01-05)

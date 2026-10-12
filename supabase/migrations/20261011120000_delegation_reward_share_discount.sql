@@ -180,10 +180,14 @@ end;
 $$;
 
 -- Draw the discount for one billed request: applied = min(trunc(p_cost x d,
--- 6), balance). Idempotent on p_request_id -- a repeat returns the amount
--- the first call applied and never applies twice; a request whose discount
--- was reversed returns 0. Returns 0 when there is nothing to apply (no
--- balance row, zero balance, zero cost / percent) and then writes nothing.
+-- 6), balance), with d capped at 0.99 so every request still pays (and
+-- records) a positive credit charge. Idempotent on p_request_id, BOUND to the
+-- account and the cost: a repeat by the same account for the same cost
+-- returns the amount the first call applied and never applies twice; the same
+-- request_id with any other account or cost -- or a request whose discount was
+-- reversed -- returns 0 (full price), so one key can never fund two requests.
+-- Returns 0 when there is nothing to apply (no balance row, zero balance,
+-- zero cost / percent) and then writes nothing.
 create or replace function public.discount_apply(
   p_user_id bigint, p_cost numeric, p_discount_percent numeric, p_request_id uuid,
   p_metadata jsonb default '{}'::jsonb
@@ -201,7 +205,7 @@ begin
   if p_request_id is null or p_user_id is null or coalesce(p_cost, 0) <= 0 then
     return 0;
   end if;
-  v_percent := least(greatest(coalesce(p_discount_percent, 0), 0), 1);
+  v_percent := least(greatest(coalesce(p_discount_percent, 0), 0), 0.99);
   if v_percent = 0 then
     return 0;
   end if;
@@ -214,7 +218,9 @@ begin
 
   select * into v_existing from public.inference_discount_ledger where request_id = p_request_id;
   if found then
-    if v_existing.kind = 'use' and v_existing.user_id = p_user_id and not exists (
+    if v_existing.kind = 'use' and v_existing.user_id = p_user_id
+       and v_existing.metadata ->> 'cost' is not null
+       and (v_existing.metadata ->> 'cost')::numeric = p_cost and not exists (
       select 1 from public.inference_discount_ledger r
       where r.kind = 'reverse' and r.ref = 'reverse:' || p_request_id::text
     ) then
@@ -240,6 +246,7 @@ begin
   ) values (
     p_user_id, 'use', -v_applied, v_balance.balance_usd, p_request_id, 'inference',
     coalesce(p_metadata, '{}'::jsonb)
+      || jsonb_build_object('cost', p_cost, 'discount_percent', v_percent)
   );
   return v_applied;
 end;

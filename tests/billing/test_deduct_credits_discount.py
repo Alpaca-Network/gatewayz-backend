@@ -185,18 +185,86 @@ class TestFlagOn:
         _deduct(client, cost=2.0)
         assert _atomic(client)[0]["p_tokens_amount"] == 2.0
 
-    def test_applied_is_never_more_than_cost(self, flags):
+    def test_applied_above_its_ceiling_is_reversed_and_full_price(self, flags):
         flags()
-        client = _client(lambda n, p: 999 if n == "discount_apply" else _ok_deduct(n, p))
+        client = _client(
+            lambda n, p: 999 if n in ("discount_apply", "discount_reverse") else _ok_deduct(n, p)
+        )
         _deduct(client, cost=2.0)
-        # Fully covered -> nothing charged in credits, never a negative charge.
-        assert _atomic(client) == []
+        assert [n for n, _ in client.calls] == [
+            "discount_apply",
+            "discount_reverse",
+            "atomic_deduct_credits",
+        ]
+        assert _atomic(client)[0]["p_tokens_amount"] == 2.0
 
-    def test_fully_covered_writes_no_credit_charge(self, flags):
-        flags(percent="1")
-        client = _client(lambda n, p: 2.0 if n == "discount_apply" else _ok_deduct(n, p))
+    @pytest.mark.parametrize("configured", ["1", "1.5", "0.999"])
+    def test_d_is_capped_so_every_request_pays_writes_and_is_limited(self, flags, configured):
+        """Security review: d = 1 made a request free, with no credit row and
+        no daily-limit check. d is capped at 0.99 in Python and SQL, so the
+        charge is always positive and goes through both."""
+        flags(percent=configured)
+        seen = {}
+
+        def handler(name, params):
+            if name == "discount_apply":
+                seen["percent"] = params["p_discount_percent"]
+                return "1.980000"
+            return _ok_deduct(name, params)
+
+        client = _client(handler)
+        with patch("src.services.daily_usage_limiter.enforce_daily_usage_limit") as limit:
+            from src.db.users import deduct_credits
+
+            with (
+                patch("src.db.users.get_supabase_client", return_value=client),
+                patch("src.db.inference_discount.get_supabase_client", return_value=client),
+                patch("src.db.plans.is_admin_tier_user", return_value=False),
+                patch("src.db.users.invalidate_user_cache"),
+                patch("src.db.credit_transactions.get_supabase_client", return_value=client),
+            ):
+                deduct_credits("key", 2.0, "d", {"request_id": REQ}, REQ)
+        assert seen["percent"] == "0.99"
+        assert _atomic(client)[0]["p_tokens_amount"] == pytest.approx(0.02)
+        assert limit.call_args.args[1] == pytest.approx(0.02)
+        assert discount.discount_percent() == Decimal("0.99")
+
+    def test_tiny_cost_still_charges(self, flags):
+        flags()
+        client = _client(lambda n, p: "0" if n == "discount_apply" else _ok_deduct(n, p))
+        _deduct(client, cost=1e-8)
+        assert _atomic(client)[0]["p_tokens_amount"] > 0
+
+    def test_no_reversal_when_the_charge_succeeded(self, flags):
+        flags()
+        client = _client(lambda n, p: "1.98" if n == "discount_apply" else _ok_deduct(n, p))
         _deduct(client, cost=2.0)
-        assert [n for n, _ in client.calls] == ["discount_apply"]
+        assert "discount_reverse" not in [n for n, _ in client.calls]
+
+    def test_refused_twice_reverses_once(self, flags):
+        """credit_handler retries a wrapped refusal: the first attempt reverses,
+        the second finds the request reversed (SQL returns 0) and has nothing
+        to put back."""
+        flags()
+        state = {"applied": False, "reversed": False}
+
+        def handler(name, params):
+            if name == "discount_apply":
+                if state["reversed"]:
+                    return 0
+                state["applied"] = True
+                return "1.98"
+            if name == "discount_reverse":
+                state["reversed"] = True
+                return "1.98"
+            return {"success": False, "error": "insufficient_credits", "new_balance": 0}
+
+        client = _client(handler, balance=0.0)
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                _deduct(client, cost=2.0)
+        assert [n for n, _ in client.calls].count("discount_reverse") == 1
+        assert _atomic(client)[-1]["p_tokens_amount"] == 2.0
 
     def test_non_uuid_request_id_gets_no_discount(self, flags):
         flags()
@@ -270,7 +338,7 @@ class TestCapacity:
             (1.0, 1000, "0.99", 100.0),  # credits bind: 1 / 0.01
             (1.0, 5, "0.99", 6.0),  # balance binds: 1 + 5
             (1.0, 0, "0.99", 1.0),  # no balance: unchanged
-            (2.0, 3, "1", 5.0),  # d = 1: credits + balance
+            (2.0, 1000, "1", 200.0),  # d = 1 is capped at 0.99: never unbounded
             (0.0, 100, "0.99", 0.0),  # no credits: still nothing (1 - d is paid in credits)
         ],
     )
@@ -319,9 +387,9 @@ class TestRefund:
         assert add.call_args.kwargs["credits"] == pytest.approx(0.02)
         assert add.call_args.kwargs["metadata"]["discount_restored_usd"] == "1.98"
 
-    def test_fully_discounted_refund_writes_no_credits(self, flags):
-        flags(percent="1")
-        ok, add = self._refund(2.0, Decimal("2.0"))
+    def test_refund_never_goes_negative(self, flags):
+        flags()
+        ok, add = self._refund(2.0, Decimal("5"))
         assert ok is True
         add.assert_not_called()
 

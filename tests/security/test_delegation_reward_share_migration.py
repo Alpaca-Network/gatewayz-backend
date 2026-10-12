@@ -129,6 +129,14 @@ def test_balance_never_negative_and_money_has_6dp():
     assert "trunc(p_cost * v_percent, 6)" in LOWER
 
 
+def test_apply_caps_d_and_binds_idempotency_to_account_and_cost():
+    body = _function_body("discount_apply")
+    assert "least(greatest(coalesce(p_discount_percent, 0), 0), 0.99)" in body
+    assert "v_existing.user_id = p_user_id" in body
+    assert "(v_existing.metadata ->> 'cost')::numeric = p_cost" in body
+    assert "jsonb_build_object('cost', p_cost" in body
+
+
 def test_reserve_caps_at_revenue_and_grant_rechecks_link_and_account():
     reserve = _function_body("delegation_reserve_attribution")
     assert "v_revenue.revenue_usd - v_already" in reserve

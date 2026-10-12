@@ -162,6 +162,8 @@ class TestStatus:
         assert data["reward_share"] == "1"
         assert data["discount_percent"] == "0"
         assert data["payout_model"] == "reward_share"
+        monkeypatch.setattr(routes.Config, "DELEGATION_DISCOUNT_PERCENT", Decimal("1"))
+        assert client.get("/delegation/status").json()["data"]["discount_percent"] == "0.99"
 
 
 def _rewards(**patches):

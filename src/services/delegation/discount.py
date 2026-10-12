@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 
 PAYOUT_MODELS = ("reward_share", "allowance")
 _DISCOUNT_DP = Decimal("0.000001")
+# d is capped below 1 so every billed request still pays something in credits
+# -- which writes its credit_transactions row (the retry guard and the usage
+# record) and goes through the daily usage limit. d = 1 would make a request
+# free, unrecorded and unlimited while the balance lasts. The SQL
+# (discount_apply) applies the same cap.
+MAX_DISCOUNT_PERCENT = Decimal("0.99")
 
 
 def _clamped(value: Any, default: str) -> Decimal:
@@ -58,7 +64,7 @@ def reward_share() -> Decimal:
 
 
 def discount_percent() -> Decimal:
-    return _clamped(Config.DELEGATION_DISCOUNT_PERCENT, "0.99")
+    return min(_clamped(Config.DELEGATION_DISCOUNT_PERCENT, "0.99"), MAX_DISCOUNT_PERCENT)
 
 
 def discount_enabled() -> bool:
@@ -81,7 +87,8 @@ def apply_for_request(
 ) -> Decimal:
     """The discount drawn for one billed request -- 0 when disabled, when the
     request has no UUID request_id, when there is no balance, and on ANY
-    error (full price). Never raises. Never more than `cost`."""
+    error (full price). Never raises. Never more than trunc(cost x d, 6) with
+    d <= MAX_DISCOUNT_PERCENT, so the credit charge is always positive."""
     if not discount_enabled() or cost <= 0:
         return Decimal(0)
     percent = discount_percent()
@@ -100,7 +107,14 @@ def apply_for_request(
             "inference discount unavailable for user %s; charging full price: %s", user_id, reason
         )
         return Decimal(0)
-    return min(max(applied, Decimal(0)), cost).quantize(_DISCOUNT_DP, rounding=ROUND_DOWN)
+    ceiling = (cost * percent).quantize(_DISCOUNT_DP, rounding=ROUND_DOWN)
+    if applied > ceiling:
+        # The SQL never returns more than this; if it somehow did, charge
+        # full price rather than trust it, and put back whatever it drew.
+        logger.warning("inference discount above its ceiling for user %s; reversing", user_id)
+        reverse_for_request(key)
+        return Decimal(0)
+    return max(applied, Decimal(0)).quantize(_DISCOUNT_DP, rounding=ROUND_DOWN)
 
 
 def reverse_for_request(request_id: Any) -> Decimal:
@@ -143,9 +157,10 @@ def discount_aware_credits(user_id: Any, credits: float) -> float:
     if not balance.is_finite() or balance <= 0:
         return credits
     c = Decimal(str(credits))
-    capacity = c + balance
-    if percent < 1:
-        capacity = min(capacity, c / (Decimal(1) - percent))
+    # percent <= MAX_DISCOUNT_PERCENT < 1, so the division is always defined
+    # and capacity <= 100 x credits: a request it admits always charges a
+    # positive (1 - d) share in credits.
+    capacity = min(c + balance, c / (Decimal(1) - percent))
     return float(max(capacity, c))
 
 

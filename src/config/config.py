@@ -389,7 +389,8 @@ class Config:
     # Share of attributed revenue returned as discount, clamped 0..1.
     DELEGATION_REWARD_SHARE = _decimal_env("DELEGATION_REWARD_SHARE", "0.95")
     # d: the part of a request's list price drawn from the discount balance
-    # (the user pays 1 - d in credits), clamped 0..1.
+    # (the user pays 1 - d in credits), clamped 0..0.99 -- never 1, so every
+    # request still writes a credit row and passes the daily usage limit.
     DELEGATION_DISCOUNT_PERCENT = _decimal_env("DELEGATION_DISCOUNT_PERCENT", "0.99")
     # Billing applies the discount only when this AND DELEGATED_STAKING_ENABLED
     # are on. Off -> deduct_credits is unchanged and makes no extra DB call.

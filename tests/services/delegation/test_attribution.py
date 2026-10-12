@@ -597,3 +597,63 @@ def test_v2_accrual_grants_nothing_in_reward_share_mode(db):
         "skipped": "payout_model",
         "payout_model": "reward_share",
     }
+
+
+class TestShareCannotBeInflated:
+    """Security review item 5."""
+
+    def test_exit_just_before_the_reading_cannot_shrink_the_denominator(self, db):
+        # W1 held 10 ETH all of 10-09 and left right before the 10-10 reading,
+        # so that reading's total (10 ETH of unlinked stake) omits it. The
+        # previous reading (20 ETH) bounds the period instead: W1 gets half,
+        # not all, of the revenue.
+        _link(db, W1, 7)
+        db.amounts[("eth", MEASURE_DAY)] = {W1: [10 * WEI, 10 * WEI]}
+        _eth_revenue(db, 0, 20, day="2026-10-09")
+        _eth_revenue(db, 40, 10)
+        attribution.run_delegation_attribution_once(TODAY)
+        assert db.balances == {7: Decimal("19.000000")}  # 40 x 10/20 x 0.95
+
+    def test_previous_reading_outside_the_window_still_counts(self, db):
+        _link(db, W1, 7)
+        first = (TODAY - timedelta(days=30)).isoformat()
+        prev = (TODAY - timedelta(days=31)).isoformat()
+        db.amounts[("eth", date.fromisoformat(first) - timedelta(days=1))] = {
+            W1: [10 * WEI, 10 * WEI]
+        }
+        _eth_revenue(db, 0, 20, day=prev)
+        _eth_revenue(db, 40, 10, day=first)
+        attribution.run_delegation_attribution_once(TODAY)
+        assert db.balances == {7: Decimal("19.000000")}
+        assert all(k[2] != prev for k in db.attributions)
+
+    def test_unlinked_depositors_stay_in_the_denominator(self, db):
+        # 1 ETH linked out of a 100 ETH vault: 1% of revenue, the other 99%
+        # (unlinked depositors) is never paid to anyone.
+        _link(db, W1, 7)
+        db.amounts[("eth", MEASURE_DAY)] = {W1: [WEI, WEI]}
+        _eth_revenue(db, 100, 100)
+        attribution.run_delegation_attribution_once(TODAY)
+        assert db.balances == {7: Decimal("0.950000")}
+
+    def test_relinking_a_wallet_to_another_account_never_pays_twice(self, db):
+        _link(db, W1, 7)
+        db.amounts[("eth", MEASURE_DAY)] = {W1: [WEI, WEI]}
+        _eth_revenue(db, 40, 4)
+        attribution.run_delegation_attribution_once(TODAY)
+        db.linked[W1] = {"wallet_address": W1, "user_id": 8}  # moved to account 8
+        attribution.run_delegation_attribution_once(TODAY)
+        attribution.grant_pending_for_wallet(W1, 8)
+        assert db.balances == {7: Decimal("9.500000")}
+        assert len(db.ledger) == 1
+
+    def test_pending_wallet_moved_before_grant_pays_only_the_new_owner_once(self, db):
+        db.amounts[("eth", MEASURE_DAY)] = {W1: [WEI, WEI]}
+        _eth_revenue(db, 40, 4)
+        attribution.run_delegation_attribution_once(TODAY)  # unlinked -> pending
+        _link(db, W1, 7)
+        db.linked[W1] = {"wallet_address": W1, "user_id": 8}
+        attribution.grant_pending_for_wallet(W1, 7)  # 7 no longer owns it
+        attribution.grant_pending_for_wallet(W1, 8)
+        attribution.grant_pending_for_wallet(W1, 8)
+        assert db.balances == {8: Decimal("9.500000")}
