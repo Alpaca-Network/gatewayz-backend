@@ -24,6 +24,13 @@ W2 = "0x" + "2" * 40
 ADA1 = "stake1uyehkck0lajq8gr28t9uxnuvgcqrc6070x3k9r8048z8y5gh6ffgw"
 
 
+@pytest.fixture(autouse=True)
+def _allowance_model(monkeypatch):
+    # These are the v2 allowance-model invariants; v3 reward_share (the
+    # default) is covered by test_attribution.py.
+    monkeypatch.setattr(rewards.Config, "DELEGATION_PAYOUT_MODEL", "allowance")
+
+
 class FakeDB:
     """In-memory stand-in for src.db.delegation + user_wallets + users.
 

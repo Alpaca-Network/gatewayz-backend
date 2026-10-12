@@ -123,7 +123,12 @@ def _build_delegation_block() -> dict[str, Any]:
         },
         "last_measurement_at": latest.isoformat() if latest else None,
         "jobs": get_job_runs(
-            ["delegation_measurements", "delegation_accruals", "delegation_reconciliation"]
+            [
+                "delegation_measurements",
+                "delegation_accruals",
+                "delegation_reconciliation",
+                "delegation_attribution",
+            ]
         ),
     }
 

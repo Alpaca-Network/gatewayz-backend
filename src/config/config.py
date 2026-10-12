@@ -378,6 +378,34 @@ class Config:
     DELEGATION_RECONCILIATION_CRON_MINUTE_UTC = _int_env(
         "DELEGATION_RECONCILIATION_CRON_MINUTE_UTC", 30
     )
+    # v3 (src/services/delegation/attribution.py, discount.py): how delegation
+    # pays out. "reward_share" (default) grants DELEGATION_REWARD_SHARE of the
+    # revenue each wallet's stake actually earned us as an inference DISCOUNT
+    # balance; "allowance" is the v2 admin-rate credit grant, kept for
+    # rollback. In reward_share mode the v2 accrual grants nothing.
+    DELEGATION_PAYOUT_MODEL = (
+        (_get_env_var("DELEGATION_PAYOUT_MODEL", "reward_share") or "reward_share").strip().lower()
+    )
+    # Share of attributed revenue returned as discount, clamped 0..1.
+    DELEGATION_REWARD_SHARE = _decimal_env("DELEGATION_REWARD_SHARE", "0.95")
+    # d: the part of a request's list price drawn from the discount balance
+    # (the user pays 1 - d in credits), clamped 0..0.99 -- never 1, so every
+    # request still writes a credit row and passes the daily usage limit.
+    DELEGATION_DISCOUNT_PERCENT = _decimal_env("DELEGATION_DISCOUNT_PERCENT", "0.99")
+    # Billing applies the discount only when this AND DELEGATED_STAKING_ENABLED
+    # are on. Off -> deduct_credits is unchanged and makes no extra DB call.
+    DELEGATION_DISCOUNT_ENABLED = _get_env_var("DELEGATION_DISCOUNT_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # How long a request's pre-check hold on the discount balance lives if
+    # the request is never billed (60..3600 s). Settled holds go at once.
+    DELEGATION_DISCOUNT_HOLD_TTL_SECONDS = _int_env("DELEGATION_DISCOUNT_HOLD_TTL_SECONDS", 900)
+    # The daily attribution job: after reconciliation (00:30) has recorded
+    # the revenue it divides.
+    DELEGATION_ATTRIBUTION_CRON_HOUR_UTC = _int_env("DELEGATION_ATTRIBUTION_CRON_HOUR_UTC", 0)
+    DELEGATION_ATTRIBUTION_CRON_MINUTE_UTC = _int_env("DELEGATION_ATTRIBUTION_CRON_MINUTE_UTC", 40)
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.

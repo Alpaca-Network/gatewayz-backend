@@ -1048,6 +1048,10 @@ def deduct_credits(
         logger.info("Skipping credit deduction for zero-cost request")
         return
     tokens = float(quantize_cost_up(tokens))
+    # Delegated-staking inference discount drawn for this request (see below);
+    # stays 0 -- and is never touched -- while the discount is disabled.
+    discount_applied = Decimal(0)
+    discount_key = None
 
     try:
         from src.db.credit_transactions import (
@@ -1130,6 +1134,46 @@ def deduct_credits(
                 return
         except Exception as e:
             logger.warning(f"Error checking admin tier status for credit deduction: {e}")
+
+        # DELEGATED-STAKING INFERENCE DISCOUNT (v3, src/services/delegation/
+        # discount.py). discount_enabled() is a config read: with
+        # DELEGATION_DISCOUNT_ENABLED / DELEGATED_STAKING_ENABLED off nothing
+        # below runs and billing is unchanged. When on, d x cost is drawn from
+        # the account's discount balance first -- row-locked and idempotent on
+        # this same request_id, so a retry draws nothing new -- and only the
+        # rest is charged in credits. Any discount error charges full price.
+        from src.services.delegation.discount import discount_enabled
+
+        if discount_enabled():
+            from src.services.delegation.discount import apply_for_request, reverse_for_request
+
+            discount_key = request_id or (metadata or {}).get("request_id")
+            cost_list = Decimal(repr(tokens)).quantize(LEDGER_UNIT)
+            discount_applied = apply_for_request(
+                user_id,
+                cost_list,
+                discount_key,
+                {
+                    "cost_list_usd": str(cost_list),
+                    "model": (metadata or {}).get("model"),
+                    "description": description[:200],
+                },
+            )
+            charged = cost_list - discount_applied
+            if charged <= 0:
+                # Unreachable (d is capped below 1), and never allowed: every
+                # billed request writes its credit row and passes the daily
+                # limit. Charge full price instead.
+                reverse_for_request(discount_key)
+                discount_applied = Decimal(0)
+                charged = cost_list
+            metadata = {
+                **(metadata or {}),
+                "cost_list_usd": str(cost_list),
+                "discount_usd": str(discount_applied),
+                "charged_usd": str(charged),
+            }
+            tokens = float(charged)
 
         # CHECK DAILY USAGE LIMIT (NEW - 2026-01-05)
         # Enforce $1/day usage limit for all users (except admins who already bypassed above)
@@ -1453,6 +1497,14 @@ def deduct_credits(
 
     except Exception as e:
         logger.error("Failed to deduct credits: %s", sanitize_for_logging(str(e)), exc_info=True)
+        if discount_applied > 0 and isinstance(e, ValueError):
+            # The charge was refused (insufficient credits, daily limit), so
+            # nothing was deducted: put the discount back. A transient failure
+            # keeps it -- a retry with the same request_id reuses it, charging
+            # the same (cost - discount) exactly once.
+            from src.services.delegation.discount import reverse_for_request
+
+            reverse_for_request(discount_key)
         # Wrap exceptions in RuntimeError for consistency with test expectations
         if isinstance(e, RuntimeError):
             raise

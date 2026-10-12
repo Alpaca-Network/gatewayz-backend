@@ -177,7 +177,7 @@ async def create_embeddings(
 
     # Pre-check: positive balance covering the estimated cost, before any provider spend.
     est_tokens = estimate_input_tokens(req.input)
-    user = await precheck_credits(api_key, embedding_cost(req.model, est_tokens))
+    user = await precheck_credits(api_key, embedding_cost(req.model, est_tokens), billing_ref)
 
     logger.info("Embeddings request: provider=%s, model=%s", provider, upstream_model)
 

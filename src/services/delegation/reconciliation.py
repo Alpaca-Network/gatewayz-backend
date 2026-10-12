@@ -16,9 +16,24 @@ us covers what they cost. This job records that revenue and compares:
   least two behind the tip, when the epoch's rewards are final.
   Valued at the ADA price when recorded.
 
-Then, per asset: cost = credits granted (pending + paid) x (1 - margin), and
-if ``cost > revenue x (1 + DELEGATION_RECONCILIATION_TOLERANCE) +
-DELEGATION_RECONCILIATION_GRACE_USD`` the asset's new accruals are PAUSED
+Each revenue row also records the period's total stake (``stake_total_native``)
+-- the denominator the v3 reward-share attribution divides by: ETH = vault
+``totalAssets`` minus the fee recipient's own assets at the reading; ADA = the
+pool's ``active_stake`` for the epoch (Koios ``pool_history``).
+
+Then, per asset, depending on DELEGATION_PAYOUT_MODEL:
+
+* **allowance** (v2): cost = credits granted (pending + paid) x (1 - margin);
+  overspent when ``cost > revenue x (1 + DELEGATION_RECONCILIATION_TOLERANCE)
+  + DELEGATION_RECONCILIATION_GRACE_USD``.
+* **reward_share** (v3, default): committed = discount granted (pending +
+  granted attributions, at face value) + any v2 credits' cost; overspent when
+  ``committed > reward_share x revenue x (1 + tolerance) + grace``. The
+  attribution can never grant more than that by construction; this is the
+  safety net. The view also reports the discount's cost to us across assets:
+  discount used x (1 - margin) plus the outstanding balance liability.
+
+Overspent -> the asset's new accruals / attributions are PAUSED
 (delegation_controls) and ops is alerted. Nothing automatic resumes it -- an
 admin does, via POST /admin/delegation/resume. A sum that cannot be read is
 not treated as zero: the asset is reported unknown and left as it is.
@@ -39,10 +54,13 @@ from src.db.delegation import (
     insert_revenue,
     list_revenue_period_keys,
     pause_accruals,
+    sum_attributed_discount,
     sum_granted_credits,
     sum_revenue_usd,
 )
+from src.db.inference_discount import list_balances
 from src.services.delegation import alerts, koios, stakewise
+from src.services.delegation.discount import payout_model, reward_share
 from src.services.delegation.measurements import (
     ada_configured,
     cardano_pool_id,
@@ -93,14 +111,26 @@ def record_eth_revenue(today: date) -> dict[str, Any]:
     delta_shares = 0 if previous_shares is None else max(shares - previous_shares, 0)
     wei = stakewise.convert_to_assets(delta_shares) if delta_shares > 0 else 0
     native = Decimal(wei) / _WEI_PER_ETH
+    # The attribution denominator: everyone's stake but our own fee shares.
+    recipient_wei = stakewise.convert_to_assets(shares) if shares > 0 else 0
+    staked_wei = info.total_assets_wei - recipient_wei
+    stake_total = Decimal(staked_wei) / _WEI_PER_ETH if staked_wei > 0 else None
     row = insert_revenue(
-        "eth", today, today.isoformat(), native, native * price, source, raw_amount=shares
+        "eth",
+        today,
+        today.isoformat(),
+        native,
+        native * price,
+        source,
+        raw_amount=shares,
+        stake_total_native=stake_total,
     )
     return {
         "recorded": row is not None,
         "baseline": previous_shares is None,
         "revenue_eth": str(native),
         "revenue_usd": str(native * price),
+        "stake_total_eth": None if stake_total is None else str(stake_total),
         "fee_percent_bps": info.fee_percent_bps,
     }
 
@@ -130,14 +160,35 @@ def record_ada_revenue(today: date) -> dict[str, Any]:
         if epoch > tip - _EPOCH_FINALITY_LAG or fees <= 0 or key in recorded_keys:
             continue
         ada = Decimal(fees) / _LOVELACE_PER_ADA
-        if insert_revenue("ada", today, key, ada, ada * price, "koios:pool_history.pool_fees"):
+        if insert_revenue(
+            "ada",
+            today,
+            key,
+            ada,
+            ada * price,
+            "koios:pool_history.pool_fees",
+            stake_total_native=_active_stake_ada(entry),
+        ):
             recorded += 1
             total_ada += ada
     return {"recorded_epochs": recorded, "revenue_ada": str(total_ada), "tip_epoch": tip}
 
 
+def _active_stake_ada(entry: dict[str, Any]) -> Decimal | None:
+    """pool_history.active_stake (lovelace, string) in ADA; None when absent
+    or not a positive integer."""
+    try:
+        lovelace = int(str(entry.get("active_stake")))
+    except (TypeError, ValueError):
+        return None
+    return Decimal(lovelace) / _LOVELACE_PER_ADA if lovelace > 0 else None
+
+
 def compare_asset(asset: str) -> dict[str, Any]:
-    """Cost of credits granted vs revenue recorded, for one asset."""
+    """What was granted vs what reached us, for one asset, under the current
+    payout model."""
+    if payout_model() == "reward_share":
+        return _compare_reward_share(asset)
     granted = sum_granted_credits(asset)
     revenue = sum_revenue_usd(asset)
     if granted is None or revenue is None:
@@ -154,6 +205,63 @@ def compare_asset(asset: str) -> dict[str, Any]:
         "revenue_usd": str(revenue),
         "limit_usd": str(limit),
         "coverage": str(revenue / cost) if cost > 0 else None,
+    }
+
+
+def _compare_reward_share(asset: str) -> dict[str, Any]:
+    discount = sum_attributed_discount(asset)
+    credits = sum_granted_credits(asset)
+    revenue = sum_revenue_usd(asset)
+    if discount is None or credits is None or revenue is None:
+        return {"status": "unknown"}
+    margin = _decimal(Config.DELEGATION_INFERENCE_MARGIN) or Decimal(0)
+    tolerance = _decimal(Config.DELEGATION_RECONCILIATION_TOLERANCE) or Decimal(0)
+    grace = _decimal(Config.DELEGATION_RECONCILIATION_GRACE_USD) or Decimal(0)
+    share = reward_share()
+    # Credits a v2 allowance run granted earlier still spent this revenue.
+    legacy_cost = credits * (Decimal(1) - margin)
+    committed = discount + legacy_cost
+    limit = share * revenue * (Decimal(1) + tolerance) + grace
+    return {
+        "status": "overspent" if committed > limit else "ok",
+        "payout_model": "reward_share",
+        "discount_granted_usd": str(discount),
+        "legacy_credits_cost_usd": str(legacy_cost),
+        "committed_usd": str(committed),
+        # The pause reason and the ops alert read cost_usd in either model.
+        "cost_usd": str(committed),
+        "revenue_usd": str(revenue),
+        "reward_share": str(share),
+        "limit_usd": str(limit),
+        "coverage": str(share * revenue / committed) if committed > 0 else None,
+    }
+
+
+def discount_liability() -> dict[str, Any]:
+    """The discount's cost to us across assets: used x (1 - margin) plus the
+    outstanding balance (a liability until used), from inference_discount_
+    balances. {"status": "unknown"} when the balances cannot be read."""
+    rows = list_balances()
+    if rows is None:
+        return {"status": "unknown"}
+    used = Decimal(0)
+    outstanding = Decimal(0)
+    accounts = 0
+    for row in rows:
+        balance = _decimal(row.get("balance_usd"))
+        spent = _decimal(row.get("lifetime_used_usd"))
+        if balance is None or spent is None:
+            return {"status": "unknown"}
+        used += spent
+        outstanding += balance
+        accounts += 1 if balance > 0 else 0
+    margin = _decimal(Config.DELEGATION_INFERENCE_MARGIN) or Decimal(0)
+    return {
+        "status": "ok",
+        "discount_used_usd": str(used),
+        "outstanding_balance_usd": str(outstanding),
+        "accounts_with_balance": accounts,
+        "cost_usd": str(used * (Decimal(1) - margin) + outstanding),
     }
 
 
@@ -208,7 +316,10 @@ def reconciliation_view() -> dict[str, Any]:
 
     controls = get_controls()
     paused = paused_assets(controls)  # the same fail-closed rule payouts use
-    view: dict[str, Any] = {"enabled": bool(Config.DELEGATED_STAKING_ENABLED)}
+    view: dict[str, Any] = {
+        "enabled": bool(Config.DELEGATED_STAKING_ENABLED),
+        "payout_model": payout_model(),
+    }
     for asset in ASSETS:
         control = (controls or {}).get(asset) or {}
         view[asset] = {
@@ -218,4 +329,6 @@ def reconciliation_view() -> dict[str, Any]:
             "paused_at": control.get("paused_at"),
             **compare_asset(asset),
         }
+    if payout_model() == "reward_share":
+        view["discount"] = discount_liability()
     return view
