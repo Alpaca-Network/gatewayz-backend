@@ -21,6 +21,46 @@ automatically. The user-facing framing is "99% off up to $X/month", where
 `X = /delegation/rewards → allowance.month_estimate_usd` (30 × the daily estimate,
 1 credit = $1).
 
+## v3: reward share as an inference discount (default model)
+
+`DELEGATION_PAYOUT_MODEL=reward_share` (default; `allowance` = the v2 rate model
+above, kept for rollback — in reward_share mode the v2 accrual grants nothing).
+
+* **Attribution** (`src/services/delegation/attribution.py`, daily 00:40 UTC, after
+  reconciliation records revenue): for every revenue period in the last 30 days,
+  `attributed_usd = revenue_usd × stake / total`, `discount_usd =
+  trunc(DELEGATION_REWARD_SHARE × attributed_usd, 6)`. ETH: stake = the wallet's
+  lowest-of-day measurement on the day *before* the revenue row (the row for D is
+  the fee-share growth read at ~00:30 D), total = vault `totalAssets` − fee
+  recipient assets at that reading (`delegation_revenue.stake_total_native`).
+  ADA: stake = Koios `pool_delegators_history?_epoch_no=N` active stake, total =
+  `pool_history.active_stake` for epoch N. The SQL reserve caps each period's
+  attributions at its recorded revenue, so the discount can never exceed what we
+  received. Per-account cap / global budget (`DELEGATION_DAILY_CAP_CREDITS`,
+  `DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS`, in discount USD) are enforced in SQL
+  under the per-date advisory lock; grant needs a linked, active account
+  (pending otherwise, granted on link) and is atomic with the balance credit.
+* **Billing** (`src/db/users.py::deduct_credits`, the one choke point; also
+  `credit_handler.refund_credits`): with `DELEGATION_DISCOUNT_ENABLED` and
+  `DELEGATED_STAKING_ENABLED` on, `discount_apply` draws `min(cost × d, balance)`
+  (`d = DELEGATION_DISCOUNT_PERCENT`, row-locked, idempotent on the billing
+  request_id) and only `cost − applied` is charged in credits; the credit ledger
+  metadata records `cost_list_usd`, `discount_usd`, `charged_usd`. Any discount
+  error → full price. A refused charge reverses the discount; a refund returns the
+  discount to the discount balance and only the credits part as credits.
+  Pre-request credit checks count the discount (`discount_aware_credits`). Off →
+  no DB call, billing unchanged.
+* **Reconciliation**: pauses an asset when discount granted (+ any v2 credit cost)
+  > `reward_share × revenue × (1 + tolerance) + grace`; the view adds the discount
+  liability (used × (1 − m) + outstanding balance).
+* Tables: `delegation_reward_attributions`, `inference_discount_balances`,
+  `inference_discount_ledger` (migration `20261011120000`). SQL behaviour tests:
+  `GATEWAYZ_TEST_PG_DSN=postgresql://…local… pytest tests/security/test_reward_share_sql_live.py`.
+
+Public disclaimer in reward_share mode:
+
+> Discounts are a share of staking rewards Gatewayz actually received, can change at any time, and are not a guaranteed return.
+
 ## Legal guardrail
 
 This is **not** a fixed or guaranteed yield (SEC/CFTC Release 33-11412). Rates
@@ -125,6 +165,10 @@ stake. `tests/routes/test_delegation.py::TestGuardrail` greps the route module.
 | `DELEGATION_RECONCILIATION_TOLERANCE` | `0.05` | |
 | `DELEGATION_RECONCILIATION_GRACE_USD` | `0` | Absolute allowance for revenue lag |
 | `DELEGATION_*_CRON_*` | see `src/config/config.py` | |
+| `DELEGATION_PAYOUT_MODEL` | `reward_share` | or `allowance` (v2) |
+| `DELEGATION_REWARD_SHARE` | `0.95` | Share of attributed revenue granted as discount (clamped 0..1) |
+| `DELEGATION_DISCOUNT_PERCENT` | `0.99` | d: part of list price drawn from the discount balance |
+| `DELEGATION_DISCOUNT_ENABLED` | `false` | Billing applies the discount (also needs `DELEGATED_STAKING_ENABLED`) |
 
 ## What must exist on-chain before enabling
 
@@ -153,8 +197,11 @@ counsel in [COUNSEL_BRIEF.md](COUNSEL_BRIEF.md).
 ## Endpoints
 
 `GET /delegation/status` (public) · `GET /delegation/rewards` (user) ·
-`GET|PUT /admin/delegation/rates` · `POST /admin/delegation/run {job: measure|accrue|reconcile, reward_date?}` ·
+`GET|PUT /admin/delegation/rates` · `POST /admin/delegation/run {job: measure|accrue|reconcile|attribute, reward_date?}` ·
 `GET /admin/delegation/reconciliation` · `POST /admin/delegation/resume {asset}` ·
+`POST /admin/delegation/pause {asset, reason}` · `GET /admin/delegation/overview` ·
+`GET /admin/delegation/accounts?limit&offset&q` · `GET /admin/delegation/accounts/{user_id}` ·
+`POST /admin/delegation/accounts/{user_id}/adjust {amount_usd, reason}` (Idempotency-Key header) ·
 `POST /auth/wallet/cardano/nonce` · `POST /auth/wallet/cardano/link`.
 Mutations are superadmin-only and audited. `/admin/status` has a `delegation` block.
 

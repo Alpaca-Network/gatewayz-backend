@@ -1,6 +1,6 @@
 """Read-only Koios client for the Gatewayz Cardano pool.
 
-Three calls (endpoint shapes from Koios' published OpenAPI spec,
+Four calls (endpoint shapes from Koios' published OpenAPI spec,
 api.koios.rest/koiosapi.yaml):
 
 * ``GET /tip`` -> ``[{epoch_no, ...}]`` -- the current epoch;
@@ -8,9 +8,14 @@ api.koios.rest/koiosapi.yaml):
   (lovelace, string), active_epoch_no, latest_delegation_tx_hash}]`` -- live
   delegators, paginated PostgREST-style with ``offset``/``limit`` (Koios
   caps a page at 1000 rows);
-* ``GET /pool_history?_pool_bech32=`` -> ``[{epoch_no, pool_fees (lovelace,
-  string), deleg_rewards, ...}]`` -- per-epoch operator fees, which is our
-  revenue.
+* ``GET /pool_history?_pool_bech32=`` -> ``[{epoch_no, active_stake
+  (lovelace, string), pool_fees (lovelace, string), deleg_rewards, ...}]`` --
+  per-epoch operator fees, which is our revenue, and the pool's active stake
+  for the epoch, which is the reward-share denominator;
+* ``GET /pool_delegators_history?_pool_bech32=&_epoch_no=`` ->
+  ``[{stake_address, amount (lovelace, string), epoch_no}]`` -- every
+  delegator's ACTIVE stake in the epoch's snapshot (the stake the epoch's
+  rewards were earned on), paginated like pool_delegators.
 
 KOIOS_API_KEY (optional) goes in the Authorization header, never in a URL,
 and errors are described by class and HTTP status only -- never ``str(exc)``
@@ -99,3 +104,27 @@ def get_pool_history(pool_id: str) -> list[dict[str, Any]]:
     if not isinstance(rows, list):
         raise KoiosError("Koios pool_history: unexpected payload")
     return rows
+
+
+def list_pool_delegators_history(pool_id: str, epoch_no: int) -> list[dict[str, Any]]:
+    """Every delegator's active stake in `pool_id` for `epoch_no`, all pages.
+    Raises KoiosError if any page fails: a partial list would leave some
+    delegators unattributed for the epoch."""
+    delegators: list[dict[str, Any]] = []
+    for page in range(_MAX_PAGES):
+        rows = _get(
+            "pool_delegators_history",
+            {
+                "_pool_bech32": pool_id,
+                "_epoch_no": str(int(epoch_no)),
+                "offset": page * PAGE_SIZE,
+                "limit": PAGE_SIZE,
+                "order": "stake_address.asc",
+            },
+        )
+        if not isinstance(rows, list):
+            raise KoiosError("Koios pool_delegators_history: unexpected payload")
+        delegators.extend(rows)
+        if len(rows) < PAGE_SIZE:
+            return delegators
+    raise KoiosError("Koios pool_delegators_history: page limit exceeded")

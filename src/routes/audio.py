@@ -368,7 +368,11 @@ async def create_transcription(
             user.get("purchased_credits") or 0
         )
         required_credits = estimated_cost * 1.1
-        if _user_balance < required_credits:
+        from src.services.delegation.discount import discount_aware_credits_async
+
+        # List-price capacity incl. any inference discount (identity while disabled).
+        _capacity = await discount_aware_credits_async(user.get("id"), _user_balance)
+        if _capacity < required_credits:
             raise HTTPException(
                 status_code=402,
                 detail=(
@@ -639,7 +643,11 @@ async def create_transcription_base64(
             user.get("purchased_credits") or 0
         )
         required_credits = estimated_cost * 1.1
-        if _user_balance < required_credits:
+        from src.services.delegation.discount import discount_aware_credits_async
+
+        # List-price capacity incl. any inference discount (identity while disabled).
+        _capacity = await discount_aware_credits_async(user.get("id"), _user_balance)
+        if _capacity < required_credits:
             raise HTTPException(
                 status_code=402,
                 detail=(

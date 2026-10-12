@@ -810,6 +810,28 @@ async def refund_credits(
         if metadata:
             refund_metadata.update(metadata)
 
+        # Delegated-staking inference discount (src/services/delegation/
+        # discount.py): a discounted request paid only (cost - discount) in
+        # credits. Put the discount back on the discount balance and refund
+        # just the credits part, so a refund never turns discount into credits.
+        # Config-gated: no DB call while the discount is disabled.
+        if original_request_id:
+            from src.services.delegation.discount import discount_enabled, reverse_for_request
+
+            if discount_enabled():
+                restored = await asyncio.to_thread(reverse_for_request, original_request_id)
+                if restored > 0:
+                    refund_metadata["discount_restored_usd"] = str(restored)
+                    amount = max(amount - float(restored), 0.0)
+                    if amount <= 0:
+                        logger.info(
+                            "CREDIT_REFUND: request %s was fully covered by the inference "
+                            "discount; restored $%s to the discount balance",
+                            original_request_id,
+                            restored,
+                        )
+                        return True
+
         # Add credits back to purchased_credits via the existing add_credits_to_user function
         # This function handles balance lookup, update, and transaction logging atomically.
         await asyncio.to_thread(

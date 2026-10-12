@@ -147,3 +147,25 @@ class TestKoios:
     def test_tip_epoch(self):
         with patch.object(koios.requests, "get", return_value=self._response([{"epoch_no": 660}])):
             assert koios.get_tip_epoch() == 660
+
+    def test_delegators_history_is_per_epoch_paginated_and_fails_whole(self, monkeypatch):
+        # Endpoint and fields per Koios' OpenAPI spec: GET /pool_delegators_history
+        # ?_pool_bech32=&_epoch_no= -> [{stake_address, amount, epoch_no}].
+        monkeypatch.setattr(koios, "PAGE_SIZE", 2)
+        pages = [
+            [{"stake_address": "a", "amount": "1"}, {"stake_address": "b", "amount": "2"}],
+            [{"stake_address": "c", "amount": "3"}],
+        ]
+        with patch.object(
+            koios.requests, "get", side_effect=[self._response(p) for p in pages]
+        ) as get:
+            rows = koios.list_pool_delegators_history("pool1abc", 512)
+        assert [r["stake_address"] for r in rows] == ["a", "b", "c"]
+        assert get.call_args_list[0].args[0].endswith("/pool_delegators_history")
+        params = get.call_args_list[1].kwargs["params"]
+        assert params["_pool_bech32"] == "pool1abc" and params["_epoch_no"] == "512"
+        assert params["offset"] == 2
+        responses = [self._response([{"stake_address": "a"}] * 2), self._response([], 500)]
+        with patch.object(koios.requests, "get", side_effect=responses):
+            with pytest.raises(koios.KoiosError):
+                koios.list_pool_delegators_history("pool1abc", 512)

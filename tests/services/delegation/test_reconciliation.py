@@ -30,6 +30,8 @@ def env(monkeypatch):
         tip=660,
     )
     monkeypatch.setattr(recon.Config, "DELEGATED_STAKING_ENABLED", True)
+    # v2 allowance-model comparison; reward_share is covered below.
+    monkeypatch.setattr(recon.Config, "DELEGATION_PAYOUT_MODEL", "allowance")
     monkeypatch.setattr(recon.Config, "DELEGATION_INFERENCE_MARGIN", Decimal("0.20"))
     monkeypatch.setattr(recon.Config, "DELEGATION_RECONCILIATION_TOLERANCE", Decimal("0.05"))
     monkeypatch.setattr(recon.Config, "DELEGATION_RECONCILIATION_GRACE_USD", Decimal("0"))
@@ -52,7 +54,7 @@ def env(monkeypatch):
     monkeypatch.setattr(koios, "get_tip_epoch", lambda: state.tip)
     monkeypatch.setattr(koios, "get_pool_history", lambda p: list(state.history))
 
-    def insert(asset, day, key, native, usd, source, raw_amount=None):
+    def insert(asset, day, key, native, usd, source, raw_amount=None, stake_total_native=None):
         if any(r["asset"] == asset and r["period_key"] == key for r in state.revenue):
             return None
         row = {
@@ -62,6 +64,7 @@ def env(monkeypatch):
             "revenue_usd": usd,
             "source": source,
             "raw_amount": raw_amount,
+            "stake_total_native": stake_total_native,
         }
         state.revenue.append(row)
         return row
@@ -80,7 +83,7 @@ def env(monkeypatch):
     monkeypatch.setattr(
         recon,
         "sum_revenue_usd",
-        lambda asset: sum(
+        lambda asset, since=None: sum(
             (Decimal(r["revenue_usd"]) for r in state.revenue if r["asset"] == asset), Decimal(0)
         ),
     )
@@ -188,3 +191,77 @@ def test_already_paused_asset_is_not_paused_again(env):
     result = recon.run_delegation_reconciliation_once(TODAY)
     assert env.paused == []
     assert result["eth"]["paused"] is True
+
+
+def test_eth_revenue_records_the_attribution_denominator(env):
+    # totalAssets 1000 ETH, fee recipient holds 10 ETH -> 990 ETH staked by others.
+    recon.record_eth_revenue(TODAY)
+    assert env.revenue[0]["stake_total_native"] == Decimal(990)
+
+
+def test_ada_revenue_records_the_epoch_active_stake(env):
+    env.history = [{"epoch_no": 658, "pool_fees": "400000000", "active_stake": "5000000000000"}]
+    recon.record_ada_revenue(TODAY)
+    assert env.revenue[0]["stake_total_native"] == Decimal(5_000_000)
+
+
+@pytest.fixture
+def reward_share(env, monkeypatch):
+    monkeypatch.setattr(recon.Config, "DELEGATION_PAYOUT_MODEL", "reward_share")
+    monkeypatch.setattr(recon.Config, "DELEGATION_REWARD_SHARE", Decimal("0.95"))
+    env.discount = {"eth": Decimal(0), "ada": Decimal(0)}
+    monkeypatch.setattr(recon, "sum_attributed_discount", lambda asset: env.discount[asset])
+    return env
+
+
+def test_reward_share_within_share_of_revenue_is_ok(reward_share):
+    reward_share.revenue.append({"asset": "eth", "period_key": "x", "revenue_usd": Decimal(100)})
+    reward_share.discount["eth"] = Decimal(95)
+    result = recon.run_delegation_reconciliation_once(TODAY)
+    assert result["eth"]["comparison"]["status"] == "ok"
+    assert result["eth"]["comparison"]["payout_model"] == "reward_share"
+    assert reward_share.paused == []
+
+
+def test_reward_share_granted_beyond_share_pauses(reward_share):
+    reward_share.revenue.append({"asset": "eth", "period_key": "x", "revenue_usd": Decimal(100)})
+    # 95 x 1.05 = 99.75 < 100 granted.
+    reward_share.discount["eth"] = Decimal(100)
+    result = recon.run_delegation_reconciliation_once(TODAY)
+    assert result["eth"]["comparison"]["status"] == "overspent"
+    assert reward_share.paused == ["eth"] and reward_share.alerts == ["eth"]
+
+
+def test_reward_share_counts_earlier_v2_credits_too(reward_share):
+    reward_share.revenue.append({"asset": "eth", "period_key": "x", "revenue_usd": Decimal(100)})
+    reward_share.discount["eth"] = Decimal(50)
+    reward_share.granted["eth"] = Decimal(100)  # $80 of v2 credit cost
+    result = recon.run_delegation_reconciliation_once(TODAY)
+    assert result["eth"]["comparison"]["status"] == "overspent"
+
+
+def test_reward_share_unknown_discount_sum_is_unknown(reward_share, monkeypatch):
+    monkeypatch.setattr(recon, "sum_attributed_discount", lambda asset: None)
+    result = recon.run_delegation_reconciliation_once(TODAY)
+    assert result["eth"]["comparison"] == {"status": "unknown"}
+    assert reward_share.paused == []
+
+
+def test_discount_liability(monkeypatch):
+    monkeypatch.setattr(recon.Config, "DELEGATION_INFERENCE_MARGIN", Decimal("0.20"))
+    monkeypatch.setattr(
+        recon,
+        "list_balances",
+        lambda: [
+            {"balance_usd": "10", "lifetime_used_usd": "5"},
+            {"balance_usd": "0", "lifetime_used_usd": "2.5"},
+        ],
+    )
+    view = recon.discount_liability()
+    assert view["discount_used_usd"] == "7.5"
+    assert view["outstanding_balance_usd"] == "10"
+    assert view["accounts_with_balance"] == 1
+    # used x (1 - m) + outstanding at face value.
+    assert Decimal(view["cost_usd"]) == Decimal("16")
+    monkeypatch.setattr(recon, "list_balances", lambda: None)
+    assert recon.discount_liability() == {"status": "unknown"}

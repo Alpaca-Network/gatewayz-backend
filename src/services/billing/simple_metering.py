@@ -34,7 +34,11 @@ async def precheck_credits(api_key: str, estimated_cost: float) -> dict[str, Any
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API key")
     balance = user_balance(user)
-    if balance <= 0 or balance < estimated_cost:
+    from src.services.delegation.discount import discount_aware_credits_async
+
+    # List-price capacity incl. any inference discount (identity while disabled).
+    capacity = await discount_aware_credits_async(user.get("id"), balance)
+    if balance <= 0 or capacity < estimated_cost:
         raise HTTPException(
             status_code=402,
             detail=(

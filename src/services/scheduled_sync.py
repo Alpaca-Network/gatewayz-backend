@@ -1839,7 +1839,11 @@ def stop_holdings_rewards_scheduler():
 #     wallet's delegated amount, zero included.
 #   delegation_reconciliation -- daily: record the revenue that reached us and
 #     pause an asset whose granted cost outran it (fail closed).
-#   delegation_accruals -- daily, after reconciliation, paying for YESTERDAY.
+#   delegation_accruals -- daily, after reconciliation, paying for YESTERDAY
+#     (v2 allowance model only; a no-op in the default reward_share model).
+#   delegation_attribution -- daily, after reconciliation: each linked wallet's
+#     pro-rata share of the revenue just recorded, granted as an inference
+#     discount (v3 reward_share model).
 #
 # Always started; every job no-ops (records "skipped: disabled") while
 # DELEGATED_STAKING_ENABLED is off, and per asset while its vault / pool is
@@ -1893,6 +1897,12 @@ async def run_scheduled_delegation_reconciliation():
     await _run_delegation_job("delegation_reconciliation", run_delegation_reconciliation_once)
 
 
+async def run_scheduled_delegation_attribution():
+    from src.services.delegation.attribution import run_delegation_attribution_once
+
+    await _run_delegation_job("delegation_attribution", run_delegation_attribution_once)
+
+
 def start_delegation_scheduler():
     """Start the delegated-staking jobs (app lifespan). Always starts."""
     global _delegation_scheduler
@@ -1936,6 +1946,19 @@ def start_delegation_scheduler():
             ),
             id="delegation_accruals",
             name="Delegation Accruals Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _delegation_scheduler.add_job(
+            run_scheduled_delegation_attribution,
+            trigger=CronTrigger(
+                hour=Config.DELEGATION_ATTRIBUTION_CRON_HOUR_UTC,
+                minute=Config.DELEGATION_ATTRIBUTION_CRON_MINUTE_UTC,
+                timezone="UTC",
+            ),
+            id="delegation_attribution",
+            name="Delegation Reward-Share Attribution Job",
             replace_existing=True,
             max_instances=1,
             coalesce=True,

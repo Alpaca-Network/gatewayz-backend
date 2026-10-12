@@ -105,6 +105,11 @@ TARGET_TABLES = frozenset(
         "delegation_accruals",
         "delegation_revenue",
         "delegation_controls",
+        # v3 reward share as an inference discount -- same posture, added in
+        # 20261011120000_delegation_reward_share_discount.sql.
+        "delegation_reward_attributions",
+        "inference_discount_balances",
+        "inference_discount_ledger",
     }
 )
 

@@ -19,8 +19,14 @@ async def test_disabled_runs_are_recorded_as_skipped(monkeypatch):
         await scheduled_sync.run_scheduled_delegation_measurements()
         await scheduled_sync.run_scheduled_delegation_accruals()
         await scheduled_sync.run_scheduled_delegation_reconciliation()
+        await scheduled_sync.run_scheduled_delegation_attribution()
     names = [c.args[0] for c in record.call_args_list]
-    assert names == ["delegation_measurements", "delegation_accruals", "delegation_reconciliation"]
+    assert names == [
+        "delegation_measurements",
+        "delegation_accruals",
+        "delegation_reconciliation",
+        "delegation_attribution",
+    ]
     for call in record.call_args_list:
         assert call.kwargs["ok"] is True
         assert call.kwargs["summary"] == {"skipped": "disabled"}
@@ -40,7 +46,7 @@ async def test_a_failed_run_is_recorded_not_raised(monkeypatch):
     assert "no measurements" in record.call_args.kwargs["error"]
 
 
-def test_scheduler_registers_three_jobs():
+def test_scheduler_registers_four_jobs():
     scheduled_sync.start_delegation_scheduler()
     try:
         ids = {job.id for job in scheduled_sync._delegation_scheduler.get_jobs()}
@@ -48,6 +54,7 @@ def test_scheduler_registers_three_jobs():
             "delegation_measurements",
             "delegation_accruals",
             "delegation_reconciliation",
+            "delegation_attribution",
         }
     finally:
         scheduled_sync.stop_delegation_scheduler()

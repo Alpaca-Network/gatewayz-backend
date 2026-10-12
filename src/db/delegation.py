@@ -29,6 +29,7 @@ _RATES_TABLE = "delegation_allowance_rates"
 _ACCRUALS_TABLE = "delegation_accruals"
 _REVENUE_TABLE = "delegation_revenue"
 _CONTROLS_TABLE = "delegation_controls"
+_ATTRIBUTIONS_TABLE = "delegation_reward_attributions"
 
 ASSETS: tuple[str, ...] = ("eth", "ada")
 
@@ -164,6 +165,84 @@ def get_latest_measurements(wallet_address: str) -> list[dict[str, Any]]:
     except Exception as e:
         logger.warning(f"delegation_measurements latest lookup failed: {e}")
         return []
+
+
+def get_measurement_amounts_for_date(asset: str, day: date) -> dict[str, list[int]] | None:
+    """{wallet: [amount_raw of every measurement on `day`]} for one asset --
+    wei for ETH, lovelace for ADA. None on a failed or unparseable read, so
+    "could not read" is never mistaken for "no stake"."""
+    start, end = _day_bounds(day)
+    try:
+        rows = _select_all(
+            lambda c: c.table(_MEASUREMENTS_TABLE)
+            .select("wallet_address, amount_raw")
+            .eq("asset", asset)
+            .gte("taken_at", start)
+            .lt("taken_at", end)
+            .order("id", desc=False)
+        )
+        amounts: dict[str, list[int]] = {}
+        for row in rows:
+            value = _decimal(row.get("amount_raw"))
+            if value is None or not value.is_finite():
+                return None
+            amounts.setdefault(str(row["wallet_address"]).lower(), []).append(int(value))
+        return amounts
+    except Exception as e:
+        logger.warning(f"delegation_measurements amount lookup failed ({asset}): {e}")
+        return None
+
+
+def get_latest_sweep_rows(asset: str) -> list[dict[str, Any]] | None:
+    """Every row of the most recent measurement sweep for `asset` -- one per
+    linked wallet measured, zero included: [{wallet_address, amount_raw,
+    usd_value, taken_at}]. Empty when there is no sweep yet; None on a failed
+    read."""
+    try:
+        client = get_supabase_client()
+        latest = (
+            client.table(_MEASUREMENTS_TABLE)
+            .select("taken_at")
+            .eq("asset", asset)
+            .order("taken_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not latest.data:
+            return []
+        taken_at = latest.data[0]["taken_at"]
+        return _select_all(
+            lambda c: c.table(_MEASUREMENTS_TABLE)
+            .select("wallet_address, amount_raw, usd_value, taken_at")
+            .eq("asset", asset)
+            .eq("taken_at", taken_at)
+            .order("id")
+        )
+    except Exception as e:
+        logger.warning(f"delegation_measurements latest sweep failed ({asset}): {e}")
+        return None
+
+
+def get_user_emails(user_ids: list[int]) -> dict[int, str | None]:
+    """{user_id: email} for the admin staking view. Missing ids are absent;
+    empty on error."""
+    emails: dict[int, str | None] = {}
+    ids = sorted({int(i) for i in user_ids})
+    try:
+        client = get_supabase_client()
+        for start in range(0, len(ids), 200):
+            result = (
+                client.table("users")
+                .select("id, email")
+                .in_("id", ids[start : start + 200])
+                .execute()
+            )
+            for row in result.data or []:
+                emails[int(row["id"])] = row.get("email")
+        return emails
+    except Exception as e:
+        logger.warning(f"users email lookup failed: {e}")
+        return emails
 
 
 def get_latest_measurement_taken_at() -> datetime | None:
@@ -481,39 +560,45 @@ def insert_revenue(
     revenue_usd: Decimal,
     source: str,
     raw_amount: int | None = None,
+    stake_total_native: Decimal | None = None,
 ) -> dict[str, Any] | None:
     """Record one revenue period. None on failure, including the
     (asset, period_key) UNIQUE conflict of a re-run -- which is the point:
-    a period is counted once."""
+    a period is counted once. `stake_total_native` is the attribution
+    denominator (the vault's / pool's total stake for the period); the key is
+    only sent when known."""
+    row: dict[str, Any] = {
+        "asset": asset,
+        "revenue_date": _day_str(revenue_date),
+        "period_key": period_key,
+        "revenue_native": str(revenue_native),
+        "revenue_usd": str(revenue_usd),
+        "raw_amount": None if raw_amount is None else str(int(raw_amount)),
+        "source": source,
+    }
+    if stake_total_native is not None:
+        row["stake_total_native"] = str(stake_total_native)
     try:
         client = get_supabase_client()
-        result = (
-            client.table(_REVENUE_TABLE)
-            .insert(
-                {
-                    "asset": asset,
-                    "revenue_date": _day_str(revenue_date),
-                    "period_key": period_key,
-                    "revenue_native": str(revenue_native),
-                    "revenue_usd": str(revenue_usd),
-                    "raw_amount": None if raw_amount is None else str(int(raw_amount)),
-                    "source": source,
-                }
-            )
-            .execute()
-        )
+        result = client.table(_REVENUE_TABLE).insert(row).execute()
         return (result.data or [None])[0]
     except Exception as e:
         logger.warning(f"delegation_revenue insert failed ({asset}/{period_key}): {e}")
         return None
 
 
-def sum_revenue_usd(asset: str) -> Decimal | None:
-    """All recorded revenue for `asset`, in USD. None on a failed read."""
+def sum_revenue_usd(asset: str, since: date | str | None = None) -> Decimal | None:
+    """All recorded revenue for `asset` (revenue_date >= `since` when given),
+    in USD. None on a failed read."""
+
+    def build(c: Any) -> Any:
+        query = c.table(_REVENUE_TABLE).select("revenue_usd").eq("asset", asset)
+        if since is not None:
+            query = query.gte("revenue_date", _day_str(since))
+        return query.order("id")
+
     try:
-        rows = _select_all(
-            lambda c: c.table(_REVENUE_TABLE).select("revenue_usd").eq("asset", asset).order("id")
-        )
+        rows = _select_all(build)
         total = Decimal(0)
         for row in rows:
             value = _decimal(row.get("revenue_usd"))
@@ -523,6 +608,23 @@ def sum_revenue_usd(asset: str) -> Decimal | None:
         return total
     except Exception as e:
         logger.warning(f"delegation_revenue sum failed ({asset}): {e}")
+        return None
+
+
+def list_revenue_since(asset: str, min_revenue_date: date | str) -> list[dict[str, Any]] | None:
+    """Every revenue row for `asset` recorded on or after `min_revenue_date`,
+    oldest first. None on a failed read."""
+    try:
+        return _select_all(
+            lambda c: c.table(_REVENUE_TABLE)
+            .select("*")
+            .eq("asset", asset)
+            .gte("revenue_date", _day_str(min_revenue_date))
+            .order("revenue_date", desc=False)
+            .order("id", desc=False)
+        )
+    except Exception as e:
+        logger.warning(f"delegation_revenue listing failed ({asset}): {e}")
         return None
 
 
@@ -599,4 +701,193 @@ def resume_accruals(asset: str, resumed_by: str) -> dict[str, Any] | None:
         return (result.data or [None])[0]
     except Exception as e:
         logger.warning(f"delegation_controls resume failed ({asset}): {e}")
+        return None
+
+
+# -- reward-share attributions (v3) ---------------------------------------------------
+
+
+def get_attribution(wallet_address: str, asset: str, period_key: str) -> dict[str, Any] | None:
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_ATTRIBUTIONS_TABLE)
+            .select("*")
+            .eq("wallet_address", wallet_address.lower())
+            .eq("asset", asset)
+            .eq("period_key", period_key)
+            .limit(1)
+            .execute()
+        )
+        return (result.data or [None])[0]
+    except Exception as e:
+        logger.warning(f"delegation_reward_attributions lookup failed ({asset}): {e}")
+        return None
+
+
+def reserve_attribution(
+    wallet_address: str,
+    asset: str,
+    period_key: str,
+    reward_date: date | str,
+    user_id: int | None,
+    stake_native: Decimal,
+    stake_total_native: Decimal,
+    attributed_usd: Decimal,
+    reward_share: Decimal,
+    request_id: str,
+    account_cap: Decimal,
+    global_budget: Decimal,
+) -> dict[str, Any] | None:
+    """Atomically reserve one wallet-asset-period attribution (supabase
+    function delegation_reserve_attribution): under the reward date's advisory
+    lock it caps the attribution at the period's unattributed revenue and the
+    discount at the account's remaining daily headroom, refuses on a paused
+    asset or an exhausted global budget, and inserts the row 'pending'.
+    Returns {status, attribution?, capped?}; None on any failure, which
+    callers treat as "nothing reserved"."""
+    try:
+        client = get_supabase_client()
+        result = client.rpc(
+            "delegation_reserve_attribution",
+            {
+                "p_wallet_address": wallet_address.lower(),
+                "p_asset": asset,
+                "p_period_key": period_key,
+                "p_reward_date": _day_str(reward_date),
+                "p_user_id": user_id,
+                "p_stake_native": str(stake_native),
+                "p_stake_total_native": str(stake_total_native),
+                "p_attributed_usd": str(attributed_usd),
+                "p_reward_share": str(reward_share),
+                "p_request_id": request_id,
+                "p_account_cap": str(account_cap),
+                "p_global_budget": str(global_budget),
+            },
+        ).execute()
+        return _rpc_payload(result.data)
+    except Exception as e:
+        logger.warning(f"delegation_reserve_attribution failed ({asset}): {e}")
+        return None
+
+
+def grant_attribution(
+    attribution_id: int, user_id: int, account_cap: Decimal
+) -> dict[str, Any] | None:
+    """Atomically grant a pending attribution to `user_id` (supabase function
+    delegation_grant_attribution): re-checks the pause, the wallet link, the
+    account and the cap under the date's advisory lock, credits the discount
+    balance and marks the row granted in one transaction. Returns {status,
+    attribution?, grant?}; None on any failure (the row stays pending)."""
+    try:
+        client = get_supabase_client()
+        result = client.rpc(
+            "delegation_grant_attribution",
+            {
+                "p_attribution_id": attribution_id,
+                "p_user_id": user_id,
+                "p_account_cap": str(account_cap),
+            },
+        ).execute()
+        return _rpc_payload(result.data)
+    except Exception as e:
+        logger.warning(f"delegation_grant_attribution failed for id={attribution_id}: {e}")
+        return None
+
+
+def list_pending_attributions(
+    wallet_address: str | None = None, min_reward_date: date | str | None = None
+) -> list[dict[str, Any]]:
+    """Pending attributions, oldest first -- for one wallet (pay on link) or
+    since a date (the job's retry sweep). Empty on error."""
+    try:
+        client = get_supabase_client()
+        query = client.table(_ATTRIBUTIONS_TABLE).select("*").eq("status", "pending")
+        if wallet_address is not None:
+            query = query.eq("wallet_address", wallet_address.lower())
+        if min_reward_date is not None:
+            query = query.gte("reward_date", _day_str(min_reward_date))
+        result = query.order("reward_date", desc=False).limit(_ROW_CAP).execute()
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"delegation_reward_attributions pending listing failed: {e}")
+        return []
+
+
+def list_attributions_for_account(
+    user_id: int, wallet_addresses: list[str], limit: int = 90
+) -> list[dict[str, Any]]:
+    """The account's attributions, newest first: rows granted to / decided
+    for it, plus rows for wallets it has linked now (pending ones included).
+    Empty on error."""
+    try:
+        client = get_supabase_client()
+        rows: dict[Any, dict[str, Any]] = {}
+        by_user = (
+            client.table(_ATTRIBUTIONS_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        for row in by_user.data or []:
+            rows[row.get("id")] = row
+        wallets = [w.lower() for w in wallet_addresses if w]
+        if wallets:
+            by_wallet = (
+                client.table(_ATTRIBUTIONS_TABLE)
+                .select("*")
+                .in_("wallet_address", wallets)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            for row in by_wallet.data or []:
+                rows[row.get("id")] = row
+        ordered = sorted(
+            rows.values(),
+            key=lambda r: (str(r.get("created_at") or ""), int(r.get("id") or 0)),
+            reverse=True,
+        )
+        return ordered[:limit]
+    except Exception as e:
+        logger.warning(f"delegation_reward_attributions account listing failed: {e}")
+        return []
+
+
+def list_attribution_user_ids() -> set[int] | None:
+    """Every account an attribution was decided for or granted to. None on
+    a failed read."""
+    try:
+        rows = _select_all(lambda c: c.table(_ATTRIBUTIONS_TABLE).select("user_id").order("id"))
+        return {int(r["user_id"]) for r in rows if r.get("user_id") is not None}
+    except Exception as e:
+        logger.warning(f"delegation_reward_attributions user listing failed: {e}")
+        return None
+
+
+def sum_attributed_discount(
+    asset: str, statuses: tuple[str, ...] = ("pending", "granted")
+) -> Decimal | None:
+    """Discount committed for `asset` (pending + granted by default). None --
+    never 0 -- on a failed read: reconciliation must not see an unknown
+    grant total as nothing granted."""
+    try:
+        rows = _select_all(
+            lambda c: c.table(_ATTRIBUTIONS_TABLE)
+            .select("discount_usd")
+            .eq("asset", asset)
+            .in_("status", list(statuses))
+            .order("id")
+        )
+        total = Decimal(0)
+        for row in rows:
+            value = _decimal(row.get("discount_usd"))
+            if value is None:
+                return None
+            total += value
+        return total
+    except Exception as e:
+        logger.warning(f"delegation_reward_attributions sum failed ({asset}): {e}")
         return None

@@ -92,7 +92,11 @@ class TestStatus:
                 "eth": {"vault_address": None, "chain_id": 1, "fee_percent": None},
                 "cardano": {"pool_id": None},
                 "allowance_rates": [],
-                "disclaimer": delegation_routes.DISCLAIMER,
+                "payout_model": "reward_share",
+                "reward_share": "0.95",
+                "discount_percent": "0.99",
+                "discount_enabled": False,
+                "disclaimer": delegation_routes.REWARD_SHARE_DISCLAIMER,
             },
         }
 
@@ -171,6 +175,9 @@ class TestRewards:
             patch.object(delegation_routes, "get_latest_measurements", return_value=[measurement]),
             patch.object(delegation_routes, "get_active_rates", return_value=rates),
             patch.object(delegation_routes, "list_accruals_for_wallet", return_value=accruals),
+            patch.object(delegation_routes, "get_balance", return_value=None),
+            patch.object(delegation_routes, "list_attributions_for_account", return_value=[]),
+            patch.object(delegation_routes, "list_ledger", return_value=[]),
         ):
             data = client.get("/delegation/rewards").json()["data"]
         assert data["linked_wallets"] == [{"asset": "eth", "wallet_address": WALLET}]
@@ -187,7 +194,7 @@ class TestRewards:
         assert data["allowance"]["month_estimate_usd"] == "12.000000"
         assert data["totals"] == {"pending": "0.4", "paid": "0.4"}
         assert [h["reward_date"] for h in data["history"]] == ["2099-01-02", "2099-01-01"]
-        assert data["disclaimer"] == delegation_routes.DISCLAIMER
+        assert data["disclaimer"] == delegation_routes.REWARD_SHARE_DISCLAIMER
 
 
 class TestAdmin:

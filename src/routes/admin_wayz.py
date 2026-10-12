@@ -75,6 +75,7 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     "delegation_measurements": 1440 // max(1, min(Config.DELEGATION_MEASUREMENTS_PER_DAY, 24)),
     "delegation_accruals": 1440,
     "delegation_reconciliation": 1440,
+    "delegation_attribution": 1440,
 }
 
 # WAYZ token/staking contracts are deployed on Avalanche Fuji testnet.

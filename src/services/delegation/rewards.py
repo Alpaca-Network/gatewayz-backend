@@ -1,6 +1,10 @@
 """The daily delegated-staking accrual: an inference allowance, paid in
 credits, for stake delegated to the Gatewayz StakeWise vault / Cardano pool.
 
+**v2 allowance model only.** Under the default DELEGATION_PAYOUT_MODEL
+"reward_share" (v3, attribution.py) this accrual grants nothing and a linked
+wallet's pending reward-share attributions are granted instead.
+
 The economics: the stake's rewards reach us through the vault fee / pool
 margin. If R is that revenue per USD staked per day and m our inference
 margin, a credit costs us (1 - m), so granting A = R / (1 - m) credits per
@@ -60,6 +64,7 @@ from src.db.delegation import (
 )
 from src.db.user_wallets import get_wallet
 from src.db.users import add_credits_to_user, get_user_by_id
+from src.services.delegation.discount import payout_model
 from src.services.delegation.measurements import ada_configured, eth_configured
 from src.services.holdings.rewards import budget_order
 
@@ -280,6 +285,10 @@ def run_delegation_accruals_once(reward_date: date | None = None) -> dict[str, A
     started = datetime.now(UTC)
     if not Config.DELEGATED_STAKING_ENABLED:
         return {"skipped": "disabled"}
+    if payout_model() != "allowance":
+        # v3 reward_share (the default) pays a share of real revenue as an
+        # inference discount instead (attribution.py); the rate grants nothing.
+        return {"skipped": "payout_model", "payout_model": payout_model()}
 
     effective = reward_date or (_today() - timedelta(days=1))
     day = effective.isoformat()
@@ -437,6 +446,11 @@ def pay_pending_delegation_for_wallet(address: str, user_id: int) -> None:
     through the atomic claim, so relinking several wallets to one account
     can never pay more than its daily cap."""
     if not Config.DELEGATED_STAKING_ENABLED:
+        return
+    if payout_model() != "allowance":
+        from src.services.delegation.attribution import grant_pending_for_wallet
+
+        grant_pending_for_wallet(address, user_id)
         return
     try:
         for accrual in list_pending_accruals(address):
