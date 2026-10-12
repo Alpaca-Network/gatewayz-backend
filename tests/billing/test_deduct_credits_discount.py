@@ -397,11 +397,15 @@ class TestCapacity:
 
 
 class TestRefund:
-    def _refund(self, amount, restored):
+    def _refund(self, amount, restored, charged_tx=None):
         from src.services.billing import credit_handler
 
         with (
-            patch("src.services.delegation.discount.reverse_for_request", return_value=restored),
+            patch("src.services.delegation.discount.reverse_or_none", return_value=restored),
+            patch(
+                "src.db.credit_transactions.get_transaction_by_request_id",
+                return_value=charged_tx,
+            ),
             patch("src.db.users.add_credits_to_user") as add,
         ):
             ok = asyncio.run(
@@ -417,20 +421,41 @@ class TestRefund:
 
     def test_refund_returns_discount_to_balance_and_only_credits_as_credits(self, flags):
         flags()
-        ok, add = self._refund(2.0, Decimal("1.98"))
+        ok, add = self._refund(2.0, Decimal("1.98"), {"amount": -0.02})
         assert ok is True
         assert add.call_args.kwargs["credits"] == pytest.approx(0.02)
         assert add.call_args.kwargs["metadata"]["discount_restored_usd"] == "1.98"
 
+    def test_refund_is_capped_at_the_credits_actually_charged(self, flags):
+        """Security review: even if the reversal fails (restored unknown), the
+        refund never exceeds the request's own credit charge -- discount is
+        never paid out as credits."""
+        flags()
+        ok, add = self._refund(2.0, None, {"amount": -0.02})
+        assert ok is True
+        assert add.call_args.kwargs["credits"] == pytest.approx(0.02)
+
+    def test_reversal_failed_and_charge_unknown_refunds_nothing(self, flags):
+        flags()
+        ok, add = self._refund(2.0, None, None)
+        assert ok is False
+        add.assert_not_called()
+
+    def test_charge_unknown_falls_back_to_list_minus_restored(self, flags):
+        flags()
+        ok, add = self._refund(2.0, Decimal("1.98"), None)
+        assert ok is True
+        assert add.call_args.kwargs["credits"] == pytest.approx(0.02)
+
     def test_refund_never_goes_negative(self, flags):
         flags()
-        ok, add = self._refund(2.0, Decimal("5"))
+        ok, add = self._refund(2.0, Decimal("5"), None)
         assert ok is True
         add.assert_not_called()
 
     def test_flag_off_refund_unchanged(self, flags):
         flags(enabled=False)
-        with patch("src.services.delegation.discount.reverse_for_request") as reverse:
+        with patch("src.services.delegation.discount.reverse_or_none") as reverse:
             from src.services.billing import credit_handler
 
             with patch("src.db.users.add_credits_to_user") as add:

@@ -812,25 +812,44 @@ async def refund_credits(
 
         # Delegated-staking inference discount (src/services/delegation/
         # discount.py): a discounted request paid only (cost - discount) in
-        # credits. Put the discount back on the discount balance and refund
-        # just the credits part, so a refund never turns discount into credits.
-        # Config-gated: no DB call while the discount is disabled.
+        # credits. Put the discount back on the discount balance and refund at
+        # most the credits the request was actually charged (its own credit
+        # row), so a refund can never turn discount into credits -- not even
+        # when the reversal itself fails. Config-gated: no DB call while the
+        # discount is disabled.
         if original_request_id:
-            from src.services.delegation.discount import discount_enabled, reverse_for_request
+            from src.services.delegation.discount import (
+                charged_credits_for,
+                discount_enabled,
+                reverse_or_none,
+            )
 
             if discount_enabled():
-                restored = await asyncio.to_thread(reverse_for_request, original_request_id)
-                if restored > 0:
+                restored = await asyncio.to_thread(reverse_or_none, original_request_id)
+                charged = await asyncio.to_thread(charged_credits_for, original_request_id)
+                if restored:
                     refund_metadata["discount_restored_usd"] = str(restored)
+                if charged is not None:
+                    amount = min(amount, float(charged))
+                elif restored is None:
+                    # Neither the reversal nor the original charge could be
+                    # read: refunding the list price could pay the discount out
+                    # as credits. Fail closed; ops reconciles by hand.
+                    logger.error(
+                        "CREDIT_REFUND_SKIPPED: discount state unknown for request %s",
+                        original_request_id,
+                    )
+                    return False
+                else:
                     amount = max(amount - float(restored), 0.0)
-                    if amount <= 0:
-                        logger.info(
-                            "CREDIT_REFUND: request %s was fully covered by the inference "
-                            "discount; restored $%s to the discount balance",
-                            original_request_id,
-                            restored,
-                        )
-                        return True
+                if amount <= 0:
+                    logger.info(
+                        "CREDIT_REFUND: nothing to refund in credits for request %s "
+                        "(discount restored: $%s)",
+                        original_request_id,
+                        restored,
+                    )
+                    return True
 
         # Add credits back to purchased_credits via the existing add_credits_to_user function
         # This function handles balance lookup, update, and transaction logging atomically.

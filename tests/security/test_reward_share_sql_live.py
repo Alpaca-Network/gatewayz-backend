@@ -35,9 +35,25 @@ FILES = (
 )
 
 
+def _worker_dsn() -> str | None:
+    """Each xdist worker gets its own throwaway database next to DSN's, so
+    parallel workers never drop each other's schema."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if not DSN or not worker:
+        return DSN
+    parts = urlparse(DSN)
+    name = f"{(parts.path or '/postgres').lstrip('/') or 'postgres'}_{worker}"
+    for sql in (f"drop database if exists {name}", f"create database {name}"):
+        subprocess.run(["psql", DSN, "-qtAX", "-c", sql], capture_output=True, check=True)
+    return parts._replace(path=f"/{name}").geturl()
+
+
+TARGET = DSN
+
+
 def psql(sql: str) -> str:
     out = subprocess.run(
-        ["psql", DSN, "-v", "ON_ERROR_STOP=1", "-qtAX", "-c", sql],
+        ["psql", TARGET, "-v", "ON_ERROR_STOP=1", "-qtAX", "-c", sql],
         capture_output=True,
         text=True,
         check=True,
@@ -47,6 +63,8 @@ def psql(sql: str) -> str:
 
 @pytest.fixture(scope="module", autouse=True)
 def schema():
+    global TARGET
+    TARGET = _worker_dsn()
     psql("""
         drop schema if exists public cascade; create schema public;
         do $$ begin
@@ -56,6 +74,15 @@ def schema():
           if not exists (select 1 from pg_roles where rolname='service_role') then
             create role service_role; end if;
         end $$;
+        -- Supabase's default privileges: every new function, table and
+        -- sequence in public is granted to anon / authenticated / service_role
+        -- unless a migration revokes it.
+        alter default privileges in schema public
+          grant all on tables to anon, authenticated, service_role;
+        alter default privileges in schema public
+          grant all on sequences to anon, authenticated, service_role;
+        alter default privileges in schema public
+          grant all on functions to anon, authenticated, service_role;
         create table public.users (id bigserial primary key, email text, is_active boolean default true);
         create table public.user_wallets (id bigserial primary key, user_id bigint references users(id),
           wallet_address text unique not null, source text check (source in ('privy','siwe')),
@@ -67,7 +94,7 @@ def schema():
         """)
     for name in FILES + FILES[-1:]:  # the v3 file twice: re-runs are no-ops
         subprocess.run(
-            ["psql", DSN, "-v", "ON_ERROR_STOP=1", "-q", "-f", str(MIGRATIONS / name)],
+            ["psql", TARGET, "-v", "ON_ERROR_STOP=1", "-q", "-f", str(MIGRATIONS / name)],
             capture_output=True,
             check=True,
         )
@@ -256,6 +283,120 @@ def test_attribution_ceiling_pause_link_and_grant():
     assert psql(f"select delegation_grant_attribution({b_id}, 3, 100) ->> 'status'") == (
         "inactive_user"
     )
+
+
+V3_FUNCTIONS = (
+    "discount_grant",
+    "discount_apply",
+    "discount_hold",
+    "discount_reverse",
+    "discount_adjust",
+    "delegation_attribution_spent",
+    "delegation_reserve_attribution",
+    "delegation_grant_attribution",
+)
+V3_TABLES = (
+    "delegation_reward_attributions",
+    "inference_discount_balances",
+    "inference_discount_ledger",
+    "inference_discount_holds",
+)
+
+
+@pytest.mark.parametrize("role", ["anon", "authenticated"])
+def test_nothing_in_v3_is_reachable_by_client_roles_even_with_supabase_defaults(role):
+    names = ",".join(f"'{n}'" for n in V3_FUNCTIONS)
+    leaked = psql(
+        "select string_agg(p.proname, ',') from pg_proc p join pg_namespace n"
+        " on n.oid = p.pronamespace where n.nspname = 'public'"
+        f" and p.proname in ({names}) and has_function_privilege('{role}', p.oid, 'execute')"
+    )
+    assert leaked == ""
+    for table in V3_TABLES:
+        for priv in ("select", "insert", "update", "delete"):
+            assert psql(f"select has_table_privilege('{role}', 'public.{table}', '{priv}')") == "f"
+    for seq in ("delegation_reward_attributions_id_seq", "inference_discount_ledger_id_seq"):
+        assert psql(f"select has_sequence_privilege('{role}', 'public.{seq}', 'usage')") == "f"
+    # PUBLIC too: no v3 function carries the default PUBLIC execute grant.
+    assert (
+        psql(
+            "select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace,"
+            " aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a"
+            f" where n.nspname = 'public' and p.proname in ({names}) and a.grantee = 0"
+        )
+        == "0"
+    )
+
+
+def test_a_key_held_by_another_account_is_neither_released_nor_drawn():
+    psql("insert into users (id) values (30), (31)")
+    psql(f"select discount_grant(30, 10, '{u()}', 'r', '{{}}')")
+    psql(f"select discount_grant(31, 10, '{u()}', 'r', '{{}}')")
+    rid = u()
+    assert psql(f"select discount_hold(30, 5, 0.99, '{rid}', 900)") == "4.950000"
+    assert psql(f"select discount_apply(31, 5, 0.99, '{rid}', '{{}}')") == "0"
+    assert psql(f"select count(*) from inference_discount_holds where request_id = '{rid}'") == "1"
+    assert balance(31) == "10.000000"
+
+
+def test_nothing_positive_without_a_ledger_row():
+    """No path returns a positive discount without writing its 'use' row."""
+    psql("insert into users (id) values (32)")
+    psql(f"select discount_grant(32, 10, '{u()}', 'r', '{{}}')")
+    assert psql("select discount_apply(32, 2, 0.99, null, '{}')") == "0"
+    assert psql(f"select discount_apply(32, null, 0.99, '{u()}', '{{}}')") == "0"
+    assert psql(f"select discount_apply(null, 2, 0.99, '{u()}', '{{}}')") == "0"
+    assert psql(f"select discount_apply(32, -2, 0.99, '{u()}', '{{}}')") == "0"
+    rid = u()
+    assert psql(f"select discount_apply(32, 2, 0.99, '{rid}', '{{}}')") == "1.980000"
+    assert psql(f"select discount_apply(32, 2.5, 0.99, '{rid}', '{{}}')") == "0"
+    assert (
+        psql("select count(*) from inference_discount_ledger where user_id = 32 and kind = 'use'")
+        == "1"
+    )
+    assert balance(32) == "8.020000"
+    # The ledger always explains the balance.
+    assert (
+        psql(
+            "select (select coalesce(sum(amount_usd), 0) from inference_discount_ledger"
+            " where user_id = 32) = (select balance_usd from inference_discount_balances"
+            " where user_id = 32)"
+        )
+        == "t"
+    )
+
+
+def test_a_period_is_never_granted_twice_or_beyond_its_revenue():
+    psql("insert into users (id) values (33)")
+    psql("insert into user_wallets (user_id, wallet_address, source) values (33, '0xddd', 'siwe')")
+    psql(
+        "insert into delegation_revenue (revenue_date, asset, period_key, revenue_native,"
+        " revenue_usd, source, stake_total_native)"
+        " values ('2026-10-20', 'eth', '2026-10-20', 0.01, 10, 't', 10)"
+    )
+
+    def reserve(wallet, attributed, rid):
+        return psql(
+            f"select delegation_reserve_attribution('{wallet}', 'eth', '2026-10-20', '2026-10-20',"
+            f" 33, 1, 10, {attributed}, 0.95, '{rid}', 1000, 100000) ->> 'status'"
+        )
+
+    first = u()
+    assert reserve("0xddd", 10, first) == "created"
+    # Same wallet+period under another key, case variant included: one row.
+    assert reserve("0xDDD", 10, u()) == "exists"
+    # Another wallet cannot take more than the period earned.
+    assert reserve("0xeee", 1, u()) == "revenue_exhausted"
+    row = psql("select id from delegation_reward_attributions where request_id = '" + first + "'")
+    assert psql(f"select delegation_grant_attribution({row}, 33, 1000) ->> 'status'") == "granted"
+    assert psql(f"select delegation_grant_attribution({row}, 33, 1000) ->> 'status'") == "already"
+    assert balance(33) == "9.500000"  # 0.95 x 10, once
+    # A second revenue row for the same period is rejected by UNIQUE (asset, period_key).
+    with pytest.raises(subprocess.CalledProcessError):
+        psql(
+            "insert into delegation_revenue (revenue_date, asset, period_key, revenue_native,"
+            " revenue_usd, source) values ('2026-10-21', 'eth', '2026-10-20', 1, 999, 't')"
+        )
 
 
 def test_not_executable_by_anon():

@@ -259,7 +259,15 @@ begin
   where user_id = p_user_id and expires_at <= now();
   select coalesce(sum(amount_usd), 0) into v_others from public.inference_discount_holds
   where user_id = p_user_id and request_id <> p_request_id;
-  delete from public.inference_discount_holds where request_id = p_request_id;
+  -- A request whose key is held by another account draws nothing.
+  if exists (select 1 from public.inference_discount_holds
+             where request_id = p_request_id and user_id <> p_user_id) then
+    return 0;
+  end if;
+  -- Settle only THIS account's hold: a request_id another account holds
+  -- under is never released from here.
+  delete from public.inference_discount_holds
+  where request_id = p_request_id and user_id = p_user_id;
 
   v_applied := least(trunc(p_cost * v_percent, 6), v_balance.balance_usd - v_others);
   if v_applied <= 0 then

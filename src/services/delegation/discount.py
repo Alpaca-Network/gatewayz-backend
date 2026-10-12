@@ -117,6 +117,40 @@ def apply_for_request(
     return max(applied, Decimal(0)).quantize(_DISCOUNT_DP, rounding=ROUND_DOWN)
 
 
+def reverse_or_none(request_id: Any) -> Decimal | None:
+    """Like :func:`reverse_for_request` but None -- not 0 -- when the reversal
+    could not be done, so a refund can tell "nothing was drawn" from "do not
+    know"."""
+    key = _uuid_or_none(request_id)
+    if key is None:
+        return Decimal(0)
+    from src.db.inference_discount import reverse_discount
+
+    try:
+        return reverse_discount(key)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("inference discount reversal failed: %s", type(e).__name__)
+        return None
+
+
+def charged_credits_for(request_id: Any) -> Decimal | None:
+    """The credits a billed request was actually charged (its
+    credit_transactions row, keyed by the billing request_id), or None when
+    that cannot be established."""
+    if _uuid_or_none(request_id) is None:
+        return None
+    from src.db.credit_transactions import get_transaction_by_request_id
+
+    try:
+        row = get_transaction_by_request_id(str(request_id))
+        if not isinstance(row, dict):
+            return None
+        charged = -Decimal(str(row.get("amount")))
+    except Exception:  # noqa: BLE001
+        return None
+    return charged if charged.is_finite() and charged >= 0 else None
+
+
 def reverse_for_request(request_id: Any) -> Decimal:
     """Put back the discount a request drew (it was refused or refunded).
     Returns the amount restored; 0 when there was none or on error. Never

@@ -142,7 +142,8 @@ def test_holds_cap_concurrent_prechecks_and_apply_respects_them():
     assert "expires_at <= now()" in hold
     apply = _function_body("discount_apply")
     assert "v_balance.balance_usd - v_others" in apply
-    assert "delete from public.inference_discount_holds where request_id = p_request_id" in apply
+    assert "where request_id = p_request_id and user_id = p_user_id" in apply
+    assert "request_id = p_request_id and user_id <> p_user_id" in apply
     adjust = _function_body("discount_adjust")
     assert "from public.inference_discount_holds h" in adjust
 
