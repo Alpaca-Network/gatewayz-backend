@@ -1,17 +1,20 @@
 # Counsel brief: Gatewayz delegated staking ("inference-as-yield")
 
 > **Not legal advice.** Prepared by Gatewayz engineering on 2026-10-08 to scope
-> questions for outside counsel. Nothing here is a legal conclusion. Sources were
-> opened on 2026-10-08.
+> questions for outside counsel; updated 2026-10-12 to the reward-share discount
+> model. Nothing here is a legal conclusion. Sources were opened on 2026-10-08.
 
 ## 1. Product in one paragraph
 
 Gatewayz sells AI inference (pay-per-use credits; 1 credit = $1 of usage). We
 want users who hold ETH or ADA to **stake through Gatewayz-operated
-infrastructure from their own wallets**. Gatewayz keeps ~99–100% of the staking
-rewards that infrastructure earns, and separately grants the user **inference
-credits** at a rate Gatewayz sets ("99% off inference up to $X/month"). The
-software is built and switched off in production; nothing has launched.
+infrastructure from their own wallets**. The protocol pays ~99% of the staking
+rewards that infrastructure earns to Gatewayz as the operator fee. Gatewayz then
+gives **95% of the rewards each user's own stake earned us** back to that user as
+an **inference discount balance** on their account: on each request they pay 1%
+of the list price and the other 99% is drawn from the balance until it runs out.
+The software is built and merged to production but switched off; nothing has
+launched.
 
 ## 2. How it works and who controls what
 
@@ -27,16 +30,22 @@ software is built and switched off in production; nothing has launched.
 In the vocabulary of the EBA/ESMA report below, the user keeps the **withdrawal**
 keys and Gatewayz holds the **signing** keys.
 
-**The credits.** Each day the backend measures each linked wallet's staked
-amount in USD and grants `amount / 1000 × rate` credits, capped per account and
-in total. The rate is set by a Gatewayz admin, can change or stop at any time,
-is the same for everyone, and is **not** computed from the user's own protocol
-rewards. At our planned settings, the credits' face value is about **1.25×**
-the staking revenue they are funded from (they cost us 80% of face value).
-Credits are spendable only on Gatewayz inference. Every public response carries:
-"Rates are set by Gatewayz, can change at any time, and are not a guaranteed
-return." A daily job pauses the program automatically if credit cost outruns
-staking revenue.
+**The discount.** Each day, after the backend records the revenue our vault
+and pool actually received (ETH: growth of the fee recipient's vault shares;
+ADA: pool fees for each finished epoch), it splits that revenue across linked
+wallets in proportion to stake (wallet stake / total stake for the same period)
+and credits **95%** of each wallet's share, in USD at the time of recording, to
+the linked account's discount balance. The amount is never set by an admin rate
+and never exceeds what Gatewayz received. On each inference request the user pays
+1% of the list price from their normal credits and 99% comes from the balance
+(the 99% is hard-capped in code). The balance is non-transferable, usable only on
+Gatewayz inference, and cannot be cashed out. Per-account and global caps still
+apply, and a daily job pauses the program if discounts granted exceed 95% of
+recorded revenue. Admins can make manual balance adjustments (support
+corrections) only with a recorded reason. Every public response carries:
+"Discounts are a share of staking rewards Gatewayz actually received, can change
+at any time, and are not a guaranteed return." (The earlier admin-set credit
+rate is kept in code only as a rollback option and is not planned for launch.)
 
 ## 3. Sources
 
@@ -82,24 +91,27 @@ MiCAR)"**, 16 January 2025
    through a "protocol-based" provider — with Gatewayz as vault admin, fee
    recipient and node operator? Does administering the vault make us a
    "Liquid Staking Provider" or "Custodian"?
-2. **The credits.** Is an admin-set, changeable credit grant per dollar staked —
-   not derived from each user's protocol rewards — "set[ting] … the amount of
-   the rewards" (fn. 124/126), or a separate commercial discount on our own
-   service? Does the analysis change if we instead granted a share of *actual*
-   revenue?
-3. **"Not greater than" the protocol's rewards.** Credits' face value is ≈ 1.25×
-   the underlying staking revenue. Is the Ancillary Services test measured at
-   face value or at our cost? Must we cap face value at the user's own
-   protocol-level reward?
+2. **The discount.** Each user's discount is 95% of the rewards attributed to
+   their own stake (our pro-rata split of what the vault/pool actually
+   received). Is that "set[ting] … the amount of the rewards" (fn. 124/126), an
+   Ancillary Service ("Alternate Rewards Payment Schedules and Amounts", paid as
+   a service discount instead of in ETH/ADA), or a separate commercial discount
+   on our own service? Does it matter that the per-user figure is our pro-rata
+   calculation rather than one the protocol reports?
+3. **"Not greater than" the protocol's rewards.** The discount's face value is 95%
+   of attributed revenue, so it is below what we received. Does that satisfy the
+   test, and does paying it as an inference discount (redeemed at list price)
+   rather than in the native asset change the answer? Must manual admin
+   adjustments be capped or kept separate?
 4. **Fee of 99–100%.** Any issue with retaining almost all rewards, and what
    disclosures are required? Is 99% preferable to 100% (the user still receives a
    small protocol reward)?
-5. **Credits as value.** Non-transferable, inference-only, no cash-out, can be
+5. **Discount balance as value.** Non-transferable, inference-only, no cash-out, can be
    changed or ended: any stored-value, money-transmission, or consumer-protection
    ("free", "99% off", rate-change notice) issues? Required terms of service?
 6. **Sanctions/AML.** As vault admin with a blocklist and as pool operator, must we
    screen depositor/delegator addresses (OFAC) or block sanctioned addresses? Any
-   KYC duty when credits attach to a user account?
+   KYC duty when discounts attach to a user account?
 7. **Jurisdictions.** Which users may we offer this to — US only, US + Canada (any
    Canadian securities or CSA staking position to check), EU (staking outside
    MiCAR services per EBA/ESMA, but national regimes)? Do we need geofencing?
@@ -107,6 +119,6 @@ MiCAR)"**, 16 January 2025
    What liability and disclosure follow? Should we offer slashing coverage
    (listed as an Ancillary Service)?
 9. **Tax.** How do we book fee shares / pool fees, and do users have income from
-   credits (1099 or similar reporting)? (May go to accountants.)
+   the discount (1099 or similar reporting)? (May go to accountants.)
 10. **Marketing.** Approve the user-facing copy and disclaimer; any words we must
     never use (we already ban APY/APR, "interest", and "return on your stake").
