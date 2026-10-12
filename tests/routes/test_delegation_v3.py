@@ -482,23 +482,23 @@ class TestAdjust:
 
     def test_non_uuid_key_maps_to_a_stable_per_account_uuid(self, superadmin):
         _, a1, _ = self._post(
-            {"amount_usd": "1", "reason": "x"}, key="click-1", result={"status": "exists"}
+            {"amount_usd": "1", "reason": "fix"}, key="click-1", result={"status": "exists"}
         )
         _, a2, _ = self._post(
-            {"amount_usd": "1", "reason": "x"}, key="click-1", result={"status": "exists"}
+            {"amount_usd": "1", "reason": "fix"}, key="click-1", result={"status": "exists"}
         )
         rid = a1.call_args.args[2]
         assert uuid.UUID(rid) and rid == a2.call_args.args[2]
 
     def test_replay_is_not_audited_twice(self, superadmin):
         _, _, audit = self._post(
-            {"amount_usd": "1", "reason": "x"},
+            {"amount_usd": "1", "reason": "fix"},
             result={"status": "exists", "amount_usd": "1", "balance_after": "2"},
         )
         audit.assert_not_called()
 
     def test_requires_idempotency_key(self, superadmin):
-        response, adjust, _ = self._post({"amount_usd": "1", "reason": "x"}, key=None)
+        response, adjust, _ = self._post({"amount_usd": "1", "reason": "fix"}, key=None)
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "idempotency_key_required"
         adjust.assert_not_called()
@@ -508,6 +508,7 @@ class TestAdjust:
         [
             {"amount_usd": "1"},
             {"amount_usd": "1", "reason": "   "},
+            {"amount_usd": "1", "reason": " ab "},
             {"amount_usd": "0", "reason": "x"},
             {"amount_usd": "0.0000001", "reason": "x"},
             {"amount_usd": "1e9", "reason": "x"},
@@ -530,7 +531,7 @@ class TestAdjust:
     )
     def test_refusals(self, superadmin, status, code, error):
         response, _, audit = self._post(
-            {"amount_usd": "-100", "reason": "x"}, result={"status": status} if status else None
+            {"amount_usd": "-100", "reason": "fix"}, result={"status": status} if status else None
         )
         assert response.status_code == code
         assert response.json()["error"]["code"] == error

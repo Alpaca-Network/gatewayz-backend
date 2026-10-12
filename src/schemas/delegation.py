@@ -66,7 +66,7 @@ class AdjustDiscountRequest(BaseModel):
     USD of list price (6 dp). Never takes the balance below zero."""
 
     amount_usd: Decimal = Field(..., ge=Decimal("-1000000"), le=Decimal("1000000"))
-    reason: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(..., min_length=3, max_length=500)
 
     @field_validator("amount_usd")
     @classmethod
@@ -80,6 +80,6 @@ class AdjustDiscountRequest(BaseModel):
     @field_validator("reason")
     @classmethod
     def _not_blank(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("reason must not be blank")
+        if len(v.strip()) < 3:
+            raise ValueError("reason must be at least 3 characters")
         return v.strip()
