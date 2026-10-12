@@ -669,11 +669,24 @@ async def chat_completions(
             )
             if _user_credits <= 0:
                 raise APIExceptions.payment_required(credits=_user_credits)
-            from src.services.delegation.discount import discount_aware_credits_async
+            from src.services.delegation.discount import (
+                discount_aware_credits_async,
+                discount_enabled,
+            )
 
-            # List-price capacity incl. any inference discount (identity while disabled).
-            _credit_capacity = await discount_aware_credits_async(user.get("id"), _user_credits)
             _msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+            # List-price capacity incl. this request's held inference discount
+            # (identity, no DB call, while disabled).
+            _credit_capacity = _user_credits
+            if discount_enabled():
+                from src.services.billing.credit_precheck import calculate_maximum_cost
+
+                _max_cost, _, _ = calculate_maximum_cost(
+                    req.model, _msgs, getattr(req, "max_tokens", None)
+                )
+                _credit_capacity = await discount_aware_credits_async(
+                    user.get("id"), _user_credits, _max_cost, request_id
+                )
             _precheck = estimate_and_check_credits(
                 model_id=req.model,
                 messages=_msgs,

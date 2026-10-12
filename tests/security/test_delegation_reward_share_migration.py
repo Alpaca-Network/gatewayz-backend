@@ -26,11 +26,13 @@ TABLES = (
     "delegation_reward_attributions",
     "inference_discount_balances",
     "inference_discount_ledger",
+    "inference_discount_holds",
 )
 SEQUENCES = ("delegation_reward_attributions_id_seq", "inference_discount_ledger_id_seq")
 FUNCTIONS = {
     "discount_grant": "bigint, numeric, uuid, text, jsonb",
     "discount_apply": "bigint, numeric, numeric, uuid, jsonb",
+    "discount_hold": "bigint, numeric, numeric, uuid, integer",
     "discount_reverse": "uuid",
     "discount_adjust": "bigint, numeric, uuid, text, bigint",
     "delegation_attribution_spent": "bigint, date, text[], bigint",
@@ -53,6 +55,9 @@ def _norm(sql: str) -> str:
 
 
 def test_is_purely_additive():
+    # Holds are deleted when settled or expired -- inside function bodies,
+    # never as a top-level statement.
+    top_level = re.sub(r"\$\$.*?\$\$", "", LOWER, flags=re.S)
     for statement in (
         r"drop table",
         r"drop column",
@@ -60,9 +65,9 @@ def test_is_purely_additive():
         r"delete from",
         r"alter column",
     ):
-        assert not re.search(statement, LOWER), statement
+        assert not re.search(statement, top_level), statement
     assert "add column if not exists stake_total_native" in LOWER
-    assert LOWER.count("create table if not exists") == 3
+    assert LOWER.count("create table if not exists") == 4
 
 
 @pytest.mark.parametrize("table", TABLES)
@@ -95,7 +100,9 @@ def test_functions_definer_pinned_and_service_role_only(name, signature):
     )
 
 
-@pytest.mark.parametrize("name", ["discount_grant", "discount_apply", "discount_adjust"])
+@pytest.mark.parametrize(
+    "name", ["discount_grant", "discount_apply", "discount_adjust", "discount_hold"]
+)
 def test_balance_functions_lock_the_row_before_checking_idempotency(name):
     body = _function_body(name)
     check = "inference_discount_ledger where request_id = p_request_id"
@@ -127,6 +134,17 @@ def test_balance_never_negative_and_money_has_6dp():
     assert "balance_usd numeric(38,6) not null default 0 check (balance_usd >= 0)" in LOWER
     assert "balance_after numeric(38,6) not null check (balance_after >= 0)" in LOWER
     assert "trunc(p_cost * v_percent, 6)" in LOWER
+
+
+def test_holds_cap_concurrent_prechecks_and_apply_respects_them():
+    hold = _function_body("discount_hold")
+    assert "v_balance.balance_usd - v_held" in hold
+    assert "expires_at <= now()" in hold
+    apply = _function_body("discount_apply")
+    assert "v_balance.balance_usd - v_others" in apply
+    assert "delete from public.inference_discount_holds where request_id = p_request_id" in apply
+    adjust = _function_body("discount_adjust")
+    assert "from public.inference_discount_holds h" in adjust
 
 
 def test_apply_caps_d_and_binds_idempotency_to_account_and_cost():

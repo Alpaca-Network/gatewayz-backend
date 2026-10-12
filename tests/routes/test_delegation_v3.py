@@ -25,7 +25,7 @@ ENV_ADMIN = {"role": "admin", "auth": "env_key", "is_admin": True}
 USER = {"id": 42, "email": "staker@example.com"}
 WALLET = "0x" + "a" * 40
 ADA = "stake1u" + "c" * 50
-REQ = str(uuid.uuid4())
+REQ = "6f9b1f0e-3c2a-4d5e-9b8a-1c2d3e4f5a6b"
 
 BALANCE = {
     "user_id": 42,

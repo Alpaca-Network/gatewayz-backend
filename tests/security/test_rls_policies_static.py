@@ -110,6 +110,7 @@ TARGET_TABLES = frozenset(
         "delegation_reward_attributions",
         "inference_discount_balances",
         "inference_discount_ledger",
+        "inference_discount_holds",
     }
 )
 

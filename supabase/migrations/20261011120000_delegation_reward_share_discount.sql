@@ -1,7 +1,8 @@
 -- Migration: delegated staking v3 -- reward share as an inference discount
 --   delegation_revenue.stake_total_native, delegation_reward_attributions,
---   inference_discount_balances, inference_discount_ledger, and the SQL
---   functions that move discount balance (discount_grant / discount_apply /
+--   inference_discount_balances, inference_discount_ledger,
+--   inference_discount_holds, and the SQL functions that move discount
+--   balance (discount_grant / discount_hold / discount_apply /
 --   discount_adjust / discount_reverse) and reserve + grant attributions.
 -- Created: 2026-10-11
 --
@@ -115,6 +116,28 @@ create index if not exists idx_idl_user_created
 create unique index if not exists uq_idl_reverse_ref
   on public.inference_discount_ledger (ref) where kind = 'reverse';
 
+-- 4b. Pre-request HOLDS on the discount balance. A request's credit
+--    pre-check reserves the discount it will draw (trunc(estimate x d, 6),
+--    capped at what is not already held) under the balance row lock, so N
+--    concurrent pre-checks can never each count the same balance: the sum of
+--    live holds never exceeds the balance. discount_apply settles a request
+--    against its own hold (and deletes it -- the unused part is released);
+--    a hold that is never settled (the request failed) expires and stops
+--    counting. Keyed by the billing request_id.
+create table if not exists public.inference_discount_holds (
+  request_id uuid primary key,
+  user_id bigint not null references public.users(id) on delete cascade,
+  amount_usd numeric(38,6) not null check (amount_usd > 0),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
+create index if not exists idx_idh_user_expires
+  on public.inference_discount_holds (user_id, expires_at);
+
+comment on table public.inference_discount_holds is
+  'Discount reserved by a request''s credit pre-check until it is billed (or the hold expires). Live holds never exceed the balance.';
+
 comment on table public.delegation_reward_attributions is
   'One row per (wallet, asset, revenue period): the wallet''s pro-rata share of revenue that reached Gatewayz, and the discount granted from it. Pending before any balance moves.';
 comment on table public.inference_discount_balances is
@@ -187,7 +210,9 @@ $$;
 -- request_id with any other account or cost -- or a request whose discount was
 -- reversed -- returns 0 (full price), so one key can never fund two requests.
 -- Returns 0 when there is nothing to apply (no balance row, zero balance,
--- zero cost / percent) and then writes nothing.
+-- zero cost / percent) and then writes nothing. Draws only from what other
+-- requests' live holds leave free -- its own hold included -- and settles
+-- (deletes) its own hold, releasing the unused part.
 create or replace function public.discount_apply(
   p_user_id bigint, p_cost numeric, p_discount_percent numeric, p_request_id uuid,
   p_metadata jsonb default '{}'::jsonb
@@ -199,6 +224,7 @@ as $$
 declare
   v_percent numeric;
   v_applied numeric;
+  v_others numeric;
   v_existing public.inference_discount_ledger;
   v_balance public.inference_discount_balances;
 begin
@@ -229,7 +255,13 @@ begin
     return 0;
   end if;
 
-  v_applied := least(trunc(p_cost * v_percent, 6), v_balance.balance_usd);
+  delete from public.inference_discount_holds
+  where user_id = p_user_id and expires_at <= now();
+  select coalesce(sum(amount_usd), 0) into v_others from public.inference_discount_holds
+  where user_id = p_user_id and request_id <> p_request_id;
+  delete from public.inference_discount_holds where request_id = p_request_id;
+
+  v_applied := least(trunc(p_cost * v_percent, 6), v_balance.balance_usd - v_others);
   if v_applied <= 0 then
     return 0;
   end if;
@@ -249,6 +281,66 @@ begin
       || jsonb_build_object('cost', p_cost, 'discount_percent', v_percent)
   );
   return v_applied;
+end;
+$$;
+
+-- Reserve the discount a request will draw, at pre-check time:
+-- held = min(trunc(p_estimate x d, 6), balance - every other live hold), d
+-- capped at 0.99, for p_ttl_seconds (60..3600). Idempotent on p_request_id:
+-- a repeat returns the live hold. Expired holds of the account are deleted
+-- first. Returns 0 (and holds nothing) when nothing is available.
+create or replace function public.discount_hold(
+  p_user_id bigint, p_estimate numeric, p_discount_percent numeric, p_request_id uuid,
+  p_ttl_seconds integer default 900
+) returns numeric
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_percent numeric;
+  v_balance public.inference_discount_balances;
+  v_hold public.inference_discount_holds;
+  v_held numeric;
+  v_amount numeric;
+begin
+  if p_request_id is null or p_user_id is null or coalesce(p_estimate, 0) <= 0 then
+    return 0;
+  end if;
+  v_percent := least(greatest(coalesce(p_discount_percent, 0), 0), 0.99);
+  if v_percent = 0 then
+    return 0;
+  end if;
+
+  select * into v_balance from public.inference_discount_balances
+  where user_id = p_user_id for update;
+  if not found then
+    return 0;
+  end if;
+  delete from public.inference_discount_holds
+  where user_id = p_user_id and expires_at <= now();
+
+  select * into v_hold from public.inference_discount_holds where request_id = p_request_id;
+  if found then
+    return case when v_hold.user_id = p_user_id then v_hold.amount_usd else 0 end;
+  end if;
+  -- A request already billed holds nothing more.
+  if exists (select 1 from public.inference_discount_ledger where request_id = p_request_id) then
+    return 0;
+  end if;
+
+  select coalesce(sum(amount_usd), 0) into v_held from public.inference_discount_holds
+  where user_id = p_user_id;
+  v_amount := least(trunc(p_estimate * v_percent, 6), v_balance.balance_usd - v_held);
+  if v_amount <= 0 then
+    return 0;
+  end if;
+  insert into public.inference_discount_holds (request_id, user_id, amount_usd, expires_at)
+  values (
+    p_request_id, p_user_id, v_amount,
+    now() + make_interval(secs => least(greatest(coalesce(p_ttl_seconds, 900), 60), 3600))
+  );
+  return v_amount;
 end;
 $$;
 
@@ -341,7 +433,11 @@ begin
       'balance_after', v_existing.balance_after);
   end if;
 
-  if v_balance.balance_usd + v_amount < 0 then
+  -- A correction may not take back discount that in-flight requests hold.
+  if v_balance.balance_usd + v_amount < (
+    select coalesce(sum(h.amount_usd), 0) from public.inference_discount_holds h
+    where h.user_id = p_user_id and h.expires_at > now()
+  ) then
     return jsonb_build_object('status', 'insufficient_balance', 'balance_after', v_balance.balance_usd);
   end if;
 
@@ -578,6 +674,8 @@ revoke all on function public.discount_apply(bigint, numeric, numeric, uuid, jso
   from public, anon, authenticated;
 revoke all on function public.discount_reverse(uuid)
   from public, anon, authenticated;
+revoke all on function public.discount_hold(bigint, numeric, numeric, uuid, integer)
+  from public, anon, authenticated;
 revoke all on function public.discount_adjust(bigint, numeric, uuid, text, bigint)
   from public, anon, authenticated;
 revoke all on function public.delegation_attribution_spent(bigint, date, text[], bigint)
@@ -593,6 +691,8 @@ grant execute on function public.discount_grant(bigint, numeric, uuid, text, jso
 grant execute on function public.discount_apply(bigint, numeric, numeric, uuid, jsonb)
   to service_role;
 grant execute on function public.discount_reverse(uuid) to service_role;
+grant execute on function public.discount_hold(bigint, numeric, numeric, uuid, integer)
+  to service_role;
 grant execute on function public.discount_adjust(bigint, numeric, uuid, text, bigint)
   to service_role;
 grant execute on function public.delegation_attribution_spent(bigint, date, text[], bigint)
@@ -606,15 +706,18 @@ grant execute on function public.delegation_grant_attribution(bigint, bigint, nu
 alter table public.delegation_reward_attributions enable row level security;
 alter table public.inference_discount_balances enable row level security;
 alter table public.inference_discount_ledger enable row level security;
+alter table public.inference_discount_holds enable row level security;
 
 revoke all on public.delegation_reward_attributions from anon, authenticated;
 revoke all on public.inference_discount_balances from anon, authenticated;
 revoke all on public.inference_discount_ledger from anon, authenticated;
+revoke all on public.inference_discount_holds from anon, authenticated;
 revoke all on sequence public.delegation_reward_attributions_id_seq from anon, authenticated;
 revoke all on sequence public.inference_discount_ledger_id_seq from anon, authenticated;
 
 grant all on public.delegation_reward_attributions to service_role;
 grant all on public.inference_discount_balances to service_role;
 grant all on public.inference_discount_ledger to service_role;
+grant all on public.inference_discount_holds to service_role;
 grant all on sequence public.delegation_reward_attributions_id_seq to service_role;
 grant all on sequence public.inference_discount_ledger_id_seq to service_role;

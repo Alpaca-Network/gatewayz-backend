@@ -135,41 +135,66 @@ def reverse_for_request(request_id: Any) -> Decimal:
         return Decimal(0)
 
 
-def discount_aware_credits(user_id: Any, credits: float) -> float:
-    """The list-price spend `credits` can cover once the discount is counted,
-    for pre-request sufficiency checks: with balance B, discount d and
-    credits C a request of list price X needs X - min(dX, B) <= C, i.e.
-    X <= min(C / (1 - d), C + B). Returns `credits` unchanged -- and makes no
-    DB call -- while the discount is disabled; on any error, too (the check
-    then behaves exactly as before)."""
+def discount_aware_credits(user_id: Any, credits: float, estimate: float, request_id: Any) -> float:
+    """The list-price spend `credits` can cover for ONE request once its
+    discount is counted, for pre-request sufficiency checks.
+
+    The discount counted is not the balance but a HOLD reserved for this
+    request (discount_hold, keyed by its billing request_id): trunc(estimate
+    x d, 6), capped at what other in-flight requests have not already held.
+    Concurrent pre-checks therefore cannot each count the same balance --
+    the sum of live holds never exceeds it -- and deduct_credits settles the
+    request against its own hold. With hold H, discount d and credits C a
+    request of list price X needs X - min(dX, H) <= C, i.e.
+    X <= min(C / (1 - d), C + H), so every request it admits charges at most C
+    in credits, exactly like a request without the discount.
+
+    Returns `credits` unchanged -- and makes no DB call -- while the discount
+    is disabled or the request has no UUID request_id; on any error, too (the
+    check then behaves exactly as before)."""
     if not discount_enabled() or not isinstance(user_id, int) or isinstance(user_id, bool):
         return credits
     percent = discount_percent()
-    if percent <= 0 or credits <= 0:
+    key = _uuid_or_none(request_id)
+    if percent <= 0 or credits <= 0 or key is None:
         return credits
-    from src.db.inference_discount import get_balance
+    try:
+        cost = Decimal(str(estimate))
+    except (InvalidOperation, TypeError, ValueError):
+        return credits
+    if not cost.is_finite() or cost <= 0:
+        return credits
+    from src.db.inference_discount import hold_discount
 
     try:
-        row = get_balance(user_id)
-        balance = Decimal(str((row or {}).get("balance_usd") or 0))
-    except Exception:  # noqa: BLE001
+        held = hold_discount(user_id, cost, percent, key, hold_ttl_seconds())
+    except Exception as e:  # noqa: BLE001 - no hold -> the check counts credits only
+        logger.warning("inference discount hold unavailable for user %s: %s", user_id, e)
         return credits
-    if not balance.is_finite() or balance <= 0:
+    if held <= 0:
         return credits
     c = Decimal(str(credits))
-    # percent <= MAX_DISCOUNT_PERCENT < 1, so the division is always defined
-    # and capacity <= 100 x credits: a request it admits always charges a
-    # positive (1 - d) share in credits.
-    capacity = min(c + balance, c / (Decimal(1) - percent))
+    # percent <= MAX_DISCOUNT_PERCENT < 1, so the division is always defined.
+    capacity = min(c + held, c / (Decimal(1) - percent))
     return float(max(capacity, c))
 
 
-async def discount_aware_credits_async(user_id: Any, credits: float) -> float:
+def hold_ttl_seconds() -> int:
+    try:
+        ttl = int(Config.DELEGATION_DISCOUNT_HOLD_TTL_SECONDS)
+    except (TypeError, ValueError):
+        ttl = 900
+    return min(max(ttl, 60), 3600)
+
+
+async def discount_aware_credits_async(
+    user_id: Any, credits: float, estimate: float, request_id: Any
+) -> float:
     """:func:`discount_aware_credits` for async request paths: returns
     `credits` immediately (no thread hop, no DB call) while the discount is
-    disabled, else runs the balance read off the event loop."""
+    disabled, else places the hold off the event loop."""
     if not discount_enabled():
         return credits
     import asyncio
 
-    return await asyncio.to_thread(discount_aware_credits, user_id, credits)
+    return await asyncio.to_thread(discount_aware_credits, user_id, credits, estimate, request_id)

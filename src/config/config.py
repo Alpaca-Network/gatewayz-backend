@@ -399,6 +399,9 @@ class Config:
         "true",
         "yes",
     }
+    # How long a request's pre-check hold on the discount balance lives if
+    # the request is never billed (60..3600 s). Settled holds go at once.
+    DELEGATION_DISCOUNT_HOLD_TTL_SECONDS = _int_env("DELEGATION_DISCOUNT_HOLD_TTL_SECONDS", 900)
     # The daily attribution job: after reconciliation (00:30) has recorded
     # the revenue it divides.
     DELEGATION_ATTRIBUTION_CRON_HOUR_UTC = _int_env("DELEGATION_ATTRIBUTION_CRON_HOUR_UTC", 0)

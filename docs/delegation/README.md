@@ -48,13 +48,17 @@ above, kept for rollback — in reward_share mode the v2 accrual grants nothing)
   metadata records `cost_list_usd`, `discount_usd`, `charged_usd`. Any discount
   error → full price. A refused charge reverses the discount; a refund returns the
   discount to the discount balance and only the credits part as credits.
-  Pre-request credit checks count the discount (`discount_aware_credits`). Off →
-  no DB call, billing unchanged.
+  Pre-request credit checks count only a per-request HOLD (`discount_hold`, keyed
+  by the billing ref, TTL `DELEGATION_DISCOUNT_HOLD_TTL_SECONDS`, default 900 s):
+  live holds never exceed the balance, so concurrent pre-checks cannot each count
+  the same balance; `discount_apply` settles against the request's own hold and
+  never draws what other requests hold. `d` is capped at 0.99. Off → no DB call,
+  billing unchanged.
 * **Reconciliation**: pauses an asset when discount granted (+ any v2 credit cost)
   > `reward_share × revenue × (1 + tolerance) + grace`; the view adds the discount
   liability (used × (1 − m) + outstanding balance).
 * Tables: `delegation_reward_attributions`, `inference_discount_balances`,
-  `inference_discount_ledger` (migration `20261011120000`). SQL behaviour tests:
+  `inference_discount_ledger`, `inference_discount_holds` (migration `20261011120000`). SQL behaviour tests:
   `GATEWAYZ_TEST_PG_DSN=postgresql://…local… pytest tests/security/test_reward_share_sql_live.py`.
 
 Public disclaimer in reward_share mode:

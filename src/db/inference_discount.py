@@ -10,7 +10,8 @@ writes it back.
 
 Two conventions, chosen per caller:
 
-* the billing calls (:func:`apply_discount`, :func:`reverse_discount`) RAISE
+* the billing calls (:func:`hold_discount`, :func:`apply_discount`,
+  :func:`reverse_discount`) RAISE
   :class:`DiscountUnavailableError` on any failure. Billing must know the
   call failed so it charges full price (fail open to full price); a silent 0
   would be indistinguishable from "no balance", which is fine, but a silent
@@ -82,6 +83,34 @@ def apply_discount(
         ).execute()
     except Exception as e:  # noqa: BLE001
         raise DiscountUnavailableError(f"discount_apply failed: {type(e).__name__}") from None
+    return _scalar(result.data)
+
+
+def hold_discount(
+    user_id: int,
+    estimate: Decimal,
+    discount_percent: Decimal,
+    request_id: str,
+    ttl_seconds: int,
+) -> Decimal:
+    """Reserve, at pre-check time, the discount a request will draw
+    (supabase function discount_hold): min(trunc(estimate x d, 6), balance
+    minus every other live hold), for `ttl_seconds`. Idempotent on
+    `request_id`. Raises DiscountUnavailableError on any failure."""
+    try:
+        client = get_supabase_client()
+        result = client.rpc(
+            "discount_hold",
+            {
+                "p_user_id": user_id,
+                "p_estimate": str(estimate),
+                "p_discount_percent": str(discount_percent),
+                "p_request_id": request_id,
+                "p_ttl_seconds": int(ttl_seconds),
+            },
+        ).execute()
+    except Exception as e:  # noqa: BLE001
+        raise DiscountUnavailableError(f"discount_hold failed: {type(e).__name__}") from None
     return _scalar(result.data)
 
 

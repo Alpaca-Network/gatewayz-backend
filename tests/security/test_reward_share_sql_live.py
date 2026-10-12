@@ -126,6 +126,57 @@ def test_discount_percent_is_capped_below_one():
     assert psql(f"select discount_apply(15, 2, 7, '{u()}', '{{}}')") == "1.980000"
 
 
+def test_concurrent_prechecks_cannot_amplify_unpaid_inference():
+    """Security review ("precheck amplification"): $0.01 credits, $10 of
+    discount, 50 concurrent $1 requests. Each pre-check counts only its own
+    HOLD, so only the requests the balance can actually cover are admitted,
+    and every admitted request charges at most the credits (C) -- the same
+    exposure as a request without the discount."""
+    psql("insert into users (id) values (20)")
+    psql(f"select discount_grant(20, 10, '{u()}', 'r', '{{}}')")
+    credits, d, cost = 0.01, 0.99, 1.0
+
+    def request(_):
+        rid = u()
+        held = float(psql(f"select discount_hold(20, {cost}, {d}, '{rid}', 900)"))
+        capacity = min(credits + held, credits / (1 - d))
+        if capacity + 1e-12 < cost:
+            return None  # 402 at pre-check; nothing served
+        applied = float(psql(f"select discount_apply(20, {cost}, {d}, '{rid}', '{{}}')"))
+        return cost - applied  # what the credits must cover
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        charges = [c for c in pool.map(request, range(50)) if c is not None]
+    assert len(charges) == 10  # 10 x $0.99 fits in $10; the 11th hold is $0.10
+    assert all(c <= credits + 1e-9 for c in charges)
+    assert balance(20) == "0.100000"
+    # Only the refused 11th request's $0.10 hold is still live (until its TTL).
+    assert psql("select count(*) from inference_discount_holds where user_id = 20") == "1"
+
+
+def test_holds_are_idempotent_settled_expire_and_respected():
+    psql("insert into users (id) values (21)")
+    psql(f"select discount_grant(21, 5, '{u()}', 'r', '{{}}')")
+    a, b = u(), u()
+    assert psql(f"select discount_hold(21, 3, 0.99, '{a}', 900)") == "2.970000"
+    assert psql(f"select discount_hold(21, 3, 0.99, '{a}', 900)") == "2.970000"
+    assert psql(f"select discount_hold(21, 3, 0.99, '{b}', 900)") == "2.030000"
+    # Neither a request without a hold nor an admin correction can take held discount.
+    assert psql(f"select discount_apply(21, 3, 0.99, '{u()}', '{{}}')") == "0"
+    assert '"insufficient_balance"' in psql(f"select discount_adjust(21, -1, '{u()}', 'x', 1)")
+    # Settling A uses its hold and releases it.
+    assert psql(f"select discount_apply(21, 1, 0.99, '{a}', '{{}}')") == "0.990000"
+    assert psql(f"select count(*) from inference_discount_holds where request_id = '{a}'") == "0"
+    assert psql(f"select discount_hold(21, 3, 0.99, '{a}', 900)") == "0"  # billed: no new hold
+    # B's hold expires -> it stops counting.
+    psql(
+        "update inference_discount_holds set expires_at = now() - interval '1 second'"
+        f" where request_id = '{b}'"
+    )
+    assert psql(f"select discount_apply(21, 5, 0.99, '{u()}', '{{}}')") == "4.010000"
+    assert psql("select count(*) from inference_discount_holds where user_id = 21") == "0"
+
+
 def test_concurrent_applies_never_overdraw():
     psql("insert into users (id) values (10)")
     psql(f"select discount_grant(10, 5, '{u()}', 'r', '{{}}')")

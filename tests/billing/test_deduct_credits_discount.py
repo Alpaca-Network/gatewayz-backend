@@ -24,7 +24,7 @@ import pytest
 
 from src.services.delegation import discount
 
-REQ = str(uuid.uuid4())
+REQ = "6f9b1f0e-3c2a-4d5e-9b8a-1c2d3e4f5a6b"
 
 
 def _client(rpc_handler, balance=5.0, existing_tx=None):
@@ -128,11 +128,11 @@ class TestFlagOff:
 
     def test_precheck_helpers_are_identity_without_db(self, flags):
         flags(enabled=False)
-        with patch("src.db.inference_discount.get_balance") as balance:
-            assert discount.discount_aware_credits(7, 1.5) == 1.5
-            assert asyncio.run(discount.discount_aware_credits_async(7, 1.5)) == 1.5
+        with patch("src.db.inference_discount.hold_discount") as hold:
+            assert discount.discount_aware_credits(7, 1.5, 1.0, REQ) == 1.5
+            assert asyncio.run(discount.discount_aware_credits_async(7, 1.5, 1.0, REQ)) == 1.5
             assert discount.apply_for_request(7, Decimal(1), REQ) == Decimal(0)
-        balance.assert_not_called()
+        hold.assert_not_called()
 
 
 class TestFlagOn:
@@ -332,33 +332,68 @@ class TestFlagOn:
 
 
 class TestCapacity:
+    """The pre-check counts this request's HOLD, never the whole balance."""
+
     @pytest.mark.parametrize(
-        "credits,balance,percent,expected",
+        "credits,held,percent,expected",
         [
             (1.0, 1000, "0.99", 100.0),  # credits bind: 1 / 0.01
-            (1.0, 5, "0.99", 6.0),  # balance binds: 1 + 5
-            (1.0, 0, "0.99", 1.0),  # no balance: unchanged
+            (1.0, 5, "0.99", 6.0),  # the hold binds: 1 + 5
+            (1.0, 0, "0.99", 1.0),  # nothing held: unchanged
             (2.0, 1000, "1", 200.0),  # d = 1 is capped at 0.99: never unbounded
             (0.0, 100, "0.99", 0.0),  # no credits: still nothing (1 - d is paid in credits)
         ],
     )
-    def test_formula(self, flags, credits, balance, percent, expected):
+    def test_formula(self, flags, credits, held, percent, expected):
         flags(percent=percent)
-        with patch(
-            "src.db.inference_discount.get_balance", return_value={"balance_usd": str(balance)}
+        with patch("src.db.inference_discount.hold_discount", return_value=Decimal(held)) as hold:
+            assert discount.discount_aware_credits(7, credits, 3.0, REQ) == pytest.approx(expected)
+        if credits > 0:
+            user_id, estimate, d, key, ttl = hold.call_args.args
+            assert (user_id, estimate, key) == (7, Decimal("3.0"), REQ)
+            assert d == Decimal("0.99") and 60 <= ttl <= 3600
+
+    def test_hold_error_is_identity(self, flags):
+        flags()
+        with patch("src.db.inference_discount.hold_discount", side_effect=RuntimeError("x")):
+            assert discount.discount_aware_credits(7, 3.0, 1.0, REQ) == 3.0
+
+    @pytest.mark.parametrize(
+        "user_id,estimate,key", [(None, 1.0, REQ), (7, 1.0, None), (7, 1.0, "nope"), (7, 0, REQ)]
+    )
+    def test_no_user_key_or_estimate_holds_nothing(self, flags, user_id, estimate, key):
+        flags()
+        with patch("src.db.inference_discount.hold_discount") as hold:
+            assert discount.discount_aware_credits(user_id, 3.0, estimate, key) == 3.0
+        hold.assert_not_called()
+
+    def test_precheck_passes_the_billing_ref_through(self, flags):
+        from src.services.billing import simple_metering
+
+        flags()
+        user = {"id": 7, "subscription_allowance": 0, "purchased_credits": 0.01}
+        with (
+            patch.object(simple_metering.users_module, "get_user", return_value=user),
+            patch("src.db.inference_discount.hold_discount", return_value=Decimal("0.99")) as h,
         ):
-            assert discount.discount_aware_credits(7, credits) == pytest.approx(expected)
+            assert asyncio.run(simple_metering.precheck_credits("k", 1.0, REQ)) is user
+        assert h.call_args.args[3] == REQ
 
-    def test_lookup_error_is_identity(self, flags):
-        flags()
-        with patch("src.db.inference_discount.get_balance", side_effect=RuntimeError("x")):
-            assert discount.discount_aware_credits(7, 3.0) == 3.0
+    def test_precheck_without_billing_ref_counts_credits_only(self, flags):
+        from fastapi import HTTPException
 
-    def test_non_int_user_is_identity(self, flags):
+        from src.services.billing import simple_metering
+
         flags()
-        with patch("src.db.inference_discount.get_balance") as balance:
-            assert discount.discount_aware_credits(None, 3.0) == 3.0
-        balance.assert_not_called()
+        user = {"id": 7, "subscription_allowance": 0, "purchased_credits": 0.01}
+        with (
+            patch.object(simple_metering.users_module, "get_user", return_value=user),
+            patch("src.db.inference_discount.hold_discount") as h,
+        ):
+            with pytest.raises(HTTPException) as exc:
+                asyncio.run(simple_metering.precheck_credits("k", 1.0))
+        assert exc.value.status_code == 402
+        h.assert_not_called()
 
 
 class TestRefund:
