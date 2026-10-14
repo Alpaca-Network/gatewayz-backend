@@ -238,6 +238,8 @@ def db(monkeypatch):
         monkeypatch.setattr(attribution, name, getattr(fake, name))
     monkeypatch.setattr(rewards, "get_wallet", fake.get_wallet)
     monkeypatch.setattr(rewards, "get_user_by_id", fake.get_user_by_id)
+    # Every account here has attested (US / Canada block, eligibility.py).
+    monkeypatch.setattr(rewards, "account_eligible", lambda user_id: True)
     cfg = attribution.Config
     monkeypatch.setattr(cfg, "DELEGATED_STAKING_ENABLED", True)
     monkeypatch.setattr(cfg, "DELEGATION_PAYOUT_MODEL", "reward_share")

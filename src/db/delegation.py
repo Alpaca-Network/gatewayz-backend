@@ -9,7 +9,9 @@ says so and returns None instead, so the caller can fail closed:
 * the reconciliation sums return None (not 0) on a failed read -- a 0 for
   "credits granted" would make an overspent asset look healthy;
 * get_controls returns None on a failed read -- the accrual treats that as
-  "every asset paused", never as "nothing paused".
+  "every asset paused", never as "nothing paused";
+* get_eligibility returns None on a failed read -- nothing is granted to an
+  account whose eligibility (US / Canada block) cannot be read.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ _ACCRUALS_TABLE = "delegation_accruals"
 _REVENUE_TABLE = "delegation_revenue"
 _CONTROLS_TABLE = "delegation_controls"
 _ATTRIBUTIONS_TABLE = "delegation_reward_attributions"
+_ELIGIBILITY_TABLE = "delegation_eligibility"
 
 ASSETS: tuple[str, ...] = ("eth", "ada")
 
@@ -891,3 +894,78 @@ def sum_attributed_discount(
     except Exception as e:
         logger.warning(f"delegation_reward_attributions sum failed ({asset}): {e}")
         return None
+
+
+# -- eligibility (US / Canada block) ---------------------------------------------------
+
+
+def get_eligibility(user_id: int) -> dict[str, Any] | None:
+    """The account's delegation_eligibility row; {} when it has none. None on a
+    failed read -- callers treat that as "not eligible" and never grant on it."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_ELIGIBILITY_TABLE).select("*").eq("user_id", user_id).limit(1).execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else {}
+    except Exception as e:
+        logger.warning(f"delegation_eligibility lookup failed: {e}")
+        return None
+
+
+def record_attestation(
+    user_id: int, attestation_version: str, country: str | None
+) -> dict[str, Any] | None:
+    """Mark the account eligible after it attested. Never clears a
+    'restricted' row: that one is returned as-is. None on any failure."""
+    existing = get_eligibility(user_id)
+    if existing is None:
+        return None
+    if existing.get("status") == "restricted":
+        return existing
+    now = datetime.now(UTC).isoformat()
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_ELIGIBILITY_TABLE)
+            .upsert(
+                {
+                    "user_id": user_id,
+                    "status": "eligible",
+                    "attested_at": now,
+                    "attestation_version": attestation_version,
+                    "country": country,
+                    "updated_at": now,
+                },
+                on_conflict="user_id",
+            )
+            .execute()
+        )
+        rows = result.data or []
+        return rows[0] if rows else None
+    except Exception as e:
+        logger.warning(f"delegation_eligibility attestation write failed: {e}")
+        return None
+
+
+def mark_restricted(user_id: int, country: str | None, reason: str) -> bool:
+    """Mark the account restricted (sticky). Keeps any earlier attestation
+    fields for the record."""
+    now = datetime.now(UTC).isoformat()
+    try:
+        client = get_supabase_client()
+        client.table(_ELIGIBILITY_TABLE).upsert(
+            {
+                "user_id": user_id,
+                "status": "restricted",
+                "country": country,
+                "restricted_reason": reason[:200],
+                "updated_at": now,
+            },
+            on_conflict="user_id",
+        ).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"delegation_eligibility restrict write failed: {e}")
+        return False
