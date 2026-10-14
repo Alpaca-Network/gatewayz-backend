@@ -45,6 +45,12 @@ class RunDelegationRequest(BaseModel):
     reward_date: date | None = None
 
 
+class DelegationEligibilityRequest(BaseModel):
+    # "I am not a resident or citizen of the United States or Canada." Must be
+    # true; anything else is refused with 451 attestation_required.
+    not_us_ca_person: bool = False
+
+
 class ResumeDelegationRequest(BaseModel):
     asset: DelegationAsset
 

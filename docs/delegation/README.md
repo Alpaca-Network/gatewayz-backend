@@ -161,6 +161,8 @@ stake. `tests/routes/test_delegation.py::TestGuardrail` greps the route module.
 | `KOIOS_BASE_URL` | `https://api.koios.rest/api/v1` | |
 | `KOIOS_API_KEY` | unset | Secret; sent as a Bearer header only, in the secrets registry |
 | `DELEGATION_ALLOW_CARDANO_TESTNET` | `false` | Never on in prod |
+| `DELEGATION_RESTRICTED_COUNTRIES` | `US,CA` | Counsel cleared everywhere except the US and Canada (2026-10-14). See "US / Canada block" below |
+| `DELEGATION_COUNTRY_HEADER` | unset | Trusted country header (e.g. `cf-ipcountry`); set only behind an edge that always sets it. Unset → attestation only |
 | `DELEGATION_INFERENCE_MARGIN` | `0.20` | m |
 | `DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ETH` / `_ADA` | `0` | R, suggestion only |
 | `DELEGATION_DAILY_CAP_CREDITS` | `5` | Per account per day |
@@ -218,3 +220,26 @@ Mutations are superadmin-only and audited. `/admin/status` has a `delegation` bl
   not aligned — reconciliation is cumulative for that reason.
 - The accrual's per-account cap reads the account's *current* wallets; a wallet
   unlinked mid-day is capped on its own.
+
+## US / Canada block
+
+Counsel cleared the program everywhere except the US and Canada (2026-10-14).
+`src/services/delegation/eligibility.py`:
+
+- **Attestation.** Starting to delegate needs `not_us_ca_person: true`
+  ("I am not a resident or citizen of the United States or Canada"): on
+  `POST /auth/wallet/cardano/nonce` and `/link`, or once via
+  `POST /delegation/eligibility` (ETH: deposits go straight to the vault, so
+  this is the only step that can carry it). Stored in `delegation_eligibility`
+  and audited (`delegation.eligibility.attested`, with the request IP).
+- **Country header**, only if `DELEGATION_COUNTRY_HEADER` is set. api.gatewayz.ai
+  is served straight from Railway's edge, which sets no country header, so it
+  is off by default. A restricted country marks the account `restricted` for
+  good (only a manual DB update clears it).
+- **Refusals** are HTTP 451 with `error.type` `region_restricted` or
+  `attestation_required`.
+- **Payouts.** v2 accruals and v3 discount attributions are granted only to an
+  eligible account (`rewards._payee_verified`); anything else stays pending.
+- **Never gated:** exits, unlinking, `GET /delegation/rewards` (which now
+  carries `eligibility`), and spending a discount balance already granted.
+

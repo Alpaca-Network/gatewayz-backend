@@ -341,6 +341,22 @@ class Config:
     DELEGATION_ALLOW_CARDANO_TESTNET = _get_env_var(
         "DELEGATION_ALLOW_CARDANO_TESTNET", "false"
     ).lower() in {"1", "true", "yes"}
+    # Counsel cleared delegated staking everywhere except the US and Canada
+    # (2026-10-14). ISO 3166-1 alpha-2, comma-separated. An account seen in or
+    # attesting from one of these cannot start delegating (link a stake
+    # address, attest) and is granted nothing new; exits, reads and spending
+    # an existing discount balance are never blocked.
+    DELEGATION_RESTRICTED_COUNTRIES = frozenset(
+        c.strip().upper()
+        for c in (_get_env_var("DELEGATION_RESTRICTED_COUNTRIES", "US,CA") or "").split(",")
+        if c.strip()
+    )
+    # Request header carrying the caller's country (e.g. cf-ipcountry). Unset
+    # by default: api.gatewayz.ai is served straight from Railway's edge, which
+    # sets no country header, and a header the edge does not overwrite is
+    # whatever the client sent. Set it only behind an edge that always sets it.
+    # Unset -> the self-attestation is the only check.
+    DELEGATION_COUNTRY_HEADER = (_get_env_var("DELEGATION_COUNTRY_HEADER", "") or "").lower()
     # m in A = R / (1 - m): our gross margin on inference. A credit costs us
     # (1 - m) dollars, which is what reconciliation charges against revenue.
     DELEGATION_INFERENCE_MARGIN = _decimal_env("DELEGATION_INFERENCE_MARGIN", "0.20")
