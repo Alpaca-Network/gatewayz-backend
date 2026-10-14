@@ -49,6 +49,11 @@ def cardano_pool_id() -> str | None:
     return pool if pool.startswith("pool1") else None
 
 
+def cardano_network() -> str:
+    """ "preprod" only on a testnet-demo deployment, else "mainnet"."""
+    return "preprod" if Config.DELEGATION_ALLOW_CARDANO_TESTNET else "mainnet"
+
+
 def ada_configured() -> bool:
     return cardano_pool_id() is not None
 
