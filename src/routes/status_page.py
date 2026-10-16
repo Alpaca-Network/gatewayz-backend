@@ -550,6 +550,59 @@ async def get_models_status(
         raise HTTPException(status_code=500, detail="Failed to retrieve model status") from e
 
 
+# Statuses under which a model is currently being served. "unknown" (stale
+# measurement) is deliberately NOT in this set: unmeasured is not up.
+_SERVING_STATUSES = frozenset({"operational", "degraded"})
+
+
+@router.get("/model", response_model=dict[str, Any])
+async def get_model_availability(
+    id: str = Query(  # noqa: A002 - public query parameter name
+        ...,
+        min_length=1,
+        max_length=200,
+        description="Full model id exactly as in GET /v1/models, e.g. anthropic/claude-fable-5",
+    ),
+):
+    """
+    Per-model availability for ONE model id, across every provider serving it.
+
+    Public endpoint - no authentication required.
+
+    Takes the id as a query parameter because model ids contain a slash: the
+    path form ``/models/{provider}/{model_id}`` splits ``anthropic/claude-x``
+    into a provider and a bare model and then matches nothing, since
+    ``model_status_current.model`` stores the full id. ``available`` is true
+    when at least one provider row is currently measured as serving.
+    """
+    try:
+        response = get_db().table("model_status_current").select("*").eq("model", id).execute()
+        rows = response.data or []
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": {
+                        "message": f"Model '{id}' is not monitored. See GET /v1/status/models.",
+                        "type": "invalid_request_error",
+                        "code": "model_not_monitored",
+                    }
+                },
+            )
+        now = datetime.now(UTC)
+        providers = [_format_model_status(row, now) for row in rows]
+        return {
+            "model_id": id,
+            "available": any(p.get("status") in _SERVING_STATUSES for p in providers),
+            "providers": providers,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get model availability: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve model status") from e
+
+
 @router.get("/models/{provider}/{model_id}", response_model=dict[str, Any])
 async def get_model_status(provider: str, model_id: str, gateway: str | None = Query(None)):
     """
