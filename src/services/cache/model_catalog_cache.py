@@ -1757,14 +1757,18 @@ def get_cached_unique_models() -> list[dict[str, Any]] | None:
         try:
             from src.db.models_catalog_db import (
                 get_all_unique_models_for_catalog,
-                transform_db_models_batch,
+                transform_unique_models_batch,
             )
 
             # Fetch unique models from database
             db_models = get_all_unique_models_for_catalog(include_inactive=False)
 
-            # Transform to API format
-            api_models = transform_db_models_batch(db_models)
+            # Transform to API format. These rows carry a list of provider
+            # mappings, so they need the unique transform — the flat
+            # transform_db_models_batch failed on every row and cached
+            # placeholders keyed by display name. This is also the shape
+            # services/models.py writes to the same cache key.
+            api_models = transform_unique_models_batch(db_models)
 
             # Cache in both Redis and local memory
             cache.set_unique_models(api_models, ttl=ModelCatalogCache.TTL_UNIQUE)
