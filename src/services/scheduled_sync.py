@@ -990,7 +990,9 @@ async def run_scheduled_gpu_spot_check():
             stats["failed"],
             stats["skipped"],
         )
-        record_job_run(
+        # Synchronous Redis write: keep it off the event loop.
+        await asyncio.to_thread(
+            record_job_run,
             "gpu_spot_check",
             ok=True,
             summary={**stats, "interval_minutes": Config.COMMUNITY_SPOTCHECK_INTERVAL_MINUTES},
@@ -999,7 +1001,8 @@ async def run_scheduled_gpu_spot_check():
     except Exception as e:
         _last_gpu_spotcheck_status["last_ok"] = False
         logger.warning("GPU spot-check verification failed (non-fatal): %s", e)
-        record_job_run(
+        await asyncio.to_thread(
+            record_job_run,
             "gpu_spot_check",
             ok=False,
             error=str(e),
