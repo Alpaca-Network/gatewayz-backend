@@ -265,8 +265,10 @@ class PrometheusRemoteWriter:
             return False
 
         try:
-            # Serialize and compress metrics
-            compressed_data = _serialize_metrics_to_protobuf(REGISTRY)
+            # Serialize and compress metrics. Walking the whole registry and
+            # snappy-compressing it is CPU work that ran on the event loop
+            # every push interval; do it in a thread.
+            compressed_data = await asyncio.to_thread(_serialize_metrics_to_protobuf, REGISTRY)
 
             # Send to remote write endpoint
             response = await self.client.post(
