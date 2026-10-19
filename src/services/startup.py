@@ -756,6 +756,16 @@ async def lifespan(app):
         logger.warning(f"Failed to start WAYZ staking sync scheduler: {e}")
         # Don't fail startup if WAYZ staking sync fails to start
 
+    # Start daily usage anchoring on Avalanche C-Chain (docs/usage-anchor/README.md)
+    try:
+        from src.services.scheduled_sync import start_usage_anchor_scheduler
+
+        start_usage_anchor_scheduler()
+        logger.info("Usage anchor service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start usage anchor scheduler: {e}")
+        # Don't fail startup if usage anchoring fails to start
+
     # Start daily staking rewards job (gatewayz-backend staking rewards --
     # boss's rule: WAYZ stakers are paid in inference credits)
     try:
@@ -1052,6 +1062,15 @@ async def lifespan(app):
         logger.info("WAYZ staking sync service stopped")
     except Exception as e:
         logger.warning(f"WAYZ staking sync shutdown warning: {e}")
+
+    # Stop usage anchoring
+    try:
+        from src.services.scheduled_sync import stop_usage_anchor_scheduler
+
+        stop_usage_anchor_scheduler()
+        logger.info("Usage anchor service stopped")
+    except Exception as e:
+        logger.warning(f"Usage anchor shutdown warning: {e}")
 
     # Stop daily staking rewards job
     try:

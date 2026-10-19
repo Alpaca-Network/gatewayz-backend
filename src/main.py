@@ -591,6 +591,10 @@ def create_app() -> FastAPI:
             "admin_emission",
             "Admin Emission Rewards",
         ),  # Chutes-style WAYZ emission rewards admin API (gatewayz-backend tokenomics)
+        (
+            "usage_anchors",
+            "Usage Anchoring",
+        ),  # Daily usage Merkle roots on Avalanche C-Chain (docs/usage-anchor/README.md)
     ]
 
     loaded_count = 0
