@@ -58,8 +58,9 @@ def get_fetch_models_function(slug: str) -> Callable | None:
 
     Lookup order:
     1. Module-level cache (if fresh).
-    2. DB fields via gateway registry (``fetch_module_path`` / ``fetch_function_name``).
-    3. Hardcoded ``_FALLBACK_FETCH_FUNCTIONS`` fallback.
+    2. Hardcoded ``_FALLBACK_FETCH_FUNCTIONS`` (in-code map, source of truth).
+    3. DB fields via gateway registry (``fetch_module_path`` / ``fetch_function_name``),
+       for slugs the in-code map does not cover.
     """
     now = time.monotonic()
     cached = _fetch_models_cache.get(slug)
@@ -68,10 +69,14 @@ def get_fetch_models_function(slug: str) -> Callable | None:
         if (now - ts) < _LOADER_CACHE_TTL:
             return func
 
-    func = _resolve_from_registry(slug)
+    # The in-code map wins for every slug it covers. The DB paths were seeded
+    # before the provider modules moved under src/services/providers/, so most
+    # of them (zai -> src.services.zai_client, groq, deepinfra, ...) no longer
+    # import and every sync logged an ImportError before falling back anyway.
+    func = _fallback_fetch_functions().get(slug)
 
     if func is None:
-        func = _fallback_fetch_functions().get(slug)
+        func = _resolve_from_registry(slug)
 
     _fetch_models_cache[slug] = (func, now)
     return func
