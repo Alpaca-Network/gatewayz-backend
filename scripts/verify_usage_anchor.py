@@ -6,7 +6,9 @@ can audit a proof without trusting Gatewayz code. Given the JSON returned by
 GET /v1/anchors/proof/{ledger_id}, it
 
   1. hashes the leaf exactly as published (RFC 6962: SHA-256(0x00 || leaf)),
-  2. walks the audit path to a root (RFC 9162 section 2.1.3.2),
+  2. walks the audit path to a root (RFC 9162 section 2.1.3.2), using the
+     `tree_size` from the proof JSON -- the chain stores only the root, never
+     the day's leaf count,
   3. checks that root against the proof's `root`, and
   4. (unless --offline) calls UsageAnchor.rootOf(day) over JSON-RPC and
      checks the chain holds the same root.
@@ -92,9 +94,14 @@ def verify(proof_doc: dict, rpc_url: str | None) -> tuple[bool, list[str]]:
     leaf = proof_doc["leaf"].encode("utf-8")
     path = [_hex(p) for p in proof_doc["proof"]]
     claimed = _hex(proof_doc["root"])
-    computed = root_from_proof(
-        int(proof_doc["leaf_index"]), int(proof_doc["tree_size"]), leaf, path
-    )
+    try:
+        computed = root_from_proof(
+            int(proof_doc["leaf_index"]), int(proof_doc["tree_size"]), leaf, path
+        )
+    except ValueError as e:
+        # The path doesn't fit the claimed tree_size: not a valid proof.
+        lines.append(f"leaf -> root      MISMATCH  ({e})")
+        return False, lines
     ok = computed == claimed
     lines.append(f"leaf -> root      {'OK' if ok else 'MISMATCH'}  0x{computed.hex()}")
     if not ok:

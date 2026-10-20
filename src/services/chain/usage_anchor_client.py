@@ -1,8 +1,9 @@
 """Signing web3.py client for the UsageAnchor contract on Avalanche C-Chain
 (docs/usage-anchor/README.md).
 
-Writes one Merkle root per UTC day with `anchor(day, root, leafCount)` and
-reads it back with `rootOf(day)`. The contract only accepts calls from its
+Writes one Merkle root per UTC day with `anchor(day, root)` and reads it
+back with `rootOf(day)`. Only the root goes on-chain -- the day's leaf
+(request) count is deliberately not published. The contract only accepts calls from its
 immutable `anchorer`, refuses a second root for the same day, and refuses an
 empty root -- so a bug here can at worst fail to anchor, never rewrite an
 anchored day.
@@ -48,7 +49,6 @@ USAGE_ANCHOR_ABI = [
         "inputs": [
             {"internalType": "uint64", "name": "day", "type": "uint64"},
             {"internalType": "bytes32", "name": "root", "type": "bytes32"},
-            {"internalType": "uint64", "name": "leafCount", "type": "uint64"},
         ],
         "name": "anchor",
         "outputs": [{"internalType": "uint64", "name": "seq", "type": "uint64"}],
@@ -63,16 +63,23 @@ USAGE_ANCHOR_ABI = [
         "type": "function",
     },
     {
-        "inputs": [{"internalType": "uint64", "name": "day", "type": "uint64"}],
-        "name": "leafCountOf",
+        "inputs": [],
+        "name": "anchorer",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "latestDay",
         "outputs": [{"internalType": "uint64", "name": "", "type": "uint64"}],
         "stateMutability": "view",
         "type": "function",
     },
     {
         "inputs": [],
-        "name": "anchorer",
-        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "name": "anchorCount",
+        "outputs": [{"internalType": "uint64", "name": "", "type": "uint64"}],
         "stateMutability": "view",
         "type": "function",
     },
@@ -82,7 +89,6 @@ USAGE_ANCHOR_ABI = [
             {"indexed": True, "internalType": "uint64", "name": "seq", "type": "uint64"},
             {"indexed": True, "internalType": "uint64", "name": "day", "type": "uint64"},
             {"indexed": False, "internalType": "bytes32", "name": "root", "type": "bytes32"},
-            {"indexed": False, "internalType": "uint64", "name": "leafCount", "type": "uint64"},
         ],
         "name": "Anchored",
         "type": "event",
@@ -120,7 +126,6 @@ class SignedAnchor:
     gas: int
     day: int
     root: bytes
-    leaf_count: int
 
 
 def explorer_base(chain_id: int) -> str | None:
@@ -172,8 +177,11 @@ class UsageAnchorReader:
         root = bytes(self._contract.functions.rootOf(day).call())
         return None if root == _ZERO_ROOT else root
 
-    def leaf_count_of(self, day: int) -> int:
-        return int(self._contract.functions.leafCountOf(day).call())
+    def latest_day(self) -> int:
+        return int(self._contract.functions.latestDay().call())
+
+    def anchor_count(self) -> int:
+        return int(self._contract.functions.anchorCount().call())
 
     def anchorer(self) -> str:
         return Web3.to_checksum_address(self._contract.functions.anchorer().call())
@@ -266,10 +274,10 @@ class UsageAnchorClient(UsageAnchorReader):
                 f"signer {self._account.address} is not the contract's anchorer {anchorer}"
             )
 
-    def _sign(self, day: int, root: bytes, leaf_count: int):
+    def _sign(self, day: int, root: bytes):
         sender = self._account.address
         nonce = self._w3.eth.get_transaction_count(sender, "pending")
-        call = self._contract.functions.anchor(day, root, leaf_count)
+        call = self._contract.functions.anchor(day, root)
         estimate = int(call.estimate_gas({"from": sender}))
         gas = gas_limit_with_headroom(estimate)
         latest = self._w3.eth.get_block("latest")
@@ -295,27 +303,23 @@ class UsageAnchorClient(UsageAnchorReader):
             gas=gas,
             day=day,
             root=root,
-            leaf_count=leaf_count,
         )
 
     def send_anchor(
         self,
         day: int,
         root: bytes,
-        leaf_count: int,
         record: Callable[[SignedAnchor], bool],
     ) -> SignedAnchor:
-        """Check readiness, sign, record, then broadcast `anchor(day, root,
-        leafCount)`. `record(signed)` must durably persist the tx hash and
+        """Check readiness, sign, record, then broadcast `anchor(day, root)`.
+        `record(signed)` must durably persist the tx hash and
         nonce; returning False aborts without sending."""
         if len(root) != 32 or root == _ZERO_ROOT:
             raise AnchorNotSentError("root must be 32 non-zero bytes")
-        if leaf_count <= 0:
-            raise AnchorNotSentError("leaf_count must be positive")
         with _send_lock:
             try:
                 self.check_ready()
-                signed, info = self._sign(day, root, leaf_count)
+                signed, info = self._sign(day, root)
             except AnchorNotSentError:
                 raise
             except Exception as e:
@@ -331,9 +335,8 @@ class UsageAnchorClient(UsageAnchorReader):
             except Exception as e:
                 raise AnchorBroadcastError(info.tx_hash, info.nonce, e) from e
             logger.info(
-                "Usage anchor broadcast: day=%s leaves=%s tx=%s nonce=%s",
+                "Usage anchor broadcast: day=%s tx=%s nonce=%s",
                 day,
-                leaf_count,
                 info.tx_hash,
                 info.nonce,
             )

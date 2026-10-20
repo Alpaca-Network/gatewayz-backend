@@ -66,12 +66,18 @@ def test_well_known_lists_anchors_with_explorer_links(mock_list, configured):
     assert mock_list.call_args.kwargs["statuses"] == ["pending", "confirmed"]
     text = str(body).lower()
     assert "partner" not in text and "endorse" not in text
+    # Request volume is never disclosed publicly.
+    for anchor in body["anchors"]:
+        assert "leaf_count" not in anchor and "tree_size" not in anchor
+    assert "leaf_count" not in body
 
 
 @patch("src.routes.usage_anchors.db.list_anchors", return_value=[_ROW])
 def test_list_anchors_clamps_limit(mock_list, configured):
-    assert client.get("/v1/anchors?limit=100000").status_code == 200
+    response = client.get("/v1/anchors?limit=100000")
+    assert response.status_code == 200
     assert mock_list.call_args.kwargs["limit"] == 366
+    assert "leaf_count" not in response.text and "tree_size" not in response.text
 
 
 @patch("src.routes.usage_anchors.db.get_anchor", return_value=_ROW)
@@ -79,6 +85,7 @@ def test_get_anchor_for_day(mock_get, configured):
     response = client.get("/v1/anchors/2026-10-18")
     assert response.status_code == 200
     assert response.json()["anchor"]["root"] == _ROW["root"]
+    assert "leaf_count" not in response.text and "tree_size" not in response.text
 
 
 @patch("src.routes.usage_anchors.db.get_anchor", return_value={**_ROW, "status": "failed"})

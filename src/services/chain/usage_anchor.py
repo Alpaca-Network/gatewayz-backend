@@ -6,6 +6,11 @@ credit_transactions becomes one salted leaf of an RFC 6962 Merkle tree
 UsageAnchor contract. A user can later fetch an inclusion proof for one of
 their own rows and check it against the on-chain root.
 
+Daily request volume is not disclosed: the leaf count is stored in
+usage_anchors but is neither sent on-chain nor returned by public routes.
+Only a user's own inclusion proof carries tree_size, which RFC 6962
+verification needs.
+
 Leaf format v1 -- canonical JSON (sorted keys, no whitespace, UTF-8) of:
 
     {"v":1,"id":"<ledger id>","ts":"<created_at, UTC, microseconds, Z>",
@@ -78,8 +83,9 @@ MERKLE_SPEC = (
     "below n. leaf_bytes = UTF-8 canonical JSON (sorted keys, separators ',' "
     "and ':') of {v, id, ts, model, tokens_in, tokens_out, cost, salt}; leaves "
     "ordered by (ts, id); one tree per UTC day; only the root is published "
-    "on-chain via UsageAnchor.anchor(day, root, leafCount), day = UTC days "
-    "since 1970-01-01."
+    "on-chain via UsageAnchor.anchor(day, root), day = UTC days "
+    "since 1970-01-01. The leaf count (request volume) is not published; an "
+    "inclusion proof carries its own tree_size."
 )
 
 
@@ -353,7 +359,7 @@ def _run_usage_anchor_locked(
         return True
 
     try:
-        signed = client.send_anchor(idx, tree.root, tree.leaf_count, _record)
+        signed = client.send_anchor(idx, tree.root, _record)
     except AnchorNotSentError as e:
         # Nothing reached the network; the sweep retries unanchored days.
         logger.error("Usage anchor for %s not sent: %s", day.isoformat(), e)
@@ -484,12 +490,13 @@ def _sweep_locked(client: UsageAnchorClient, today: date, now: datetime | None) 
 
 
 def anchor_view(row: dict[str, Any]) -> dict[str, Any]:
+    """Public view of one anchor. Deliberately omits leaf_count: daily
+    request volume is not disclosed (only the root is public)."""
     chain_id = int(row["chain_id"])
     return {
         "day": str(row["day"]),
         "day_index": int(row["day_index"]),
         "root": row.get("root"),
-        "leaf_count": row.get("leaf_count"),
         "status": row.get("status"),
         "tx_hash": row.get("tx_hash"),
         "block_number": row.get("block_number"),

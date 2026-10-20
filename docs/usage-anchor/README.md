@@ -7,7 +7,11 @@ proof for their own records and check it against the chain without trusting
 Gatewayz.
 
 - Contract: `UsageAnchor.sol` in `Alpaca-Network/gatewayz-protocol`
-  (append-only; one root per day; only the immutable `anchorer` can write).
+  (append-only; one root per day; only the immutable `anchorer` can write;
+  `anchor(uint64 day, bytes32 root)`, selector `0xa6855208`; event
+  `Anchored(uint64 indexed seq, uint64 indexed day, bytes32 root)`, topic0
+  `0xb1c419124cb1add6c4d8f6805fcca730b17c21a51f24f6fdcb437d6866b3d9c6`;
+  views `rootOf`, `anchorer`, `latestDay`, `anchorCount`).
 - Job: `src/services/chain/usage_anchor.py`, scheduled by
   `src/services/scheduled_sync.py::start_usage_anchor_scheduler`.
 - Chain client: `src/services/chain/usage_anchor_client.py`.
@@ -60,11 +64,16 @@ Leaves are ordered by `(created_at, id)`. One tree per UTC day.
 RFC 6962 over SHA-256: `leaf = SHA-256(0x00 || leaf_bytes)`,
 `node = SHA-256(0x01 || left || right)`, split at the largest power of two
 below `n`. Proofs are RFC 6962 audit paths, verified per RFC 9162 §2.1.3.2.
-The root goes on-chain as `UsageAnchor.anchor(day, root, leafCount)` with
+The root goes on-chain as `UsageAnchor.anchor(day, root)` with
 `day` = UTC days since 1970-01-01. A day with no usage is not anchored.
 
 ## Privacy rule
 
+- **Only the root is public. Request volume is not disclosed.** The day's
+  leaf count is kept in `usage_anchors.leaf_count` for operations but is
+  never sent on-chain (the contract has no count field) and never returned
+  by the public routes. The only place a tree size appears is in a user's
+  own inclusion proof (`tree_size`), because RFC 6962 verification needs it.
 - **Only roots go on-chain.** Leaves never leave the database, except that a
   user can fetch the leaf (with its salt) for their **own** record through
   the proof endpoint.
@@ -100,10 +109,10 @@ The root goes on-chain as `UsageAnchor.anchor(day, root, leafCount)` with
 
 | Route | Auth | What |
 |---|---|---|
-| `GET /.well-known/anchors.json` | none | chain, contract, anchorer, spec, latest 30 anchors with Snowtrace links |
+| `GET /.well-known/anchors.json` | none | chain, contract, anchorer, spec, latest 30 anchors (day, root, tx, Snowtrace link; no counts) |
 | `GET /v1/anchors?limit=` | none | anchors (max 366) |
 | `GET /v1/anchors/{YYYY-MM-DD}` | none | one day |
-| `GET /v1/anchors/proof/{ledger_id}` | API key | inclusion proof for the caller's own record (404 for anyone else's) |
+| `GET /v1/anchors/proof/{ledger_id}` | API key | inclusion proof for the caller's own record, incl. `tree_size` (404 for anyone else's) |
 | `POST /admin/usage-anchor/run` `{"day": "YYYY-MM-DD"}` | superadmin, audited | anchor a finished day now (backfill / demo) |
 
 Verify a proof:
@@ -143,7 +152,7 @@ git, never in chat.
 
 ### Funding
 
-One `anchor()` call per day, roughly 50–60k gas. Fund the signer with a
+One `anchor()` call per day (gas is estimated per call, plus 25% headroom). Fund the signer with a
 small amount of AVAX (Fuji: faucet; mainnet: a small top-up) and watch its
 balance. An unfunded signer leaves days `unanchored` and the sweep retries.
 

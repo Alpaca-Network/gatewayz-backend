@@ -59,9 +59,32 @@ def _client(chain_id=43113, anchorer=None, onchain_chain_id=None):
 
 def test_abi_has_the_fixed_interface(sb):
     names = {e["name"] for e in USAGE_ANCHOR_ABI}
-    assert names == {"anchor", "rootOf", "leafCountOf", "anchorer", "Anchored"}
+    assert names == {"anchor", "rootOf", "anchorer", "latestDay", "anchorCount", "Anchored"}
     anchor = next(e for e in USAGE_ANCHOR_ABI if e["name"] == "anchor")
-    assert [i["type"] for i in anchor["inputs"]] == ["uint64", "bytes32", "uint64"]
+    assert [i["type"] for i in anchor["inputs"]] == ["uint64", "bytes32"]
+    event = next(e for e in USAGE_ANCHOR_ABI if e["name"] == "Anchored")
+    assert [i["type"] for i in event["inputs"]] == ["uint64", "uint64", "bytes32"]
+    # No leaf/request count anywhere in the on-chain interface.
+    assert "count" not in str(anchor).lower() and "leafcount" not in str(event).lower()
+
+
+def test_selectors_match_the_deployed_contract(sb):
+    # anchor(uint64,bytes32) and Anchored(uint64,uint64,bytes32), cross-checked
+    # against `cast sig` / `cast keccak` on the gatewayz-protocol side.
+    anchor = next(e for e in USAGE_ANCHOR_ABI if e["name"] == "anchor")
+    signature = f"anchor({','.join(i['type'] for i in anchor['inputs'])})"
+    assert signature == "anchor(uint64,bytes32)"
+    assert Web3.keccak(text=signature)[:4].to_0x_hex() == "0xa6855208"
+    assert Web3.keccak(text="Anchored(uint64,uint64,bytes32)").to_0x_hex() == (
+        "0xb1c419124cb1add6c4d8f6805fcca730b17c21a51f24f6fdcb437d6866b3d9c6"
+    )
+
+
+def test_latest_day_and_anchor_count_views(sb):
+    client, _, contract, _ = _client()
+    contract.functions.latestDay.return_value.call.return_value = 20379
+    contract.functions.anchorCount.return_value.call.return_value = 4
+    assert client.latest_day() == 20379 and client.anchor_count() == 4
 
 
 def test_explorer_base_per_chain(sb):
@@ -85,10 +108,10 @@ def test_send_records_before_broadcast_and_signs_eip1559(sb):
         return True
 
     w3.eth.send_raw_transaction.side_effect = lambda raw: order.append(("send", raw))
-    info = client.send_anchor(20379, ROOT, 3, record)
+    info = client.send_anchor(20379, ROOT, record)
     assert [o[0] for o in order] == ["record", "send"]
     assert info.nonce == 7 and info.gas == 50_000 and info.day == 20379
-    contract.functions.anchor.assert_called_with(20379, ROOT, 3)
+    contract.functions.anchor.assert_called_with(20379, ROOT)
     params = contract.functions.anchor.return_value.build_transaction.call_args.args[0]
     assert params["chainId"] == 43113 and params["type"] == 2
     assert params["maxFeePerGas"] == 2 * 25_000_000_000 + 1_000_000_000
@@ -99,7 +122,7 @@ def test_send_records_before_broadcast_and_signs_eip1559(sb):
 def test_record_false_aborts_without_sending(sb):
     client, w3, _, _ = _client()
     with pytest.raises(AnchorNotSentError):
-        client.send_anchor(1, ROOT, 1, lambda s: False)
+        client.send_anchor(1, ROOT, lambda s: False)
     assert not w3.eth.send_raw_transaction.called
 
 
@@ -107,21 +130,21 @@ def test_broadcast_failure_is_uncertain_not_unsent(sb):
     client, w3, _, _ = _client()
     w3.eth.send_raw_transaction.side_effect = RuntimeError("connection reset")
     with pytest.raises(AnchorBroadcastError) as exc:
-        client.send_anchor(1, ROOT, 1, lambda s: True)
+        client.send_anchor(1, ROOT, lambda s: True)
     assert exc.value.tx_hash.startswith("0x") and exc.value.nonce == 7
 
 
 def test_wrong_chain_refuses_before_signing(sb):
     client, w3, _, _ = _client(chain_id=43114, onchain_chain_id=43113)
     with pytest.raises(AnchorNotSentError, match="chain id"):
-        client.send_anchor(1, ROOT, 1, lambda s: True)
+        client.send_anchor(1, ROOT, lambda s: True)
     assert not w3.eth.send_raw_transaction.called
 
 
 def test_signer_not_anchorer_refuses(sb):
     client, w3, _, _ = _client(anchorer="0x00000000000000000000000000000000000000bb")
     with pytest.raises(AnchorNotSentError, match="not the contract's anchorer"):
-        client.send_anchor(1, ROOT, 1, lambda s: True)
+        client.send_anchor(1, ROOT, lambda s: True)
 
 
 def test_estimate_revert_is_unsent(sb):
@@ -130,14 +153,14 @@ def test_estimate_revert_is_unsent(sb):
         "execution reverted: AlreadyAnchored"
     )
     with pytest.raises(AnchorNotSentError, match="AlreadyAnchored"):
-        client.send_anchor(1, ROOT, 1, lambda s: True)
+        client.send_anchor(1, ROOT, lambda s: True)
 
 
-@pytest.mark.parametrize("root,count", [(b"\x00" * 32, 1), (b"\x01" * 31, 1), (ROOT, 0)])
-def test_invalid_root_or_count_refused_locally(sb, root, count):
+@pytest.mark.parametrize("root", [b"\x00" * 32, b"\x01" * 31])
+def test_invalid_root_refused_locally(sb, root):
     client, w3, _, _ = _client()
     with pytest.raises(AnchorNotSentError):
-        client.send_anchor(1, root, count, lambda s: True)
+        client.send_anchor(1, root, lambda s: True)
     assert not w3.eth.get_transaction_count.called
 
 

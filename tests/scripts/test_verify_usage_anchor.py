@@ -91,3 +91,14 @@ def test_main_exit_codes(sb, tmp_path):
     junk = tmp_path / "junk.json"
     junk.write_text("not json")
     assert main([str(junk), "--offline"]) == 2
+
+
+def test_tree_size_comes_from_the_proof_not_the_chain(sb):
+    # The contract stores only the root; a wrong tree_size in the proof JSON
+    # must fail the Merkle check before any RPC call.
+    doc, root = _proof_doc(5, 4)
+    doc["tree_size"] = 6
+    with patch("scripts.verify_usage_anchor.fetch_onchain_root", return_value=root) as fetch:
+        ok, _ = verify(doc, "http://rpc")
+    assert not ok
+    fetch.assert_not_called()

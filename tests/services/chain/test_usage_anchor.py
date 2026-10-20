@@ -98,7 +98,7 @@ class FakeClient:
     def root_of(self, day):
         return self.onchain.get(day)
 
-    def send_anchor(self, day, root, leaf_count, record):
+    def send_anchor(self, day, root, record):
         if self.fail_send == "not_sent":
             raise AnchorNotSentError("signer has no AVAX")
         info = SignedAnchor(
@@ -107,7 +107,6 @@ class FakeClient:
             gas=50_000,
             day=day,
             root=root,
-            leaf_count=leaf_count,
         )
         assert record(info) is True
         if self.fail_send == "broadcast":
@@ -243,12 +242,15 @@ def test_anchors_yesterday_by_default_and_confirms(env):
     assert len(client.sent) == 1
     sent = client.sent[0]
     expected = ua.build_day_tree(DAY, fake_db.rows, SALT)
-    assert sent.root == expected.root and sent.leaf_count == 3
+    assert sent.root == expected.root
+    # The count stays in the database, never on-chain.
+    assert not hasattr(sent, "leaf_count")
     assert sent.day == ua.day_index(DAY)
     row = _anchor(fake_db)
     assert row["status"] == "confirmed"
     assert row["root"] == ua.root_hex(expected.root)
     assert row["tx_hash"] == sent.tx_hash and row["attempts"] == 1
+    assert row["leaf_count"] == 3
     assert alerts == []
 
 
@@ -435,3 +437,19 @@ def test_proof_refuses_when_ledger_no_longer_matches_root(env):
     with pytest.raises(ua.ProofNotAvailableError):
         ua.build_proof(1, user_id=7)
     assert alerts
+
+
+def test_public_anchor_view_omits_leaf_count(sb):
+    view = ua.anchor_view(
+        {
+            "chain_id": 43113,
+            "day": "2026-10-18",
+            "day_index": 20379,
+            "root": "0x" + "42" * 32,
+            "leaf_count": 3,
+            "status": "confirmed",
+            "tx_hash": "0x" + "ab" * 32,
+            "block_number": 1,
+        }
+    )
+    assert "leaf_count" not in view and "tree_size" not in view
