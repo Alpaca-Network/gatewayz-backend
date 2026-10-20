@@ -225,6 +225,13 @@ async def cache_catalog_response(
             logger.debug("Redis not available - skip caching")
             return False
 
+        if (gateway or "all").lower() == "all" and not _combined_catalog_complete():
+            # The combined catalog behind this response is missing a provider.
+            # Serving it uncached lets the next request pick up the repair
+            # instead of pinning the gap for the whole response TTL.
+            logger.warning("Skip caching gateway=all response: combined catalog is incomplete")
+            return False
+
         cache_key = get_catalog_cache_key(gateway, params)
 
         # Add cache metadata to response
@@ -277,6 +284,16 @@ async def cache_catalog_response(
 
 
 CATALOG_BUILD_KEY = f"{CACHE_NAMESPACE}catalog:build_id"
+
+
+def _combined_catalog_complete() -> bool:
+    """Whether the last combined rebuild in this process included every provider."""
+    try:
+        from src.services.cache.model_catalog_cache import last_full_catalog_rebuild_complete
+
+        return last_full_catalog_rebuild_complete()
+    except Exception:
+        return True
 
 
 def current_build_id() -> str:
