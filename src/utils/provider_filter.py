@@ -122,6 +122,12 @@ def get_model_allowlist() -> dict[str, frozenset[str]] | None:
     return _allowlist_cache[1]
 
 
+def has_model_allowlist(provider: str) -> bool:
+    """True if PROVIDER_MODEL_ALLOWLIST restricts *provider*."""
+    allowlist = get_model_allowlist()
+    return bool(allowlist) and _normalize_slug(provider) in allowlist
+
+
 def is_model_allowed(provider: str, model_id: str | None) -> bool:
     """Return True if *provider* may list or serve *model_id*.
 
