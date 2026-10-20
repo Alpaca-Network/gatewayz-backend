@@ -82,11 +82,9 @@ def _contract_block() -> dict[str, Any]:
         "enabled": Config.USAGE_ANCHOR_ENABLED,
         "chain": "avalanche-c-chain",
         "chain_id": chain_id,
-        "network": "mainnet"
-        if chain_id == 43114
-        else "fuji-testnet"
-        if chain_id == 43113
-        else None,
+        "network": (
+            "mainnet" if chain_id == 43114 else "fuji-testnet" if chain_id == 43113 else None
+        ),
         "contract_address": contract,
         "contract_explorer_url": explorer_address_url(chain_id, contract),
         "anchorer": anchorer,
