@@ -454,6 +454,17 @@ async def lifespan(app):
                 # giant-query timeout that truncates at ~3600 of 17k+ models.
                 # Per-provider caches are populated as a side-effect.
                 await asyncio.sleep(3)
+                # First start of a new deployment: drop catalog caches the old
+                # build wrote, so this preload and the response warm-up below
+                # are built by the code now running, not served from Redis.
+                try:
+                    from src.services.cache.catalog_response_cache import (
+                        invalidate_catalog_caches_for_new_build,
+                    )
+
+                    await asyncio.to_thread(invalidate_catalog_caches_for_new_build)
+                except Exception as e:
+                    logger.warning(f"Build-change cache invalidation warning: {e}")
                 try:
                     logger.info(
                         "🔥 [2/5] Preloading full model catalog cache (per-provider assembly)..."
