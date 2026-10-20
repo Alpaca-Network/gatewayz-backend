@@ -233,6 +233,12 @@ async def prepare_upstream_request(
                     f"✓ Health check passed for model '{effective_model}' on '{primary_provider}'"
                 )
 
+        # Health routing above can add a provider after the allowlist was applied
+        # in enforce_model_failover_rules; apply it once more so it has the last say.
+        from src.utils.provider_filter import filter_chain_by_model_allowlist
+
+        provider_chain = filter_chain_by_model_allowlist(effective_model, provider_chain)
+
         model = effective_model
 
     # Diagnostic logging for tools parameter

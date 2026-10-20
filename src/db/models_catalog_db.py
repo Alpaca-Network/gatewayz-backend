@@ -2543,6 +2543,20 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
 
             ump_offset += page_size
 
+        # PROVIDER_MODEL_ALLOWLIST: a restricted provider contributes only the
+        # models its allowlist names to the unique view.
+        from src.utils.provider_filter import get_model_allowlist, is_model_allowed
+
+        if get_model_allowlist():
+            all_provider_mappings = [
+                ump
+                for ump in all_provider_mappings
+                if is_model_allowed(
+                    (providers_by_id.get(ump.get("provider_id")) or {}).get("slug", ""),
+                    (ump.get("models") or {}).get("provider_model_id"),
+                )
+            ]
+
         if not all_provider_mappings:
             logger.info("No provider mappings for enabled providers; unique catalog is empty")
             return []

@@ -23,6 +23,23 @@ def _all_providers_enabled():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _no_db_verification():
+    """The rebuild also reads per-provider model counts; these tests cover the
+    assembly alone, so the count is unknown and no repair read happens."""
+    with (
+        patch(
+            "src.services.cache.model_catalog_cache._count_active_provider_models",
+            return_value=None,
+        ),
+        patch(
+            "src.services.cache.catalog_sync_guard.is_sync_in_progress",
+            return_value=False,
+        ),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Sample data helpers
 # ---------------------------------------------------------------------------
