@@ -30,6 +30,7 @@ Usage:
 import hashlib
 import json
 import logging
+import os
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -224,6 +225,13 @@ async def cache_catalog_response(
             logger.debug("Redis not available - skip caching")
             return False
 
+        if (gateway or "all").lower() == "all" and not _combined_catalog_complete():
+            # The combined catalog behind this response is missing a provider.
+            # Serving it uncached lets the next request pick up the repair
+            # instead of pinning the gap for the whole response TTL.
+            logger.warning("Skip caching gateway=all response: combined catalog is incomplete")
+            return False
+
         cache_key = get_catalog_cache_key(gateway, params)
 
         # Add cache metadata to response
@@ -272,6 +280,71 @@ async def cache_catalog_response(
 
     except redis_module.RedisError as e:
         logger.warning(f"Cache write failed: {e}")
+        return False
+
+
+CATALOG_BUILD_KEY = f"{CACHE_NAMESPACE}catalog:build_id"
+
+
+def _combined_catalog_complete() -> bool:
+    """Whether the last combined rebuild in this process included every provider."""
+    try:
+        from src.services.cache.model_catalog_cache import last_full_catalog_rebuild_complete
+
+        return last_full_catalog_rebuild_complete()
+    except Exception:
+        return True
+
+
+def current_build_id() -> str:
+    """Identify the running deployment ("" outside Railway).
+
+    The deployment id changes on every redeploy, including env-only ones such
+    as an ENABLED_PROVIDERS change, which alter the catalog as much as a code
+    change does. The commit sha is the fallback.
+    """
+    return os.environ.get("RAILWAY_DEPLOYMENT_ID") or os.environ.get("RAILWAY_GIT_COMMIT_SHA") or ""
+
+
+def invalidate_catalog_caches_for_new_build() -> bool:
+    """Drop every catalog cache once per deployment.
+
+    Redis outlives deploys. Without this, rows built by the previous
+    deployment's pricing code keep being served for up to an hour: provider
+    catalogs live 30 minutes, the response cache 60, and the startup warm-up
+    re-caches the response from those stale provider catalogs. After #2402
+    Groq models kept showing $0 / servable=False for that reason, although
+    the new code priced them correctly on any uncached request.
+
+    Returns True when caches were cleared.
+    """
+    build = current_build_id()
+    if not build:
+        return False
+    try:
+        redis = get_redis_client()
+        if not redis:
+            return False
+        previous = redis.get(CATALOG_BUILD_KEY)
+        if isinstance(previous, bytes):
+            previous = previous.decode()
+        if previous == build:
+            return False
+
+        from src.services.cache.model_catalog_cache import clear_all_model_caches
+
+        model_keys = clear_all_model_caches()
+        response_keys = invalidate_catalog_cache()
+        redis.set(CATALOG_BUILD_KEY, build)
+        logger.info(
+            "New build %s: cleared %s model cache keys and %s catalog response keys",
+            build,
+            model_keys,
+            response_keys,
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"Build-change catalog invalidation failed: {e}")
         return False
 
 

@@ -77,8 +77,13 @@ def _load_catalog_ids() -> list[str]:
 
     def _collect(rows) -> None:
         for r in rows or []:
-            if isinstance(r, dict) and r.get("id"):
-                ids.append(str(r["id"]))
+            if not isinstance(r, dict):
+                continue
+            # Unique-catalog rows strip the provider prefix from "id"; their
+            # "canonical_id" is the fully-qualified form /v1/models advertises.
+            mid = r.get("canonical_id") or r.get("id")
+            if mid:
+                ids.append(str(mid))
 
     try:
         from src.services.models import get_cached_models
