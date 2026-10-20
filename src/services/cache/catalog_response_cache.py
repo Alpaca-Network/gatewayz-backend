@@ -111,6 +111,8 @@ def get_catalog_cache_key(gateway: str | None, params: dict) -> str:
         "is_private": params.get("is_private"),
         "include_huggingface": params.get("include_huggingface", False),
         "unique_models": params.get("unique_models", False),
+        # ?tier= changes the body, so it must change the key.
+        "tier": params.get("tier") or "all",
     }
 
     # Hash parameters to keep keys short while maintaining uniqueness
