@@ -1554,6 +1554,20 @@ def cache_provider_catalog(
 
 
 def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | None:
+    """Provider catalog from cache/DB, trimmed to PROVIDER_MODEL_ALLOWLIST.
+
+    Every catalog surface (per-provider, the full catalog rebuild, model
+    detection) reads through here, so the allowlist is applied once.
+    """
+    from src.utils.provider_filter import filter_models_by_allowlist
+
+    models = _get_cached_provider_catalog_unfiltered(provider_name)
+    if models is None:
+        return None
+    return filter_models_by_allowlist(provider_name, models)
+
+
+def _get_cached_provider_catalog_unfiltered(provider_name: str) -> list[dict[str, Any]] | None:
     """
     Get cached provider catalog with multi-tier caching and background refresh.
 
@@ -1710,7 +1724,10 @@ def cache_gateway_catalog(
     ttl: int | None = None,
 ) -> bool:
     """Cache model catalog for a specific gateway"""
+    from src.utils.provider_filter import filter_models_by_allowlist
+
     cache = get_model_catalog_cache()
+    catalog = filter_models_by_allowlist(gateway_name, catalog)
     return cache.set_gateway_catalog(gateway_name, catalog, ttl=ttl)
 
 
