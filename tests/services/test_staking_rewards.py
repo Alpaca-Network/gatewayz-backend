@@ -183,8 +183,9 @@ def store(monkeypatch):
     return fake
 
 
-DAY1 = date(2026, 9, 9)
-DAY2 = date(2026, 9, 10)
+# Inside pay_pending_for_wallet's retry window, which is measured from today.
+DAY1 = datetime.now(UTC).date() - timedelta(days=3)
+DAY2 = DAY1 + timedelta(days=1)
 
 
 def _stake_row(address, wayz_amount):
