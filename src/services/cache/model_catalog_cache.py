@@ -1240,6 +1240,80 @@ def get_cached_full_catalog() -> list[dict[str, Any]] | None:
             return []
 
 
+# Whether the last combined rebuild in this process included every enabled
+# provider that has active models. The response cache reads it so a combined
+# catalog missing a provider is never pinned for a full response TTL.
+_last_rebuild_complete = True
+
+# An incomplete combined catalog is still cached, briefly, so a provider that
+# keeps failing cannot turn every /v1/models request into a full rebuild.
+TTL_INCOMPLETE_FULL_CATALOG = 60
+
+
+def last_full_catalog_rebuild_complete() -> bool:
+    """True unless the most recent combined rebuild in this process dropped a provider."""
+    return _last_rebuild_complete
+
+
+# How long a suspect provider list (empty, or read while a sync is rewriting
+# ``models``) may sit in local memory. Long enough to spare the database a
+# retry storm during an outage, short enough that a gap heals by itself.
+SUSPECT_LOCAL_CATALOG_TTL = 30.0
+
+
+def _set_local_catalog_if_sound(name: str, catalog: list[dict[str, Any]]) -> None:
+    """Write the per-process catalog copy, keeping suspect snapshots short-lived.
+
+    The Redis writes refuse empty payloads and snapshots taken while a sync is
+    rewriting ``models``; the local copy used to take them anyway and hold them
+    15 minutes fresh plus an hour stale. An empty or half-written provider list
+    pinned there made every later rebuild in that process drop the provider
+    (groq 11 -> 0, zai 11 -> 8 in prod). Such lists now expire in seconds, with
+    no stale grace.
+    """
+    from src.services.cache.catalog_sync_guard import is_sync_in_progress
+    from src.services.cache.local_memory_cache import set_local_catalog
+
+    if not catalog or is_sync_in_progress():
+        set_local_catalog(name, catalog, ttl=SUSPECT_LOCAL_CATALOG_TTL, stale_ttl=0.0)
+        return
+
+    set_local_catalog(name, catalog)
+
+
+def _count_active_provider_models(slug: str) -> int | None:
+    """Active model rows for one provider, or None when the count can't be read."""
+    try:
+        from src.config.supabase_config import get_client_for_query
+
+        supabase = get_client_for_query(read_only=True)
+        response = (
+            supabase.table("models")
+            .select("id, providers!inner(slug)", count="exact", head=True)
+            .eq("providers.slug", slug)
+            .eq("is_active", True)
+            .execute()
+        )
+        count = response.count
+        return count if isinstance(count, int) else None
+    except Exception as e:
+        logger.warning(f"rebuild_full_catalog_from_providers: could not count {slug} models: {e}")
+        return None
+
+
+def _reload_provider_from_db(slug: str) -> list[dict[str, Any]]:
+    """Read one provider straight from the database, skipping Redis and local caches."""
+    from src.services.models import _set_building_catalog
+
+    # Same guard as the cache-miss path: pricing enrichment must not recurse
+    # into a catalog fetch while a catalog is being built.
+    _set_building_catalog(True)
+    try:
+        return _fetch_provider_models_from_db(slug)
+    finally:
+        _set_building_catalog(False)
+
+
 def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     """
     Build the full catalog by assembling individually-cached per-provider catalogs.
@@ -1264,8 +1338,6 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    from src.services.cache.local_memory_cache import set_local_catalog
-
     cache = get_model_catalog_cache()
 
     # --- Step 1: Discover provider slugs ---
@@ -1275,6 +1347,10 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     # may have models synced to the DB via model_catalog_sync.py.
     # Providers with 0 models simply return empty lists (harmless).
     provider_slugs: list[str] = []
+    # Counting against the database only makes sense when it answered the
+    # discovery query; on the registry fallback it is unreachable and every
+    # count would just wait out another failed connection.
+    db_reachable = False
 
     try:
         from src.config.supabase_config import get_client_for_query
@@ -1284,6 +1360,7 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
         response = supabase.table("providers").select("slug").eq("is_active", True).execute()
         all_active = [row["slug"] for row in (response.data or []) if row.get("slug")]
         provider_slugs = [s for s in all_active if is_provider_enabled(s)]
+        db_reachable = True
         logger.info(
             f"rebuild_full_catalog_from_providers: discovered {len(all_active)} "
             f"active provider slugs from database, {len(provider_slugs)} after "
@@ -1317,10 +1394,11 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     # With 30+ providers, use 10 workers to complete in ~3 batches while leaving
     # plenty of headroom in the connection pool (50 max connections). Most providers
     # will hit Redis cache (sub-ms), so only a few use DB connections simultaneously.
+    global _last_rebuild_complete
+
     MAX_WORKERS = 10
-    all_models: list[dict[str, Any]] = []
-    provider_counts: dict[str, int] = {}
-    empty_providers: list[str] = []
+    by_slug: dict[str, list[dict[str, Any]]] = {}
+    expected_counts: dict[str, int | None] = {}
 
     def _fetch_provider(slug: str) -> tuple[str, list[dict[str, Any]]]:
         """Fetch a single provider's catalog (runs in thread pool)."""
@@ -1331,22 +1409,68 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
             logger.warning(f"rebuild_full_catalog_from_providers: failed to fetch {slug}: {exc}")
             return (slug, [])
 
+    def _count_provider(slug: str) -> tuple[str, int | None]:
+        return (slug, _count_active_provider_models(slug))
+
     fetch_start = time.monotonic()
 
+    # The cached copy and the database count are read side by side. The count
+    # is what tells a provider with no models apart from one whose cached copy
+    # is empty or half-written.
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(_fetch_provider, slug): slug for slug in provider_slugs}
+        count_futures = (
+            {executor.submit(_count_provider, slug): slug for slug in provider_slugs}
+            if db_reachable
+            else {}
+        )
         for future in as_completed(futures):
             slug = futures[future]
             try:
                 _returned_slug, models = future.result(timeout=120)
-                if models:
-                    all_models.extend(models)
-                    provider_counts[slug] = len(models)
-                else:
-                    empty_providers.append(slug)
+                by_slug[slug] = models or []
             except Exception as exc:
                 logger.warning(f"rebuild_full_catalog_from_providers: {slug} future failed: {exc}")
-                empty_providers.append(slug)
+                by_slug[slug] = []
+        for future in as_completed(count_futures):
+            slug = count_futures[future]
+            try:
+                expected_counts[slug] = future.result(timeout=120)[1]
+            except Exception:
+                expected_counts[slug] = None
+
+    # --- Step 2b: Repair providers whose cached copy is short of the database ---
+    missing_providers: list[str] = []
+    for slug in provider_slugs:
+        have = len(by_slug.get(slug) or [])
+        expected = expected_counts.get(slug)
+        if expected is None or expected <= have:
+            continue
+
+        fresh = _reload_provider_from_db(slug)
+        if len(fresh) > have:
+            logger.warning(
+                f"rebuild_full_catalog_from_providers: {slug} cached copy had {have} of "
+                f"{expected} active models; reloaded {len(fresh)} from the database"
+            )
+            by_slug[slug] = fresh
+            cache.set_provider_catalog(slug, fresh, ttl=ModelCatalogCache.TTL_PROVIDER)
+            _set_local_catalog_if_sound(slug, fresh)
+
+        if not by_slug.get(slug):
+            missing_providers.append(slug)
+
+    # Assemble in discovery order so the combined list is stable between rebuilds.
+    all_models: list[dict[str, Any]] = []
+    provider_counts: dict[str, int] = {}
+    empty_providers: list[str] = []
+    for slug in provider_slugs:
+        models = by_slug.get(slug) or []
+        if models:
+            all_models.extend(models)
+            provider_counts[slug] = len(models)
+        else:
+            empty_providers.append(slug)
 
     fetch_elapsed = time.monotonic() - fetch_start
 
@@ -1363,9 +1487,21 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
         )
 
     # --- Step 3: Cache the assembled full catalog ---
-    if all_models:
+    _last_rebuild_complete = not missing_providers
+    if missing_providers:
+        # A provider with active rows came back empty even from a direct read.
+        # Keep the catalog only briefly and out of local memory, so the next
+        # rebuild gets another chance instead of serving the gap for 15 minutes.
+        logger.warning(
+            f"rebuild_full_catalog_from_providers: combined catalog is missing "
+            f"{missing_providers} despite active models in the database; caching it "
+            f"for {TTL_INCOMPLETE_FULL_CATALOG}s only"
+        )
+        if all_models:
+            cache.set_full_catalog(all_models, ttl=TTL_INCOMPLETE_FULL_CATALOG)
+    elif all_models:
         cache.set_full_catalog(all_models, ttl=ModelCatalogCache.TTL_FULL_CATALOG)
-        set_local_catalog("all", all_models)
+        _set_local_catalog_if_sound("all", all_models)
         logger.info(
             f"rebuild_full_catalog_from_providers: cached full catalog "
             f"({len(all_models)} models, TTL={ModelCatalogCache.TTL_FULL_CATALOG}s)"
@@ -1469,7 +1605,7 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
                 cache.set_provider_catalog(
                     provider_name, fresh_data, ttl=ModelCatalogCache.TTL_PROVIDER
                 )
-                set_local_catalog(provider_name, fresh_data)
+                _set_local_catalog_if_sound(provider_name, fresh_data)
 
             # Fire and forget background refresh
             warmer = get_cache_warmer()
@@ -1519,7 +1655,7 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
             cache.set_provider_catalog(
                 provider_name, api_models, ttl=ModelCatalogCache.TTL_PROVIDER
             )
-            set_local_catalog(provider_name, api_models)
+            _set_local_catalog_if_sound(provider_name, api_models)
 
             logger.info(
                 f"Fetched {len(api_models)} models for {provider_name} from database and cached"
@@ -1629,7 +1765,7 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
                 cache.set_gateway_catalog(
                     gateway_name, fresh_data, ttl=ModelCatalogCache.TTL_GATEWAY
                 )
-                set_local_catalog(gateway_name, fresh_data)
+                _set_local_catalog_if_sound(gateway_name, fresh_data)
 
             # Fire and forget background refresh
             warmer = get_cache_warmer()
@@ -1677,7 +1813,7 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
 
             # Cache in both Redis and local memory
             cache.set_gateway_catalog(gateway_name, api_models, ttl=ModelCatalogCache.TTL_GATEWAY)
-            set_local_catalog(gateway_name, api_models)
+            _set_local_catalog_if_sound(gateway_name, api_models)
 
             logger.info(
                 f"Fetched {len(api_models)} models for {gateway_name} from database and cached"
