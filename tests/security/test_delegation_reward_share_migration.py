@@ -165,6 +165,13 @@ def test_reserve_caps_at_revenue_and_grant_rechecks_link_and_account():
     assert "public.discount_grant(" in grant
 
 
-def test_version_stamp_is_newer_than_every_other_migration():
-    others = sorted(p.name for p in MIGRATION.parent.glob("*.sql") if p.name != MIGRATION.name)
-    assert MIGRATION.name > others[-1]
+def test_version_stamp_is_newer_than_the_migrations_it_builds_on():
+    # It alters the delegated-staking tables and functions, so it must sort
+    # after the migrations that create them. Later, unrelated migrations
+    # (e.g. 20261020000000_usage_anchors.sql) are free to come after it.
+    for base in (
+        "20261008230000_delegated_staking.sql",
+        "20261009010000_delegation_claim_inactive_user.sql",
+    ):
+        assert (MIGRATION.parent / base).exists()
+        assert MIGRATION.name > base

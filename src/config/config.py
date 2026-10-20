@@ -200,6 +200,33 @@ class Config:
     )
     # Placeholder; the real value is a product decision, not set here.
     WAYZ_DAILY_INFERENCE_CAPACITY = int(_get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0"))
+    # Daily usage anchoring (docs/usage-anchor/README.md): once a day, the
+    # Merkle root of the previous UTC day's api_usage ledger rows is written
+    # to the UsageAnchor contract on Avalanche C-Chain. Only the root goes
+    # on-chain. Off by default; with no contract address or key set the job
+    # refuses to run. USAGE_ANCHOR_PRIVATE_KEY is a dedicated signer -- never
+    # the payout-pool key -- and is never logged. USAGE_ANCHOR_SALT_KEY salts
+    # every leaf so a leaf cannot be guessed from public data.
+    USAGE_ANCHOR_ENABLED = _get_env_var("USAGE_ANCHOR_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    USAGE_ANCHOR_CHAIN_ID = int(_get_env_var("USAGE_ANCHOR_CHAIN_ID", "43113"))
+    USAGE_ANCHOR_RPC_URL = _get_env_var(
+        "USAGE_ANCHOR_RPC_URL", "https://api.avax-test.network/ext/bc/C/rpc"
+    )
+    USAGE_ANCHOR_CONTRACT_ADDRESS = _get_env_var("USAGE_ANCHOR_CONTRACT_ADDRESS")
+    USAGE_ANCHOR_PRIVATE_KEY = _get_env_var("USAGE_ANCHOR_PRIVATE_KEY")
+    USAGE_ANCHOR_SALT_KEY = _get_env_var("USAGE_ANCHOR_SALT_KEY")
+    # Daily cron time (UTC) for anchoring the previous day -- see
+    # src/services/scheduled_sync.py::start_usage_anchor_scheduler.
+    USAGE_ANCHOR_HOUR_UTC = int(_get_env_var("USAGE_ANCHOR_HOUR_UTC", "0"))
+    USAGE_ANCHOR_MINUTE_UTC = int(_get_env_var("USAGE_ANCHOR_MINUTE_UTC", "15"))
+    USAGE_ANCHOR_MIN_CONFIRMATIONS = int(_get_env_var("USAGE_ANCHOR_MIN_CONFIRMATIONS", "3"))
+    USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES = int(
+        _get_env_var("USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES", "10")
+    )
     # Staking rewards (gatewayz-backend staking rewards, boss's rule: WAYZ
     # stakers are paid in inference credits; providers who offer inference
     # are paid in ETH on Base -- see PROVIDER_PAYOUT_ASSET below).
