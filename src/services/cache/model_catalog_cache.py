@@ -1282,11 +1282,29 @@ def _set_local_catalog_if_sound(name: str, catalog: list[dict[str, Any]]) -> Non
 
 
 def _count_active_provider_models(slug: str) -> int | None:
-    """Active model rows for one provider, or None when the count can't be read."""
+    """Active model rows for one provider, or None when the count can't be read.
+
+    For a provider in PROVIDER_MODEL_ALLOWLIST only the rows the allowlist
+    names count: its cached copy is trimmed to them, so comparing against every
+    active row would flag it as partial on every rebuild.
+    """
     try:
         from src.config.supabase_config import get_client_for_query
+        from src.utils.provider_filter import has_model_allowlist, is_model_allowed
 
         supabase = get_client_for_query(read_only=True)
+        if has_model_allowlist(slug):
+            response = (
+                supabase.table("models")
+                .select("provider_model_id, providers!inner(slug)")
+                .eq("providers.slug", slug)
+                .eq("is_active", True)
+                .range(0, 9999)
+                .execute()
+            )
+            rows = response.data or []
+            return sum(1 for row in rows if is_model_allowed(slug, row.get("provider_model_id")))
+
         response = (
             supabase.table("models")
             .select("id, providers!inner(slug)", count="exact", head=True)
@@ -1302,14 +1320,18 @@ def _count_active_provider_models(slug: str) -> int | None:
 
 
 def _reload_provider_from_db(slug: str) -> list[dict[str, Any]]:
-    """Read one provider straight from the database, skipping Redis and local caches."""
+    """Read one provider straight from the database, skipping Redis and local caches.
+
+    Trimmed to PROVIDER_MODEL_ALLOWLIST like every other catalog read.
+    """
     from src.services.models import _set_building_catalog
+    from src.utils.provider_filter import filter_models_by_allowlist
 
     # Same guard as the cache-miss path: pricing enrichment must not recurse
     # into a catalog fetch while a catalog is being built.
     _set_building_catalog(True)
     try:
-        return _fetch_provider_models_from_db(slug)
+        return filter_models_by_allowlist(slug, _fetch_provider_models_from_db(slug))
     finally:
         _set_building_catalog(False)
 
@@ -1554,6 +1576,20 @@ def cache_provider_catalog(
 
 
 def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | None:
+    """Provider catalog from cache/DB, trimmed to PROVIDER_MODEL_ALLOWLIST.
+
+    Every catalog surface (per-provider, the full catalog rebuild, model
+    detection) reads through here, so the allowlist is applied once.
+    """
+    from src.utils.provider_filter import filter_models_by_allowlist
+
+    models = _get_cached_provider_catalog_unfiltered(provider_name)
+    if models is None:
+        return None
+    return filter_models_by_allowlist(provider_name, models)
+
+
+def _get_cached_provider_catalog_unfiltered(provider_name: str) -> list[dict[str, Any]] | None:
     """
     Get cached provider catalog with multi-tier caching and background refresh.
 
@@ -1710,7 +1746,10 @@ def cache_gateway_catalog(
     ttl: int | None = None,
 ) -> bool:
     """Cache model catalog for a specific gateway"""
+    from src.utils.provider_filter import filter_models_by_allowlist
+
     cache = get_model_catalog_cache()
+    catalog = filter_models_by_allowlist(gateway_name, catalog)
     return cache.set_gateway_catalog(gateway_name, catalog, ttl=ttl)
 
 

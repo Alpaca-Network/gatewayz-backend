@@ -223,3 +223,93 @@ class TestResponseCacheGuard:
         mcc._last_rebuild_complete = False
         _, redis = self._cache("groq")
         redis.setex.assert_called_once()
+
+
+class TestAllowlistedProvider:
+    """PROVIDER_MODEL_ALLOWLIST trims a provider's cached copy (deepinfra: 15 of
+    ~230 active rows), so the repair must count only the allowlisted rows.
+    Counting every active row would mark the provider partial on every rebuild."""
+
+    LISTED = [f"org/model-{i}" for i in range(15)]
+
+    @staticmethod
+    def _rows(total):
+        return [{"provider_model_id": f"org/model-{i}"} for i in range(total)]
+
+    @staticmethod
+    def _catalog(count):
+        return [
+            {"id": f"deepinfra/org/model-{i}", "source_gateway": "deepinfra"} for i in range(count)
+        ]
+
+    def _client(self, slugs, db_rows):
+        client = _providers_client(slugs)
+        rows = MagicMock()
+        rows.data = db_rows
+        chain = client.table.return_value.select.return_value.eq.return_value.eq.return_value
+        chain.range.return_value.execute.return_value = rows
+        # The unfiltered head count sees every active row.
+        chain.execute.return_value.count = len(db_rows)
+        return client
+
+    def _allowlist(self):
+        import json
+
+        return patch(
+            "src.config.config.Config.PROVIDER_MODEL_ALLOWLIST",
+            json.dumps({"deepinfra": self.LISTED}),
+            create=True,
+        )
+
+    def _rebuild(self, cached, reloaded):
+        cache = MagicMock()
+        with (
+            self._allowlist(),
+            patch(
+                "src.config.supabase_config.get_client_for_query",
+                return_value=self._client(["deepinfra"], self._rows(230)),
+            ),
+            patch.object(mcc, "get_cached_provider_catalog", return_value=cached),
+            patch.object(mcc, "_reload_provider_from_db", return_value=reloaded) as reload,
+            patch.object(mcc, "get_model_catalog_cache", return_value=cache),
+            patch("src.services.cache.local_memory_cache.set_local_catalog"),
+        ):
+            result = mcc.rebuild_full_catalog_from_providers()
+        return result, cache, reload
+
+    def test_count_includes_only_allowlisted_rows(self):
+        with (
+            self._allowlist(),
+            patch(
+                "src.config.supabase_config.get_client_for_query",
+                return_value=self._client(["deepinfra"], self._rows(230)),
+            ),
+        ):
+            assert mcc._count_active_provider_models("deepinfra") == 15
+
+    def test_15_of_230_is_complete_without_a_reload(self):
+        result, cache, reload = self._rebuild(self._catalog(15), [])
+
+        assert len(result) == 15
+        reload.assert_not_called()
+        assert cache.set_full_catalog.call_args[1]["ttl"] == mcc.ModelCatalogCache.TTL_FULL_CATALOG
+        assert mcc.last_full_catalog_rebuild_complete() is True
+
+    def test_missing_listed_models_are_still_repaired(self):
+        result, _, reload = self._rebuild(self._catalog(9), self._catalog(15))
+
+        reload.assert_called_once_with("deepinfra")
+        assert len(result) == 15
+        assert mcc.last_full_catalog_rebuild_complete() is True
+
+    def test_db_reload_applies_the_allowlist(self):
+        unfiltered = [
+            {"id": f"deepinfra/org/model-{i}", "provider_model_id": f"org/model-{i}"}
+            for i in range(230)
+        ]
+        with (
+            self._allowlist(),
+            patch.object(mcc, "_fetch_provider_models_from_db", return_value=unfiltered),
+            patch("src.services.models._set_building_catalog"),
+        ):
+            assert len(mcc._reload_provider_from_db("deepinfra")) == 15

@@ -1184,6 +1184,14 @@ class Config:
         else None  # None = all providers enabled
     )
 
+    # Per-provider model allowlist, JSON: {"deepinfra": ["meta-llama/Llama-3.3-70B-Instruct", ...]}.
+    # A provider listed here only lists, routes and caches the named models
+    # (its native ids, case-insensitive, "<provider>/" prefix optional). Providers
+    # not listed are unrestricted. Unset, empty or invalid JSON restricts nothing.
+    # Parsed in src/utils/provider_filter.py. North Star §5: breadth from a wide
+    # host like DeepInfra is curated, not mirrored.
+    PROVIDER_MODEL_ALLOWLIST: str = os.environ.get("PROVIDER_MODEL_ALLOWLIST", "")
+
     # Health-gated catalog. When true, models whose models.health_status == 'down'
     # are hidden from the served catalog. This is INERT until an active health sweep
     # (see src/services/monitoring/model_health_sweep.py) actually marks a model
