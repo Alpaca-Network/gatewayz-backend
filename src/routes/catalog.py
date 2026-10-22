@@ -119,6 +119,31 @@ def _get_down_model_id_set() -> set[str]:
     return ids
 
 
+# Default page size of GET /v1/models. OpenAI-compatible clients
+# (``client.models.list()``) read one page and never follow ``next_offset``, so
+# the default page has to hold the whole catalog. At 100 the combined catalog
+# outgrew it when DeepInfra was enabled (107 rows): the last provider in
+# discovery order, Anthropic, fell onto page 2 and every Opus and Sonnet model
+# disappeared from the default listing.
+DEFAULT_MODELS_LIST_LIMIT = 1000
+
+
+def default_models_cache_params() -> dict:
+    """Response-cache params of a bare ``GET /v1/models`` request.
+
+    The startup warm-up writes its payload under these, so it must build them
+    the same way the route does or it pins a payload nobody asked for.
+    """
+    return {
+        "limit": DEFAULT_MODELS_LIST_LIMIT,
+        "offset": 0,
+        "provider": None,
+        "is_private": None,
+        "unique_models": False,
+        "tier": SERVING_TIER_ALL,
+    }
+
+
 def _apply_health_gating(models: list) -> list:
     """Remove models marked ``health_status == 'down'`` from a served model list.
 
@@ -936,8 +961,18 @@ async def get_models(
             gated_data = _annotate_serving_tier(
                 _annotate_servability(_apply_health_gating(cached_response.get("data", [])))
             )
-            if len(gated_data) != len(cached_response.get("data", [])):
-                cached_response = {**cached_response, "data": gated_data}
+            removed = len(cached_response.get("data", [])) - len(gated_data)
+            if removed:
+                # Keep the envelope honest: a page that lost rows here used to
+                # report the pre-gating total and returned (prod: 99 / 99 over
+                # 96 rows).
+                cached_response = {
+                    **cached_response,
+                    "data": gated_data,
+                    "returned": len(gated_data),
+                }
+                if isinstance(cached_response.get("total"), int):
+                    cached_response["total"] = max(0, cached_response["total"] - removed)
             cached_json = _dumps_fast(cached_response)
             etag_data = json.dumps(cached_response.get("data", [])[:5], sort_keys=True)
             etag_value = hashlib.md5(etag_data.encode(), usedforsecurity=False).hexdigest()[:16]
@@ -2149,7 +2184,13 @@ async def get_all_models(
         description="Filter by private models: true=private only, false=non-private only, null=all models",
     ),
     limit: int = Query(
-        100, ge=1, le=1000, description=f"{DESC_LIMIT_NUMBER_OF_RESULTS} (default: 100, max: 1000)"
+        DEFAULT_MODELS_LIST_LIMIT,
+        ge=1,
+        le=1000,
+        description=(
+            f"{DESC_LIMIT_NUMBER_OF_RESULTS} "
+            f"(default: {DEFAULT_MODELS_LIST_LIMIT}, the whole catalog; max: 1000)"
+        ),
     ),
     offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     gateway: str | None = Query(

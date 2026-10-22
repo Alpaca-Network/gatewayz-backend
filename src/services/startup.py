@@ -454,6 +454,17 @@ async def lifespan(app):
                 # giant-query timeout that truncates at ~3600 of 17k+ models.
                 # Per-provider caches are populated as a side-effect.
                 await asyncio.sleep(3)
+                # First start of a new deployment: drop catalog caches the old
+                # build wrote, so this preload and the response warm-up below
+                # are built by the code now running, not served from Redis.
+                try:
+                    from src.services.cache.catalog_response_cache import (
+                        invalidate_catalog_caches_for_new_build,
+                    )
+
+                    await asyncio.to_thread(invalidate_catalog_caches_for_new_build)
+                except Exception as e:
+                    logger.warning(f"Build-change cache invalidation warning: {e}")
                 try:
                     logger.info(
                         "🔥 [2/5] Preloading full model catalog cache (per-provider assembly)..."
@@ -509,29 +520,30 @@ async def lifespan(app):
                     )
                     from datetime import datetime
 
+                    from src.routes.catalog import (
+                        DEFAULT_MODELS_LIST_LIMIT,
+                        default_models_cache_params,
+                    )
                     from src.services.catalog_response_cache import cache_catalog_response
                     from src.services.models import get_cached_models
 
-                    default_cache_params = {
-                        "limit": 100,
-                        "offset": 0,
-                        "provider": None,
-                        "is_private": None,
-                        "include_huggingface": False,
-                        "unique_models": False,
-                    }
+                    # Same params a bare GET /v1/models builds, so this warms the
+                    # entry that request reads. With a hardcoded limit of 100 the
+                    # warmed page cut the catalog short of the route's default.
+                    default_cache_params = default_models_cache_params()
+                    page_size = DEFAULT_MODELS_LIST_LIMIT
 
                     models = await asyncio.to_thread(get_cached_models, "all")
                     if models:
-                        paginated = models[:100]
+                        paginated = models[:page_size]
                         response_payload = {
                             "data": paginated,
                             "total": len(models),
                             "returned": len(paginated),
                             "offset": 0,
-                            "limit": 100,
-                            "has_more": len(models) > 100,
-                            "next_offset": 100 if len(models) > 100 else None,
+                            "limit": page_size,
+                            "has_more": len(models) > page_size,
+                            "next_offset": page_size if len(models) > page_size else None,
                             "include_huggingface": False,
                             "gateway": "all",
                             "note": ("Combined catalog (all gateways)"),
@@ -755,6 +767,16 @@ async def lifespan(app):
     except Exception as e:
         logger.warning(f"Failed to start WAYZ staking sync scheduler: {e}")
         # Don't fail startup if WAYZ staking sync fails to start
+
+    # Start daily usage anchoring on Avalanche C-Chain (docs/usage-anchor/README.md)
+    try:
+        from src.services.scheduled_sync import start_usage_anchor_scheduler
+
+        start_usage_anchor_scheduler()
+        logger.info("Usage anchor service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start usage anchor scheduler: {e}")
+        # Don't fail startup if usage anchoring fails to start
 
     # Start daily staking rewards job (gatewayz-backend staking rewards --
     # boss's rule: WAYZ stakers are paid in inference credits)
@@ -1052,6 +1074,15 @@ async def lifespan(app):
         logger.info("WAYZ staking sync service stopped")
     except Exception as e:
         logger.warning(f"WAYZ staking sync shutdown warning: {e}")
+
+    # Stop usage anchoring
+    try:
+        from src.services.scheduled_sync import stop_usage_anchor_scheduler
+
+        stop_usage_anchor_scheduler()
+        logger.info("Usage anchor service stopped")
+    except Exception as e:
+        logger.warning(f"Usage anchor shutdown warning: {e}")
 
     # Stop daily staking rewards job
     try:

@@ -1945,9 +1945,19 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
         "openai"
     """
     try:
-        # Extract provider info from joined data
-        provider = db_model.get("providers", {})
-        provider_slug = provider.get("slug", "unknown")
+        # Extract provider info from joined data. Rows from
+        # get_all_unique_models_for_catalog carry a LIST of provider mappings
+        # and belong to transform_unique_model_to_api_format; tolerate the list
+        # here instead of raising on every row.
+        provider = db_model.get("providers") or {}
+        if isinstance(provider, list):
+            first = provider[0] if provider else {}
+            provider = {
+                "slug": first.get("provider_slug") or first.get("slug"),
+                "site_url": first.get("site_url"),
+                "logo_url": first.get("logo_url"),
+            }
+        provider_slug = provider.get("slug") or "unknown"
 
         # Build pricing dict from metadata.pricing_raw.
         # NOTE: The pricing_prompt/pricing_completion/pricing_image/pricing_request
@@ -2533,6 +2543,20 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
 
             ump_offset += page_size
 
+        # PROVIDER_MODEL_ALLOWLIST: a restricted provider contributes only the
+        # models its allowlist names to the unique view.
+        from src.utils.provider_filter import get_model_allowlist, is_model_allowed
+
+        if get_model_allowlist():
+            all_provider_mappings = [
+                ump
+                for ump in all_provider_mappings
+                if is_model_allowed(
+                    (providers_by_id.get(ump.get("provider_id")) or {}).get("slug", ""),
+                    (ump.get("models") or {}).get("provider_model_id"),
+                )
+            ]
+
         if not all_provider_mappings:
             logger.info("No provider mappings for enabled providers; unique catalog is empty")
             return []
@@ -2812,6 +2836,9 @@ def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, 
 
         api_model = {
             "id": model_id,
+            # The fully-qualified id (e.g. "openai/gpt-4") that "id" strips. The
+            # model-resolution index reads this so it matches /v1/models ids.
+            "canonical_id": db_model.get("sample_model_id"),
             "name": db_model.get("model_name", "Unknown"),
             "providers": transformed_providers,
             "provider_count": len(transformed_providers),

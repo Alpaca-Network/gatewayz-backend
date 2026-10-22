@@ -76,6 +76,10 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     "delegation_accruals": 1440,
     "delegation_reconciliation": 1440,
     "delegation_attribution": 1440,
+    # Usage anchoring on Avalanche C-Chain (src/services/chain/usage_anchor.py):
+    # the anchor once a day, the confirmation sweep every few minutes.
+    "usage_anchor": 1440,
+    "usage_anchor_sweep": Config.USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES,
 }
 
 # WAYZ token/staking contracts are deployed on Avalanche Fuji testnet.

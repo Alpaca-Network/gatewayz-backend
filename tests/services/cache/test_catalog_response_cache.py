@@ -27,6 +27,16 @@ def test_catalog_cache_uses_fresh_v3_namespace():
     assert key.startswith("gw:catalog:v3:all:")
 
 
+def test_catalog_cache_key_varies_by_tier():
+    base = {"limit": 1000, "offset": 0}
+    key = catalog_response_cache.get_catalog_cache_key
+    all_key = key("all", {**base, "tier": "all"})
+    assert key("all", {**base, "tier": "provider"}) != all_key
+    assert key("all", {**base, "tier": "community"}) != all_key
+    # No tier means the default "all" view.
+    assert key("all", base) == all_key
+
+
 def test_full_catalog_cache_uses_fresh_namespace_and_fixed_expiry(monkeypatch):
     redis = MagicMock()
     redis.get.return_value = json.dumps({"data": [{"id": "openai/gpt-4o-mini"}]})

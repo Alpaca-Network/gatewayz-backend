@@ -990,7 +990,9 @@ async def run_scheduled_gpu_spot_check():
             stats["failed"],
             stats["skipped"],
         )
-        record_job_run(
+        # Synchronous Redis write: keep it off the event loop.
+        await asyncio.to_thread(
+            record_job_run,
             "gpu_spot_check",
             ok=True,
             summary={**stats, "interval_minutes": Config.COMMUNITY_SPOTCHECK_INTERVAL_MINUTES},
@@ -999,7 +1001,8 @@ async def run_scheduled_gpu_spot_check():
     except Exception as e:
         _last_gpu_spotcheck_status["last_ok"] = False
         logger.warning("GPU spot-check verification failed (non-fatal): %s", e)
-        record_job_run(
+        await asyncio.to_thread(
+            record_job_run,
             "gpu_spot_check",
             ok=False,
             error=str(e),
@@ -1464,6 +1467,127 @@ def stop_gpu_liveness_scheduler():
         logger.error("❌ Error stopping GPU node liveness sweep scheduler: %s", e)
     finally:
         _gpu_liveness_scheduler = None
+
+
+# ============================================================================
+# Usage anchoring (docs/usage-anchor/README.md) -- once a day, the Merkle root
+# of the previous UTC day's api_usage ledger rows is written to the
+# UsageAnchor contract on Avalanche C-Chain; a sweep confirms pending
+# transactions, resubmits once after a reorg and retries unsent days. Only
+# starts when USAGE_ANCHOR_ENABLED is on. All DB/RPC work runs in a worker
+# thread -- never on the event loop.
+# ============================================================================
+_usage_anchor_scheduler: AsyncIOScheduler | None = None
+
+
+async def run_scheduled_usage_anchor():
+    """Anchor yesterday (src/services/chain/usage_anchor.py::run_usage_anchor_once)."""
+    from src.services.chain.usage_anchor import run_usage_anchor_once
+
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(run_usage_anchor_once)
+        ok = result.get("status") not in ("failed", "unanchored")
+        log = logger.info if ok else logger.error
+        log("Usage anchor run | %s", result)
+        record_job_run(
+            "usage_anchor",
+            ok=ok,
+            summary=result,
+            error=None if ok else result.get("error"),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+    except Exception as e:
+        logger.error("Usage anchor run failed: %s", e)
+        record_job_run(
+            "usage_anchor",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+async def run_scheduled_usage_anchor_sweep():
+    """Confirm / reconcile in-flight anchors (usage_anchor.py::sweep_usage_anchors)."""
+    from src.services.chain.usage_anchor import sweep_usage_anchors
+
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(sweep_usage_anchors)
+        record_job_run(
+            "usage_anchor_sweep",
+            ok=True,
+            summary=result,
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+    except Exception as e:
+        logger.error("Usage anchor sweep failed: %s", e)
+        record_job_run(
+            "usage_anchor_sweep",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+def start_usage_anchor_scheduler():
+    """Start the daily anchor cron + confirmation sweep (app lifespan)."""
+    global _usage_anchor_scheduler
+
+    if not Config.USAGE_ANCHOR_ENABLED:
+        logger.info("Usage anchoring DISABLED: USAGE_ANCHOR_ENABLED is off")
+        return
+
+    hour = Config.USAGE_ANCHOR_HOUR_UTC
+    minute = Config.USAGE_ANCHOR_MINUTE_UTC
+    sweep_minutes = Config.USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES
+    logger.info(
+        "Starting usage anchor scheduler (daily at %02d:%02d UTC, sweep every %s min)",
+        hour,
+        minute,
+        sweep_minutes,
+    )
+    try:
+        _usage_anchor_scheduler = AsyncIOScheduler()
+        _usage_anchor_scheduler.add_job(
+            run_scheduled_usage_anchor,
+            trigger=CronTrigger(hour=hour, minute=minute, timezone="UTC"),
+            id="usage_anchor",
+            name="Usage Anchor Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _usage_anchor_scheduler.add_job(
+            run_scheduled_usage_anchor_sweep,
+            trigger=IntervalTrigger(minutes=sweep_minutes),
+            id="usage_anchor_sweep",
+            name="Usage Anchor Confirmation Sweep",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _usage_anchor_scheduler.start()
+        logger.info("✅ Usage anchor scheduler started")
+    except Exception as e:
+        logger.error("❌ Failed to start usage anchor scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_usage_anchor_scheduler():
+    """Stop the usage anchor APScheduler gracefully (called during shutdown)."""
+    global _usage_anchor_scheduler
+
+    if _usage_anchor_scheduler is None:
+        return
+    logger.info("Stopping usage anchor scheduler...")
+    try:
+        _usage_anchor_scheduler.shutdown(wait=True)
+        logger.info("✅ Usage anchor scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping usage anchor scheduler: %s", e)
+    finally:
+        _usage_anchor_scheduler = None
 
 
 # ============================================================================

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -19,7 +20,9 @@ async def get_ranking_models(
     scraped snapshot per time-period bucket while traffic is still low."""
     try:
         # Get models with pagination support
-        models = get_ranking_models_from_usage(limit=limit, offset=offset)
+        # Synchronous DB work (up to four 50k-row activity_log scans on a cache
+        # miss): run it in a thread so it never stalls the event loop.
+        models = await asyncio.to_thread(get_ranking_models_from_usage, limit=limit, offset=offset)
         logger.info(f"Retrieved {len(models)} ranking models")
 
         return {
@@ -41,7 +44,7 @@ async def get_ranking_apps():
     """Get all apps from latest_apps table for ranking page"""
     try:
         # Get apps based on filters
-        apps = get_all_latest_apps()
+        apps = await asyncio.to_thread(get_all_latest_apps)
 
         logger.info(f"Retrieved {len(apps)} apps")
 

@@ -90,9 +90,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Create v1 router for OpenAI-compatible endpoints
-    # This allows users to use base_url="https://api.gatewayz.ai" (SDK appends /v1)
-    # or base_url="https://api.gatewayz.ai/v1" directly
+    # Create v1 router for OpenAI-compatible endpoints.
+    # OpenAI SDK clients should use base_url="https://api.gatewayz.ai/v1" (the
+    # SDK appends only "/chat/completions"). A bare base_url still works for
+    # chat/completions/embeddings via OpenAIPathAliasMiddleware, and for /models
+    # via the root mount below. The Anthropic SDK appends "/v1/messages" itself.
     v1_router = APIRouter(prefix="/v1")
 
     # Add CORS middleware
@@ -260,6 +262,14 @@ def create_app() -> FastAPI:
         logger.warning(
             f"  🛡️  [1] Security middleware enabled with LOCAL fallback (Redis error: {e})"
         )
+
+    # [0] Path alias — rewrites root /chat/completions, /completions and
+    #     /embeddings to their /v1 form before any other layer runs, so every
+    #     middleware above sees the canonical path.
+    from src.middleware.openai_path_alias_middleware import OpenAIPathAliasMiddleware
+
+    app.add_middleware(OpenAIPathAliasMiddleware)
+    logger.info("  🔀 [0] OpenAI root-path alias middleware enabled")
 
     # Security
     HTTPBearer()
@@ -581,6 +591,10 @@ def create_app() -> FastAPI:
             "admin_emission",
             "Admin Emission Rewards",
         ),  # Chutes-style WAYZ emission rewards admin API (gatewayz-backend tokenomics)
+        (
+            "usage_anchors",
+            "Usage Anchoring",
+        ),  # Daily usage Merkle roots on Avalanche C-Chain (docs/usage-anchor/README.md)
     ]
 
     loaded_count = 0
