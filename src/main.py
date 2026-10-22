@@ -131,6 +131,15 @@ def create_app() -> FastAPI:
         ] + base_origins
 
     # Explicitly allow modern tracing/debug headers to prevent CORS failures on mobile
+    # Non-production only: extra exact origins (comma-separated), e.g. a Vercel
+    # preview pointed at a demo backend. Production ignores it.
+    if not Config.IS_PRODUCTION:
+        allowed_origins += [
+            o.strip().rstrip("/")
+            for o in os.environ.get("CORS_EXTRA_ORIGINS", "").split(",")
+            if o.strip()
+        ]
+
     allowed_headers = [
         "Content-Type",
         "Authorization",
