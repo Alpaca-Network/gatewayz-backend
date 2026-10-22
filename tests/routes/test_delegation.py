@@ -83,6 +83,7 @@ class TestStatus:
         monkeypatch.setattr(delegation_routes.Config, "STAKEWISE_VAULT_ADDRESS", None)
         monkeypatch.setattr(delegation_routes.Config, "CARDANO_POOL_ID", None)
         monkeypatch.setattr(delegation_routes.Config, "STAKEWISE_VAULT_CHAIN_ID", 1)
+        monkeypatch.setattr(delegation_routes.Config, "DELEGATION_ALLOW_CARDANO_TESTNET", False)
         response = client.get("/delegation/status")
         assert response.status_code == 200
         assert response.json() == {
@@ -90,7 +91,7 @@ class TestStatus:
             "data": {
                 "enabled": False,
                 "eth": {"vault_address": None, "chain_id": 1, "fee_percent": None},
-                "cardano": {"pool_id": None},
+                "cardano": {"pool_id": None, "network": "mainnet"},
                 "allowance_rates": [],
                 "payout_model": "reward_share",
                 "reward_share": "0.95",
@@ -99,6 +100,13 @@ class TestStatus:
                 "disclaimer": delegation_routes.REWARD_SHARE_DISCLAIMER,
             },
         }
+
+    def test_testnet_demo_reports_preprod(self, monkeypatch):
+        # Testnet demos only: the frontend switches the ADA tab to preprod.
+        monkeypatch.setattr(delegation_routes.Config, "DELEGATION_ALLOW_CARDANO_TESTNET", True)
+        monkeypatch.setattr(delegation_routes.Config, "CARDANO_POOL_ID", "pool1" + "q" * 51)
+        data = client.get("/delegation/status").json()["data"]
+        assert data["cardano"] == {"pool_id": "pool1" + "q" * 51, "network": "preprod"}
 
     def test_enabled_shows_vault_fee_and_active_configured_rates(self, enabled):
         rates = {
