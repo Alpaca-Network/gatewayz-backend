@@ -18,6 +18,7 @@ user's API key (`require_superadmin`); reads accept any admin key.
 
 - [ ] Counsel has answered the questions in [COUNSEL_BRIEF.md](COUNSEL_BRIEF.md) in writing, including the user-facing copy and terms.
 - [ ] Boss approved the launch rates, `DELEGATION_DAILY_CAP_CREDITS` and `DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS`.
+- [ ] US / Canada block live: backend (`DELEGATION_RESTRICTED_COUNTRIES=US,CA`, migration `20261014120000_delegation_eligibility.sql` applied) and frontend (gatewayz-frontend#1036, which must send `not_us_ca_person` — README "US / Canada block").
 - [ ] Ops alert recipient set (`OPS_ALERT_EMAIL`, else alerts fall back to superadmin emails).
 - [ ] An employee volunteer has an ETH wallet and a Cardano wallet (key-hash `stake1u…` address, not a script `stake17…`) for the smoke test.
 

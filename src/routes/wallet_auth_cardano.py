@@ -20,7 +20,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from src.config.config import Config
@@ -34,6 +34,7 @@ from src.services.delegation.cip8 import (
     parse_stake_address,
     verify_stake_signature,
 )
+from src.services.delegation.eligibility import require_eligible
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,9 @@ def _validated_stake_address(value: str) -> str:
 class CardanoNonceRequest(BaseModel):
     # stake1 + 53 chars on mainnet (59 total), stake_test1 on testnet (64).
     stake_address: str = Field(..., min_length=50, max_length=80)
+    # "I am not a resident or citizen of the United States or Canada." Needed
+    # unless the account already attested (eligibility.py).
+    not_us_ca_person: bool = False
 
     @field_validator("stake_address")
     @classmethod
@@ -83,6 +87,7 @@ class CardanoLinkRequest(BaseModel):
     signature: str = Field(..., min_length=2, max_length=4096)
     # COSE_Key hex: ~45 bytes.
     key: str = Field(..., min_length=2, max_length=512)
+    not_us_ca_person: bool = False
 
     @field_validator("stake_address")
     @classmethod
@@ -119,11 +124,15 @@ def _require_redis():
 @router.post("/auth/wallet/cardano/nonce", tags=["wallet_auth"])
 async def cardano_link_nonce(
     body: CardanoNonceRequest,
+    request: Request,
     user_id: int = Depends(get_user_id),
     _rl: None = Depends(cardano_link_nonce_rl),
 ) -> dict[str, Any]:
     """Issue a one-time message for the wallet to sign with CIP-30
-    ``signData(stake_address, payload_hex)``."""
+    ``signData(stake_address, payload_hex)``. Refused with 451 for a US /
+    Canadian person (or one who has not attested otherwise) before anything
+    is signed."""
+    require_eligible(user_id, request, body.not_us_ca_person)
     redis_client = _require_redis()
     nonce = secrets.token_hex(16)
     issued_at = datetime.now(UTC).replace(microsecond=0)
@@ -149,11 +158,14 @@ async def cardano_link_nonce(
 @router.post("/auth/wallet/cardano/link", tags=["wallet_auth"])
 async def cardano_link(
     body: CardanoLinkRequest,
+    request: Request,
     user_id: int = Depends(get_user_id),
     _rl: None = Depends(cardano_link_rl),
 ) -> dict[str, Any]:
     """Verify the CIP-30 proof over the issued message and link the stake
-    address to the caller's account."""
+    address to the caller's account. A stake address exists only for
+    delegated staking, so the US / Canada gate applies here too."""
+    require_eligible(user_id, request, body.not_us_ca_person)
     redis_client = _require_redis()
     try:
         stored = redis_client.getdel(_nonce_key(user_id, body.stake_address))

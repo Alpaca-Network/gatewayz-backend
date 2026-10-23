@@ -13,11 +13,17 @@ from fastapi.testclient import TestClient
 import src.routes.wallet_auth_cardano as cardano_routes
 from src.main import app
 from src.security.deps import get_user_id
-from src.services.delegation import cip8
+from src.services.delegation import cip8, eligibility
 from tests.services.delegation.test_cip8 import _cose_key_hex, _raw_public, _sign1_hex
 
 client = TestClient(app)
 USER_ID = 42
+_ELIGIBLE = {
+    "user_id": USER_ID,
+    "status": "eligible",
+    "attested_at": "2026-10-14T00:00:00+00:00",
+    "attestation_version": eligibility.ATTESTATION_VERSION,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +32,9 @@ def _overrides():
     app.dependency_overrides[get_user_id] = lambda: USER_ID
     app.dependency_overrides[cardano_routes.cardano_link_rl] = lambda: None
     app.dependency_overrides[cardano_routes.cardano_link_nonce_rl] = lambda: None
-    yield
+    # The account has attested it is not a US / Canadian person.
+    with patch.object(eligibility, "get_eligibility", return_value=_ELIGIBLE):
+        yield
     app.dependency_overrides.clear()
     app.dependency_overrides.update(saved)
 
@@ -160,5 +168,75 @@ def test_unlink_accepts_a_stake_address(wallet):
         patch.object(wallet_auth, "unlink_wallet", return_value=True) as unlink,
     ):
         response = client.delete(f"/auth/wallets/{wallet[2].upper()}")
+    assert response.status_code == 200
+    unlink.assert_called_once_with(USER_ID, wallet[2])
+
+
+# -- US / Canada block (src/services/delegation/eligibility.py) ------------------------
+
+
+def test_not_attested_is_refused_before_anything_is_signed_or_linked(wallet):
+    redis_client = _redis("anything")
+    with (
+        patch.object(eligibility, "get_eligibility", return_value={}),
+        patch.object(cardano_routes, "get_redis_client", return_value=redis_client),
+        patch.object(cardano_routes, "link_wallet") as link,
+    ):
+        nonce = client.post("/auth/wallet/cardano/nonce", json={"stake_address": wallet[2]})
+        linked = client.post("/auth/wallet/cardano/link", json=_proof(wallet, "anything"))
+    assert (nonce.status_code, nonce.json()["error"]["type"]) == (451, "attestation_required")
+    assert (linked.status_code, linked.json()["error"]["type"]) == (451, "attestation_required")
+    redis_client.setex.assert_not_called()
+    redis_client.getdel.assert_not_called()
+    link.assert_not_called()
+
+
+def test_attestation_in_the_request_is_recorded_and_passes(wallet):
+    saved = {"status": "eligible", "attested_at": "now"}
+    with (
+        patch.object(eligibility, "get_eligibility", return_value={}),
+        patch.object(eligibility, "record_attestation", return_value=saved) as record,
+        patch.object(eligibility, "record_audit") as audit,
+        patch.object(cardano_routes, "get_redis_client", return_value=_redis()),
+    ):
+        response = client.post(
+            "/auth/wallet/cardano/nonce",
+            json={"stake_address": wallet[2], "not_us_ca_person": True},
+        )
+    assert response.status_code == 200
+    record.assert_called_once_with(USER_ID, eligibility.ATTESTATION_VERSION, None)
+    assert audit.call_args.kwargs["action"] == "delegation.eligibility.attested"
+
+
+def test_restricted_country_is_refused_even_with_attestation(wallet, monkeypatch):
+    monkeypatch.setattr(eligibility.Config, "DELEGATION_COUNTRY_HEADER", "cf-ipcountry")
+    with (
+        patch.object(eligibility, "mark_restricted", return_value=True) as restrict,
+        patch.object(eligibility, "record_audit"),
+        patch.object(cardano_routes, "get_redis_client", return_value=_redis()) as redis,
+    ):
+        response = client.post(
+            "/auth/wallet/cardano/nonce",
+            json={"stake_address": wallet[2], "not_us_ca_person": True},
+            headers={"cf-ipcountry": "US"},
+        )
+    assert (response.status_code, response.json()["error"]["type"]) == (451, "region_restricted")
+    restrict.assert_called_once_with(USER_ID, "US", "request_country")
+    redis.assert_not_called()
+
+
+def test_restricted_account_can_still_unlink(wallet):
+    """Leaving is never gated: a restricted account removes its stake address."""
+    import src.routes.wallet_auth as wallet_auth
+
+    with (
+        patch.object(eligibility, "get_eligibility", return_value={"status": "restricted"}),
+        patch.object(wallet_auth, "get_wallet", return_value={"user_id": USER_ID}),
+        patch.object(
+            wallet_auth.users_module, "get_user_by_id", return_value={"auth_method": "email"}
+        ),
+        patch.object(wallet_auth, "unlink_wallet", return_value=True) as unlink,
+    ):
+        response = client.delete(f"/auth/wallets/{wallet[2]}")
     assert response.status_code == 200
     unlink.assert_called_once_with(USER_ID, wallet[2])

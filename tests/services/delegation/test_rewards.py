@@ -267,6 +267,8 @@ def db(monkeypatch):
         "add_credits_to_user",
     ):
         monkeypatch.setattr(rewards, name, getattr(fake, name))
+    # Every account here has attested (US / Canada block, eligibility.py).
+    monkeypatch.setattr(rewards, "account_eligible", lambda user_id: True)
     monkeypatch.setattr(rewards.Config, "DELEGATED_STAKING_ENABLED", True)
     monkeypatch.setattr(rewards.Config, "DELEGATION_DAILY_CAP_CREDITS", Decimal("5"))
     monkeypatch.setattr(rewards.Config, "DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS", Decimal("50"))

@@ -76,6 +76,7 @@ from src.db.user_wallets import get_wallets_for_user, is_cardano_wallet, list_al
 from src.db.users import get_user_by_id
 from src.schemas.delegation import (
     AdjustDiscountRequest,
+    DelegationEligibilityRequest,
     PauseDelegationRequest,
     ResumeDelegationRequest,
     RunDelegationRequest,
@@ -90,6 +91,7 @@ from src.services.delegation.discount import (
     payout_model,
     reward_share,
 )
+from src.services.delegation.eligibility import eligibility_view, require_eligible
 from src.services.delegation.measurements import (
     cardano_network,
     cardano_pool_id,
@@ -356,9 +358,24 @@ async def get_delegation_rewards(
                 for a in history
             ],
             **_discount_block(user["id"], wallets),
+            "eligibility": eligibility_view(user["id"]),
             "disclaimer": _disclaimer(),
         },
     }
+
+
+@router.post("/delegation/eligibility", tags=["delegation"])
+async def attest_delegation_eligibility(
+    body: DelegationEligibilityRequest,
+    request: Request,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Record the caller's attestation that they are not a US or Canadian
+    person -- required before any reward is granted (ETH vault deposits go
+    straight on-chain, so this is the only step that can carry it). 451
+    region_restricted / attestation_required otherwise."""
+    require_eligible(user["id"], request, body.not_us_ca_person)
+    return {"success": True, "data": {"eligibility": eligibility_view(user["id"])}}
 
 
 def _discount_block(user_id: int, wallets: list[dict[str, Any]]) -> dict[str, Any]:
