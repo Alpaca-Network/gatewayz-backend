@@ -363,9 +363,12 @@ class Config:
     KOIOS_BASE_URL = _get_env_var("KOIOS_BASE_URL", "https://api.koios.rest/api/v1")
     # Optional bearer token for Koios' paid tiers. A secret: never logged.
     KOIOS_API_KEY = _get_env_var("KOIOS_API_KEY")
-    # Accept stake_test1... addresses when linking a Cardano wallet. Never on
-    # in production: a testnet stake key proves nothing about mainnet ADA.
-    DELEGATION_ALLOW_CARDANO_TESTNET = _get_env_var(
+    # Accept stake_test1... addresses when linking a Cardano wallet, and report
+    # cardano.network "preprod" on /delegation/status so the frontend switches
+    # to preprod (testnet demos; point KOIOS_BASE_URL at preprod Koios too).
+    # Never on in production: a testnet stake key proves nothing about mainnet
+    # ADA, so APP_ENV=production ignores the flag.
+    DELEGATION_ALLOW_CARDANO_TESTNET = not IS_PRODUCTION and _get_env_var(
         "DELEGATION_ALLOW_CARDANO_TESTNET", "false"
     ).lower() in {"1", "true", "yes"}
     # m in A = R / (1 - m): our gross margin on inference. A credit costs us

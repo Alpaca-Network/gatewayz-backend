@@ -91,6 +91,7 @@ from src.services.delegation.discount import (
     reward_share,
 )
 from src.services.delegation.measurements import (
+    cardano_network,
     cardano_pool_id,
     run_delegation_measurements_once,
 )
@@ -268,7 +269,7 @@ async def get_delegation_status() -> dict[str, Any]:
                 "chain_id": int(Config.STAKEWISE_VAULT_CHAIN_ID),
                 "fee_percent": _fee_percent(),
             },
-            "cardano": {"pool_id": cardano_pool_id()},
+            "cardano": {"pool_id": cardano_pool_id(), "network": cardano_network()},
             "allowance_rates": _public_rates(),
             **_discount_config(),
             "disclaimer": _disclaimer(),
