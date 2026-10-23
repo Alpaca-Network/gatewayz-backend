@@ -36,6 +36,9 @@ reused rather than reinvented:
 * **Fail closed per asset.** An asset whose accruals reconciliation paused
   (delegation_controls) gets no new accrual and no pending payout until an
   admin resumes it; an unreadable controls table pauses everything.
+* **Eligible accounts only.** Nothing is paid to an account that has not
+  attested it is not a US / Canadian person, or that was marked restricted
+  (eligibility.py); its rows stay pending.
 """
 
 from __future__ import annotations
@@ -65,6 +68,7 @@ from src.db.delegation import (
 from src.db.user_wallets import get_wallet
 from src.db.users import add_credits_to_user, get_user_by_id
 from src.services.delegation.discount import payout_model
+from src.services.delegation.eligibility import account_eligible
 from src.services.delegation.measurements import ada_configured, eth_configured
 from src.services.holdings.rewards import budget_order
 
@@ -172,15 +176,19 @@ def _resolve_user_id(wallet_address: str) -> int | None:
 
 def _payee_verified(wallet_address: str, payee: int) -> bool:
     """True only when, right now, the wallet is linked (and active) to
-    `payee` AND `payee` is an existing, non-deactivated account. Any lookup
-    error, missing row or mismatch is False -- never pay on doubt."""
+    `payee` AND `payee` is an existing, non-deactivated account that is
+    eligible (attested not US / Canada, not restricted -- eligibility.py).
+    Any lookup error, missing row or mismatch is False -- never pay on doubt;
+    the reward stays pending."""
     if _resolve_user_id(wallet_address) != payee:
         return False
     try:
         user = get_user_by_id(payee)
     except Exception:  # noqa: BLE001 - a failed lookup is "not verified"
         return False
-    return isinstance(user, dict) and user.get("is_active") is not False
+    if not (isinstance(user, dict) and user.get("is_active") is not False):
+        return False
+    return account_eligible(payee)
 
 
 def _pay_or_leave_pending(

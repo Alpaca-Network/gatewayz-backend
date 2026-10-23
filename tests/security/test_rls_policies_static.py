@@ -111,6 +111,9 @@ TARGET_TABLES = frozenset(
         "inference_discount_balances",
         "inference_discount_ledger",
         "inference_discount_holds",
+        # US / Canada block -- same posture, added in
+        # 20261014120000_delegation_eligibility.sql.
+        "delegation_eligibility",
     }
 )
 
