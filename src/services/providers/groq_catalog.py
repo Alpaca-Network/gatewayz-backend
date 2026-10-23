@@ -75,6 +75,14 @@ def normalize_groq_model(groq_model: dict) -> dict:
         if cents_output:
             pricing["completion"] = str(cents_output / 100)
 
+    # Current Groq API: OpenRouter-shaped USD-per-token strings
+    # ({"prompt": "0.0000008", "completion": "0.000004"}). Ignoring these let
+    # enrichment fall back to cross-referenced prices below Groq's real cost.
+    elif "prompt" in pricing_info or "completion" in pricing_info:
+        for key in ("prompt", "completion", "request", "image"):
+            if pricing_info.get(key) not in (None, ""):
+                pricing[key] = str(pricing_info[key])
+
     # Check for direct dollar-based pricing
     elif "input" in pricing_info or "output" in pricing_info:
         if pricing_info.get("input"):
