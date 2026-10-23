@@ -8,7 +8,8 @@ Gatewayz side of the "sealed usage record":
   GET  /v1/jobs/{id}                  job state
   POST /v1/jobs/{id}/close            retire the key, seal the log into a Merkle root
   GET  /v1/jobs/{id}/usage            totals + root (sealed, or live preview while running)
-  GET  /v1/jobs/{id}/usage/proof?i=n  one line + its Merkle path
+  GET  /v1/jobs/{id}/usage/proof?i=n  one line + its Merkle path (v=2: the sha256
+                                      cost-dispute tree, see services/job_usage_v2.py)
 
 A job key is an ordinary key: the inference endpoints do not change. The usage
 log holds billing metadata only — never prompt or completion content.
@@ -27,8 +28,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from src.db.api_keys import create_api_key
-from src.db.inference_jobs import get_job, insert_job, list_usage, mark_closed, store_seal
+from src.db.inference_jobs import (
+    get_job,
+    insert_job,
+    list_usage,
+    list_usage_v2,
+    mark_closed,
+    store_seal,
+)
 from src.security.deps import get_current_user
+from src.services import job_usage_v2
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.services.job_usage import JOB_KEY_SCOPES, is_job_key_name, job_key_name, proof_for, seal
 
@@ -96,6 +105,7 @@ def _job_view(job: dict) -> dict[str, Any]:
         "spent_usd": str(job["spent_usd"]),
         "deadline": job["deadline"],
         "usage_root": job.get("usage_root"),
+        "usage_root_v2": job.get("usage_root_v2"),
         "escrow_tx": job.get("escrow_tx"),
         "genlayer_tx": job.get("genlayer_tx"),
         "created_at": job.get("created_at"),
@@ -171,6 +181,10 @@ async def close_job(
         return {**_job_view(job), "usage": _usage_totals(job)}
     mark_closed(job["job_id"], job.get("api_key_id"))
     sealed = seal(list_usage(job["job_id"]))
+    # v2 (cost disputes) covers every line or none: a job with a line recorded
+    # before v2 existed gets no v2 root rather than one that omits a charge.
+    entries_v2 = list_usage_v2(job["job_id"])
+    sealed["root_v2"] = job_usage_v2.seal(entries_v2)["root"] if entries_v2 is not None else None
     job = store_seal(job["job_id"], sealed)
     return {**_job_view(job), "usage": _usage_totals(job)}
 
@@ -182,6 +196,7 @@ def _usage_totals(job: dict) -> dict[str, Any]:
         "tokens_in": job["usage_tokens_in"],
         "tokens_out": job["usage_tokens_out"],
         "cost_usd": job["usage_cost_usd"],
+        "root_v2": job.get("usage_root_v2"),
         "sealed": True,
     }
 
@@ -195,17 +210,23 @@ async def get_job_usage(
 ) -> dict[str, Any]:
     job = _load(job_id, user_id)
     entries = list_usage(job["job_id"])
+    entries_v2 = list_usage_v2(job["job_id"])
+    root_v2 = job_usage_v2.seal(entries_v2)["root"] if entries_v2 is not None else None
     if job.get("usage_root"):
         out = _usage_totals(job)
-        # The stored root is authoritative; recompute to catch a tampered log.
-        if seal(entries)["root"] != job["usage_root"]:
+        # The stored roots are authoritative; recompute to catch a tampered log.
+        if seal(entries)["root"] != job["usage_root"] or (
+            job.get("usage_root_v2") and root_v2 != job["usage_root_v2"]
+        ):
             logger.error("usage log for %s no longer matches its sealed root", job["job_id"])
             raise _error(500, "usage_root_mismatch", "The stored log does not match its seal.")
     else:
-        out = {**seal(entries), "sealed": False}
+        out = {**seal(entries), "root_v2": root_v2, "sealed": False}
     out["job_id"] = job["job_id"]
     if full:
         out["entries"] = entries
+        if entries_v2 is not None:
+            out["entries_v2"] = entries_v2
     return out
 
 
@@ -213,12 +234,24 @@ async def get_job_usage(
 async def get_job_usage_proof(
     job_id: str,
     i: int = Query(..., ge=0),
+    v: int = Query(1, ge=1, le=2, description="1: keccak escrow tree; 2: sha256 dispute tree"),
     user_id: int = Depends(job_owner_id),
     _rl: None = Depends(jobs_read_rl),
 ) -> dict[str, Any]:
     job = _load(job_id, user_id)
     if not job.get("usage_root"):
         raise _error(409, "job_not_sealed", "Close the job before requesting proofs.")
+    if v == 2:
+        if not job.get("usage_root_v2"):
+            raise _error(409, "job_not_sealed_v2", "This job has no v2 (cost-dispute) seal.")
+        entries_v2 = list_usage_v2(job["job_id"]) or []
+        if i >= len(entries_v2):
+            raise _error(404, "usage_line_not_found", f"The job has {len(entries_v2)} usage lines.")
+        out = job_usage_v2.proof_for(entries_v2, i)
+        if out["root"] != job["usage_root_v2"]:
+            logger.error("v2 usage log for %s no longer matches its sealed root", job["job_id"])
+            raise _error(500, "usage_root_mismatch", "The stored log does not match its seal.")
+        return {"job_id": job["job_id"], "version": 2, **out}
     entries = list_usage(job["job_id"])
     if i >= len(entries):
         raise _error(404, "usage_line_not_found", f"The job has {len(entries)} usage lines.")

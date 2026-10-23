@@ -87,6 +87,7 @@ async def stream_generator(
     credit_deduction_success = False  # Track whether credits were actually deducted
     billing_scheduled = False  # Set once post-stream billing has been handed to a task
     client_cancelled = False  # CancelledError/GeneratorExit: client went away mid-stream
+    last_finish_reason = None  # the provider's real finish_reason, recorded at billing
     inner_stream = None
 
     # Initialize normalizer
@@ -160,6 +161,7 @@ async def stream_generator(
             # CRITICAL: Check for client disconnect to prevent zombie requests (499)
             if request and await request.is_disconnected():
                 logger.warning(f"[StreamGenerator] Client disconnected (request_id={request_id})")
+                last_finish_reason = "cancelled"
                 break
 
             # FREEZE FIX: Wall-clock deadline — abort if stream exceeds MAX_STREAM_DURATION.
@@ -235,6 +237,9 @@ async def stream_generator(
                 total_tokens = chunk.usage.total_tokens
 
             if normalized_chunk:
+                for _choice in normalized_chunk.choices or []:
+                    if isinstance(_choice, dict) and _choice.get("finish_reason"):
+                        last_finish_reason = _choice["finish_reason"]
                 yield normalized_chunk.to_sse()
             else:
                 # Only count as a real drop if it's not an Anthropic control event
@@ -435,6 +440,7 @@ async def stream_generator(
                 request_id=request_id,
                 client_ip=client_ip,
                 api_key_id=api_key_id,
+                finish_reason=last_finish_reason,
             )
         )
 

@@ -236,6 +236,14 @@ class Config:
     BASE_RPC_URL = _get_env_var("BASE_RPC_URL", "https://mainnet.base.org")
     POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-rpc.com")
     ARBITRUM_RPC_URL = _get_env_var("ARBITRUM_RPC_URL", "https://arb1.arbitrum.io/rpc")
+    # v2 job usage lines for cost disputes (src/services/job_usage_v2.py). Ships
+    # dark: migration 20261023000000 must be applied BEFORE this is turned on, or
+    # the new append_job_usage arguments fail and job usage lines are lost.
+    JOB_USAGE_V2_ENABLED = _get_env_var("JOB_USAGE_V2_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     # Ships dark, exactly like STAKING_REWARDS_ENABLED did -- the schema, jobs
     # and endpoints land inert until the rates/caps are a confirmed product
     # decision.

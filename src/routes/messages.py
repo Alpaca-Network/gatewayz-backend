@@ -31,19 +31,23 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.schemas.proxy import ProxyRequest
 from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
 from src.security.security import ApiKeyLookupUnavailable, validate_api_key_security
+from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.providers.anthropic_transformer import (
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
 )
 
 logger = logging.getLogger(__name__)
+
+# Job keys: the usage line's content hash, emitted by chat_dispatch before [DONE].
+_CONTENT_HASH_COMMENT = f": {CONTENT_HASH_HEADER.lower()}: "
 
 router = APIRouter(tags=["messages"])
 
@@ -265,6 +269,9 @@ async def _stream_anthropic_events_impl(
     try:
         async for raw in openai_stream:
             # The OpenAI adapter yields fully-formed SSE lines.
+            if raw and raw.startswith(_CONTENT_HASH_COMMENT):
+                yield raw  # job keys: the usage line's content hash, as an SSE comment
+                continue
             if not raw or not raw.startswith("data: "):
                 continue
             payload = raw[len("data: ") :].strip()
@@ -552,6 +559,10 @@ async def create_message(
         stop_sequences=req.stop_sequences,
     )
     anthropic_response["id"] = message_id
+    # Job keys only: the content fingerprint of this request's usage line.
+    content_hash = getattr(getattr(request, "state", None), "gatewayz_content_hash", None)
+    if content_hash:
+        return JSONResponse(content=anthropic_response, headers={CONTENT_HASH_HEADER: content_hash})
     return anthropic_response
 
 

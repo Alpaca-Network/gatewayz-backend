@@ -469,6 +469,8 @@ def create_app() -> FastAPI:
         ("status_page", "Public Status Page"),  # Public status page (no auth required)
         # Inference escrow: job-scoped keys + sealed usage records (GenLayer cohort).
         ("jobs", "Inference Jobs"),
+        # Content-addressed rate sheets that job usage lines are charged against.
+        ("price_sheets", "Price Sheets"),
     ]
 
     # Define non-v1 routes (loaded directly on app without prefix)
