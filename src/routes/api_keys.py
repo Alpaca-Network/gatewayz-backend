@@ -26,6 +26,7 @@ from src.services.auth_rate_limiting import (
     AuthRateLimitType,
     check_auth_rate_limit,
 )
+from src.services.key_purpose import PURPOSE_GENERAL, normalize_purpose
 from src.services.usage_signing import ALG as USAGE_ALG
 from src.services.usage_signing import SigningUnavailable
 from src.services.usage_signing import key_id as usage_key_id
@@ -81,6 +82,13 @@ async def create_user_api_key(
             if request.max_requests is not None and request.max_requests <= 0:
                 raise HTTPException(status_code=400, detail="Max requests must be positive")
 
+            # Key purpose: None/"general" or "validator" (no-logging mode,
+            # src/services/key_purpose.py). Rejected before anything is created.
+            try:
+                purpose = normalize_purpose(request.purpose)
+            except ValueError as ve:
+                raise HTTPException(status_code=400, detail=str(ve)) from ve
+
             # Validate environment tag
             valid_environments = ["test", "staging", "live", "development"]
             if request.environment_tag not in valid_environments:
@@ -121,6 +129,7 @@ async def create_user_api_key(
                     max_requests=request.max_requests,
                     ip_allowlist=request.ip_allowlist,
                     domain_referrers=request.domain_referrers,
+                    **({"purpose": purpose} if purpose is not None else {}),
                 )
 
                 # Add Phase 4 security logging and audit features
@@ -163,6 +172,7 @@ async def create_user_api_key(
                 "api_key": new_api_key,
                 "key_name": request.key_name,
                 "environment_tag": request.environment_tag,
+                "purpose": purpose or PURPOSE_GENERAL,
                 "security_features": {
                     "ip_allowlist": request.ip_allowlist or [],
                     "domain_referrers": request.domain_referrers or [],
@@ -276,13 +286,23 @@ async def update_user_api_key_endpoint(
                 updates["domain_referrers"] = request.domain_referrers
             if request.is_active is not None:
                 updates["is_active"] = request.is_active
+            if request.purpose is not None:
+                try:
+                    # "general" is stored as NULL (see normalize_purpose).
+                    updates["purpose"] = normalize_purpose(request.purpose)
+                except ValueError as ve:
+                    raise HTTPException(status_code=400, detail=str(ve)) from ve
 
         if not updates:
             raise HTTPException(status_code=400, detail="No valid fields to update")
 
         # Update the key in the database
         try:
-            success = update_api_key(api_key, user["id"], updates)
+            # Update the key named in the path. update_api_key looks a key up by
+            # its secret, and this used to pass the CALLER's key -- so editing
+            # key B while authenticated with key A silently edited A. For a
+            # privacy flag that is a fail-open: B would keep being logged.
+            success = update_api_key(key_to_update["api_key"], user["id"], updates)
 
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to update API key")

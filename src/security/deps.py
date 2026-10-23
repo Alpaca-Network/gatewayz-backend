@@ -16,6 +16,7 @@ from src.security.security import (
     audit_logger,
     validate_api_key_security,
 )
+from src.services.key_purpose import bind_request_key_purpose, is_validator_key
 from src.services.user_lookup_cache import get_user
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
@@ -225,7 +226,12 @@ async def get_api_key(
 
         # Log successful authentication
         user = get_user(api_key)
-        if user and request:
+        # Validator (no-logging) mode is decided here, once, for the rest of
+        # the request -- leaf persistence functions read it from the context.
+        bind_request_key_purpose(user)
+        # The per-request audit line carries client IP and user agent; a
+        # validator key's requests are not logged beyond billing.
+        if user and request and not is_validator_key(user):
             audit_logger.log_api_key_usage(
                 user_id=user["id"],
                 key_id=user.get("key_id", 0),
