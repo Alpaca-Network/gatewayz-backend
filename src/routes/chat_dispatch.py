@@ -25,6 +25,7 @@ from src.adapters.chat import OpenAIChatAdapter  # noqa: F401
 from src.handlers.chat_handler import ChatInferenceHandler  # noqa: F401
 from src.handlers.provider_registry import PROVIDER_ROUTING  # noqa: F401
 from src.routes.chat_helpers import _to_thread  # noqa: F401
+from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.model_transformations import transform_model_id  # noqa: F401
 from src.services.pricing import calculate_cost_async  # noqa: F401
 from src.services.prometheus_metrics import (  # noqa: F401
@@ -154,6 +155,15 @@ async def dispatch_streaming(
                     try:
                         async for _chunk in _sse_stream:
                             _content_started = True
+                            if _chunk.startswith("data: [DONE]"):
+                                # Job keys: billing (and the content hash) is done
+                                # by the time [DONE] is emitted. Sent as an SSE
+                                # comment, which clients and SDKs ignore.
+                                _hash = getattr(
+                                    getattr(request, "state", None), "gatewayz_content_hash", None
+                                )
+                                if _hash:
+                                    yield f": {CONTENT_HASH_HEADER.lower()}: {_hash}\n\n"
                             yield _chunk
                     finally:
                         # Client abort: close downward so process_stream sees the

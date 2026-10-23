@@ -40,7 +40,28 @@ def get_job(job_id: str, user_id: int) -> dict | None:
 
 
 def list_usage(job_id: str) -> list[dict]:
-    """All usage lines in seq order. Paged so a long job is never truncated."""
+    """All v1 usage entries in seq order."""
+    return [row["entry"] for row in _usage_rows(job_id, "seq,entry")]
+
+
+def list_usage_v2(job_id: str) -> list[dict] | None:
+    """All v2 entries in seq order, or None if any line predates v2.
+
+    A v2 root over only some of a job's lines would not match what the account
+    was charged, so a job with a v1-only line has no v2 seal at all.
+    """
+    from src.services.job_usage_v2 import enabled
+
+    if not enabled():
+        return None  # entry_v2 may not exist yet (migration 20261023000000)
+    rows = _usage_rows(job_id, "seq,entry_v2")
+    if any(row.get("entry_v2") is None for row in rows):
+        return None
+    return [row["entry_v2"] for row in rows]
+
+
+def _usage_rows(job_id: str, columns: str) -> list[dict]:
+    """Usage rows in seq order. Paged so a long job is never truncated."""
     client = get_supabase_client()
     out: list[dict] = []
     page = 1000
@@ -48,7 +69,7 @@ def list_usage(job_id: str) -> list[dict]:
     while True:
         result = (
             client.table(_USAGE)
-            .select("seq,entry")
+            .select(columns)
             .eq("job_id", job_id)
             .order("seq")
             .range(start, start + page - 1)
@@ -62,19 +83,37 @@ def list_usage(job_id: str) -> list[dict]:
     for i, row in enumerate(out):
         if row["seq"] != i:
             raise RuntimeError(f"usage log for {job_id} has a gap at seq {i}")
-    return [row["entry"] for row in out]
+    return out
 
 
-def append_usage(job_id: str, entry: dict) -> int:
-    result = (
-        get_supabase_client()
-        .rpc(
-            "append_job_usage",
-            {"p_job_id": job_id, "p_entry": entry, "p_cost": entry["cost_usd"]},
+def append_usage(
+    job_id: str,
+    entry: dict,
+    entry_v2: dict | None = None,
+    usage_estimated: bool = False,
+    price_sheet_body: str | None = None,
+) -> int:
+    """Append one line (v1 entry, plus the v2 entry and its price sheet when given)
+    in a single transaction."""
+    params: dict[str, Any] = {"p_job_id": job_id, "p_entry": entry, "p_cost": entry["cost_usd"]}
+    if entry_v2 is not None:
+        params.update(
+            {
+                "p_entry_v2": entry_v2,
+                "p_usage_estimated": usage_estimated,
+                "p_price_sheet_body": price_sheet_body,
+            }
         )
-        .execute()
-    )
+    result = get_supabase_client().rpc("append_job_usage", params).execute()
     return int(result.data)
+
+
+def get_price_sheet(sheet_hash: str) -> str | None:
+    """The exact body stored for a price-sheet hash, or None."""
+    result = (
+        get_supabase_client().table("price_sheets").select("body").eq("hash", sheet_hash).execute()
+    )
+    return result.data[0]["body"] if result.data else None
 
 
 def mark_closed(job_id: str, api_key_id: int | None) -> None:
@@ -104,6 +143,7 @@ def store_seal(job_id: str, sealed: dict) -> dict:
             "usage_tokens_in": sealed["tokens_in"],
             "usage_tokens_out": sealed["tokens_out"],
             "usage_cost_usd": sealed["cost_usd"],
+            "usage_root_v2": sealed.get("root_v2"),
         }
     ).eq("job_id", job_id).is_("usage_root", "null").execute()
     result = client.table(_JOBS).select("*").eq("job_id", job_id).execute()

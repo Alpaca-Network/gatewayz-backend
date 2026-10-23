@@ -240,6 +240,7 @@ async def _process_stream_completion_background(
     client_ip=None,
     api_key_id=None,
     cancelled=False,
+    finish_reason=None,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -248,7 +249,14 @@ async def _process_stream_completion_background(
     event to be sent immediately without waiting for database operations.
 
     For anonymous users, only metrics recording is performed (no credits, usage tracking, or history).
+
+    ``finish_reason`` is the stream's last one (``"cancelled"`` when the client
+    aborted). Recorded as given: a reply cut off by max_tokens is ``length``,
+    which a cost dispute must be able to tell apart from a provider failure.
     """
+    if cancelled:
+        finish_reason = "cancelled"
+    finish_reason = finish_reason or "unknown"
     try:
         # Add distributed tracing for streaming completion
         async with AITracer.trace_inference(
@@ -271,7 +279,7 @@ async def _process_stream_completion_background(
             # Set response model (for streaming, use requested model as we don't capture response model)
             trace_ctx.set_response_model(
                 response_model=model,
-                finish_reason="stop",  # Streaming completed successfully
+                finish_reason=finish_reason,
             )
 
             # Set user info if authenticated
@@ -362,6 +370,8 @@ async def _process_stream_completion_background(
                 completion_tokens,
                 cost,
                 request_id or "",
+                request_id=request_id,
+                finish_reason=finish_reason,
             )
 
             # Increment API key usage counter
@@ -391,7 +401,7 @@ async def _process_stream_completion_background(
                     tokens=total_tokens,
                     cost=cost,
                     speed=speed,
-                    finish_reason="stop",
+                    finish_reason=finish_reason,
                     app="API",
                     metadata={
                         "prompt_tokens": prompt_tokens,

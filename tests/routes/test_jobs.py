@@ -36,6 +36,7 @@ class FakeStore:
     def __init__(self):
         self.jobs: dict[str, dict] = {}
         self.usage: dict[str, list[dict]] = {}
+        self.usage_v2: dict[str, list[dict | None]] = {}
         self.calls: list[str] = []
         self.keys: list[dict] = []
 
@@ -60,6 +61,7 @@ class FakeStore:
         }
         self.jobs[row["job_id"]] = job
         self.usage[row["job_id"]] = []
+        self.usage_v2[row["job_id"]] = []
         return job
 
     def get_job(self, job_id, user_id):
@@ -69,6 +71,11 @@ class FakeStore:
     def list_usage(self, job_id):
         self.calls.append("list_usage")
         return list(self.usage[job_id])
+
+    def list_usage_v2(self, job_id):
+        self.calls.append("list_usage_v2")
+        rows = self.usage_v2[job_id]
+        return None if any(r is None for r in rows) else list(rows)
 
     def mark_closed(self, job_id, api_key_id):
         self.calls.append("mark_closed")
@@ -84,6 +91,7 @@ class FakeStore:
                 usage_tokens_in=sealed["tokens_in"],
                 usage_tokens_out=sealed["tokens_out"],
                 usage_cost_usd=sealed["cost_usd"],
+                usage_root_v2=sealed.get("root_v2"),
             )
         return j
 
@@ -96,6 +104,7 @@ def store(monkeypatch):
         "insert_job",
         "get_job",
         "list_usage",
+        "list_usage_v2",
         "mark_closed",
         "store_seal",
     ):
@@ -174,7 +183,7 @@ def test_close_stops_appends_before_reading_the_log(store):
     store.usage[job_id] = _entries(3)
     r = c.post(f"/v1/jobs/{job_id}/close")
     assert r.status_code == 200
-    assert store.calls == ["mark_closed", "list_usage", "store_seal"]
+    assert store.calls == ["mark_closed", "list_usage", "list_usage_v2", "store_seal"]
     u = r.json()["usage"]
     assert u["root"] == ju.seal(_entries(3))["root"] and u["requests"] == 3 and u["sealed"]
 
@@ -228,3 +237,91 @@ def test_proof_needs_a_sealed_job_and_verifies(store):
         h = ju._node(h, bytes.fromhex(sib[2:]))
     assert "0x" + h.hex() == p["root"]
     assert c.get(f"/v1/jobs/{job_id}/usage/proof?i=5").status_code == 404
+
+
+# --------------------------------------------------------------------------- v2 (cost disputes)
+
+from src.services import job_usage_v2 as v2  # noqa: E402
+
+SHEET = "0x" + "ab" * 32
+
+
+def _entries_v2(n):
+    return [
+        {
+            "request_id": f"req_{i}",
+            "ts": f"2026-10-05T12:00:{i:02d}Z",
+            "model": "openai/gpt-5-mini",
+            "provider": "openai",
+            "tokens_in": 10 + i,
+            "tokens_out": 5,
+            "tokens_reasoning": 64 * i,
+            "cost_usd": "0.01",
+            "status": 200,
+            "finish_reason": "length" if i == 1 else "stop",
+            "price_sheet": SHEET,
+            "content_hash": "0x" + f"{i:02x}" * 32,
+            "commit": f"r{i}",
+        }
+        for i in range(n)
+    ]
+
+
+def test_close_writes_a_v2_root_next_to_the_v1_root(store):
+    c = _client()
+    job_id = _create(c).json()["job_id"]
+    store.usage[job_id] = _entries(3)
+    store.usage_v2[job_id] = _entries_v2(3)
+    u = c.post(f"/v1/jobs/{job_id}/close").json()["usage"]
+    assert u["root"] == ju.seal(_entries(3))["root"]  # v1 unchanged
+    assert u["root_v2"] == v2.seal(_entries_v2(3))["root"]
+
+
+def test_a_job_with_a_pre_v2_line_gets_no_v2_root(store):
+    c = _client()
+    job_id = _create(c).json()["job_id"]
+    store.usage[job_id] = _entries(2)
+    store.usage_v2[job_id] = [None, _entries_v2(2)[1]]
+    u = c.post(f"/v1/jobs/{job_id}/close").json()["usage"]
+    assert u["root"] and u["root_v2"] is None
+    r = c.get(f"/v1/jobs/{job_id}/usage/proof?i=0&v=2")
+    assert r.status_code == 409 and r.json()["detail"]["error"]["code"] == "job_not_sealed_v2"
+
+
+def test_v2_proof_verifies_with_sha256(store):
+    c = _client()
+    job_id = _create(c).json()["job_id"]
+    store.usage[job_id] = _entries(5)
+    store.usage_v2[job_id] = _entries_v2(5)
+    c.post(f"/v1/jobs/{job_id}/close")
+    p = c.get(f"/v1/jobs/{job_id}/usage/proof?i=3&v=2").json()
+    assert p["version"] == 2 and p["entry"]["request_id"] == "req_3"
+    h = v2.leaf_hash(p["entry"])
+    assert "0x" + h.hex() == p["leaf"]
+    for sib in p["proof"]:
+        h = v2._node(h, bytes.fromhex(sib[2:]))
+    assert "0x" + h.hex() == p["root"] == store.jobs[job_id]["usage_root_v2"]
+    assert c.get(f"/v1/jobs/{job_id}/usage/proof?i=5&v=2").status_code == 404
+
+
+def test_a_tampered_v2_log_is_reported_not_served(store):
+    c = _client()
+    job_id = _create(c).json()["job_id"]
+    store.usage[job_id] = _entries(3)
+    store.usage_v2[job_id] = _entries_v2(3)
+    c.post(f"/v1/jobs/{job_id}/close")
+    store.usage_v2[job_id][2]["tokens_reasoning"] = 0
+    r = c.get(f"/v1/jobs/{job_id}/usage")
+    assert r.status_code == 500 and r.json()["detail"]["error"]["code"] == "usage_root_mismatch"
+    r = c.get(f"/v1/jobs/{job_id}/usage/proof?i=0&v=2")
+    assert r.status_code == 500
+
+
+def test_usage_full_includes_v2_entries(store):
+    c = _client()
+    job_id = _create(c).json()["job_id"]
+    store.usage[job_id] = _entries(2)
+    store.usage_v2[job_id] = _entries_v2(2)
+    live = c.get(f"/v1/jobs/{job_id}/usage?full=true").json()
+    assert live["root_v2"] == v2.seal(_entries_v2(2))["root"]
+    assert live["entries_v2"] == _entries_v2(2)
