@@ -8,6 +8,7 @@ Pricing extraction below is provider-specific and intentionally NOT unified
 """
 
 import logging
+from decimal import Decimal, InvalidOperation
 
 import httpx
 
@@ -30,6 +31,12 @@ def normalize_groq_model(groq_model: dict) -> dict:
     provider_model_id = groq_model.get("id")
     if not provider_model_id:
         return {"source_gateway": "groq", "raw_groq": groq_model or {}}
+
+    # Speech models (orpheus TTS: audio out, priced per character) are not chat
+    # models; never list them, whatever price an enrichment tier may hold.
+    output_modalities = groq_model.get("output_modalities")
+    if output_modalities and "text" not in output_modalities:
+        return None
 
     slug = f"groq/{provider_model_id}"
     provider_slug = "groq"
@@ -78,10 +85,17 @@ def normalize_groq_model(groq_model: dict) -> dict:
     # Current Groq API: OpenRouter-shaped USD-per-token strings
     # ({"prompt": "0.0000008", "completion": "0.000004"}). Ignoring these let
     # enrichment fall back to cross-referenced prices below Groq's real cost.
-    elif "prompt" in pricing_info or "completion" in pricing_info:
-        for key in ("prompt", "completion", "request", "image"):
-            if pricing_info.get(key) not in (None, ""):
-                pricing[key] = str(pricing_info[key])
+    # The sync treats Groq prices as per-1M (providers.metadata.pricing_format
+    # default) and divides by 1e6, so convert per-token -> per-1M here; passing
+    # per-token through was divided twice and delisted every chat model.
+    # Models with no completion price (TTS, priced per character) are left
+    # unpriced so they stay out of the chat catalog.
+    elif pricing_info.get("prompt") and pricing_info.get("completion"):
+        for key in ("prompt", "completion"):
+            try:
+                pricing[key] = str(Decimal(str(pricing_info[key])) * 1_000_000)
+            except (InvalidOperation, ValueError):
+                pricing[key] = None
 
     # Check for direct dollar-based pricing
     elif "input" in pricing_info or "output" in pricing_info:
