@@ -1093,7 +1093,14 @@ async def chat_completions(
         # call performs only the route-owned bookkeeping (rate-limit + shadow
         # ledger) and does NOT deduct a second time — the prior behaviour billed
         # paid users twice per request.
-        cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
+        if not is_anonymous:
+            # What the unified handler actually charged (loss-proof, cache-aware,
+            # BYOK fee applied). Recomputing it here could disagree with the bill,
+            # and calculate_cost raises on missing/anomalous pricing, which would
+            # turn an already-charged request into a 500.
+            cost = float((processed.get("gateway_usage") or {}).get("cost_usd") or 0.0)
+        else:
+            cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
         if not is_anonymous:
             # With already_charged=True this is bookkeeping only (rate-limit usage
             # and the shadow ledger; the handler already deducted credits), so it

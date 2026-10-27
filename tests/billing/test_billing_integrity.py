@@ -93,8 +93,14 @@ def test_non_streaming_deduction_only_after_provider_success():
     Credit deduction in non-streaming path must only happen AFTER
     the provider call succeeds (after 'break' in failover loop).
     """
+    import re
+
     source = Path("src/routes/chat.py").read_text()
-    assert "_handle_credits_and_usage(" in source
+    dispatch = source.find("await dispatch_non_streaming(")
+    # Called directly, or scheduled as a background task (after the response).
+    m = re.search(r"_handle_credits_and_usage\(|add_task\(\s*_handle_credits_and_usage\b", source)
+    assert dispatch != -1 and m is not None
+    assert m.start() > dispatch, "billing bookkeeping must follow the provider call"
 
 
 def test_streaming_background_task_only_after_done_event():
