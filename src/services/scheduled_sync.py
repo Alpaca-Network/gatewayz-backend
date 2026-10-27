@@ -14,7 +14,7 @@ Features:
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -25,6 +25,9 @@ from src.config.config import Config
 from src.services.ops.job_runs import record_job_run
 
 logger = logging.getLogger(__name__)
+
+# Delay before the first model sync after startup (then every interval).
+MODEL_SYNC_FIRST_RUN_DELAY_MINUTES = 5
 
 # Global scheduler instance
 _scheduler: AsyncIOScheduler | None = None
@@ -275,6 +278,11 @@ def start_scheduler():
         _scheduler.add_job(
             run_scheduled_model_sync,
             trigger=IntervalTrigger(minutes=interval_minutes),
+            # First run shortly after startup rather than a full interval later:
+            # with a 60-minute interval, every redeploy pushed the next sync back
+            # an hour, and three deploys in a row left the catalog unsynced for
+            # 90+ minutes after new provider keys went in (2026-10-27).
+            next_run_time=datetime.now(UTC) + timedelta(minutes=MODEL_SYNC_FIRST_RUN_DELAY_MINUTES),
             id="model_sync",
             name="Model Sync Job",
             replace_existing=True,
@@ -286,7 +294,9 @@ def start_scheduler():
         _scheduler.start()
 
         logger.info("✅ Scheduled model sync service started successfully")
-        logger.info(f"   Next sync in {interval_minutes} minutes")
+        logger.info(
+            f"   First sync in {MODEL_SYNC_FIRST_RUN_DELAY_MINUTES} minutes, then every {interval_minutes}"
+        )
 
     except Exception as e:
         logger.error(f"❌ Failed to start scheduled model sync service: {e}")

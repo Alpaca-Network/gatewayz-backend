@@ -134,9 +134,12 @@ async def prepare_upstream_request(
 
         # Use routed model for provider detection when code routing is active
         model_for_provider_detection = req.model if is_code_route and req.model else original_model
-        override_provider = await asyncio.to_thread(
+        catalog_provider = await asyncio.to_thread(
             catalog_gateway_for, model_for_provider_detection
-        ) or detect_provider_from_model_id(model_for_provider_detection)
+        )
+        override_provider = catalog_provider or detect_provider_from_model_id(
+            model_for_provider_detection
+        )
         if override_provider:
             override_provider = override_provider.lower()
             if override_provider == "hug":
@@ -203,7 +206,16 @@ async def prepare_upstream_request(
         effective_model = req.model if req.model else original_model
 
         provider_chain = build_provider_failover_chain(provider)
-        provider_chain = enforce_model_failover_rules(effective_model, provider_chain)
+        if catalog_provider and provider == catalog_provider:
+            # The catalog chose the provider. The name-prefix rules (openai/* ->
+            # OpenAI or OpenRouter only) would drop it: 'openai/gpt-oss-120b' is a
+            # DeepInfra listing and failed as "No providers available" (2026-10-27).
+            # Keep the allowlist, which still has the last say.
+            from src.utils.provider_filter import filter_chain_by_model_allowlist
+
+            provider_chain = filter_chain_by_model_allowlist(effective_model, provider_chain)
+        else:
+            provider_chain = enforce_model_failover_rules(effective_model, provider_chain)
         provider_chain = filter_by_circuit_breaker(effective_model, provider_chain)
 
         # Gatewayz One Phase 2 — smart-router reordering (flag-gated, off by default).
