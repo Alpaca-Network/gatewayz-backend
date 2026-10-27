@@ -27,7 +27,7 @@ env:
 jobs:
   security-tests:
     name: Security Hardening Tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout code
