@@ -42,6 +42,13 @@ def tool_cost_usd(tool_name: str) -> float:
     return cost * margin
 
 
+def _state_billing_ref(request: Request | None) -> str | None:
+    """The server-minted billing ref the charge will settle on, if the
+    middleware set one (never a freshly minted fallback: a hold under a key
+    the charge does not use would only expire)."""
+    return getattr(getattr(request, "state", None), "billing_ref", None)
+
+
 async def _charge_tool(api_key: str, user: dict, tool_name: str, request: Request | None) -> None:
     await charge_credits(
         api_key=api_key,
@@ -170,7 +177,9 @@ async def execute_tool_endpoint(
         raise HTTPException(status_code=404, detail=f"Tool '{request.name}' not found")
 
     # Pre-check before any provider spend; every tool call is billed.
-    user = await precheck_credits(api_key, tool_cost_usd(request.name))
+    user = await precheck_credits(
+        api_key, tool_cost_usd(request.name), _state_billing_ref(http_request)
+    )
 
     try:
         logger.info(
@@ -233,7 +242,9 @@ async def search_augment(
            https://coindesk.com/...
         ...
     """
-    user = await precheck_credits(api_key, tool_cost_usd("web_search"))
+    user = await precheck_credits(
+        api_key, tool_cost_usd("web_search"), _state_billing_ref(http_request)
+    )
 
     try:
         logger.info(f"Search augment request: query='{request.query[:50]}...'")

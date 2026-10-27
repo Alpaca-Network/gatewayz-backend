@@ -68,6 +68,18 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     # hard-coded, so raising the count doesn't make the job read as stale.
     "holdings_snapshots": 1440 // max(1, min(Config.HOLDINGS_SNAPSHOTS_PER_DAY, 24)),
     "holdings_rewards": 1440,
+    # Hourly staleness check on holdings_snapshots (src/services/holdings/alerts.py).
+    "holdings_sweep_watchdog": 60,
+    # Delegated staking (src/services/delegation/): the measurement sweep runs
+    # DELEGATION_MEASUREMENTS_PER_DAY times a day; accrual and reconciliation daily.
+    "delegation_measurements": 1440 // max(1, min(Config.DELEGATION_MEASUREMENTS_PER_DAY, 24)),
+    "delegation_accruals": 1440,
+    "delegation_reconciliation": 1440,
+    "delegation_attribution": 1440,
+    # Usage anchoring on Avalanche C-Chain (src/services/chain/usage_anchor.py):
+    # the anchor once a day, the confirmation sweep every few minutes.
+    "usage_anchor": 1440,
+    "usage_anchor_sweep": Config.USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES,
 }
 
 # WAYZ token/staking contracts are deployed on Avalanche Fuji testnet.

@@ -12,12 +12,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.db.holdings import (
+    HoldingsLookupError,
     count_sweeps_for_date,
     create_holdings_accrual,
     create_token,
     get_active_holdings_rates,
     get_holdings_accrual,
     get_latest_snapshot_usd,
+    get_latest_sweep_taken_at,
     get_min_usd_for_date,
     get_sweep_totals_for_date,
     list_all_tokens,
@@ -604,3 +606,28 @@ class TestListWalletsWithSweepsForDate:
     def test_returns_empty_on_error(self, sb):
         with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
             assert list_wallets_with_sweeps_for_date(date(2026, 9, 14)) == []
+
+
+class TestGetLatestSweepTakenAt:
+    def test_returns_the_newest_taken_at_as_aware_utc(self, sb):
+        client = _mock_table_client(
+            {"wallet_holdings_sweeps": [{"taken_at": "2026-10-08T06:05:00Z"}]}
+        )
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            got = get_latest_sweep_taken_at()
+        assert got == datetime(2026, 10, 8, 6, 5, tzinfo=UTC)
+        query = client.table("wallet_holdings_sweeps")
+        query.order.assert_called_once_with("taken_at", desc=True)
+        query.limit.assert_called_once_with(1)
+
+    def test_none_when_nothing_was_ever_recorded(self, sb):
+        client = _mock_table_client({"wallet_holdings_sweeps": []})
+        with patch("src.db.holdings.get_supabase_client", return_value=client):
+            assert get_latest_sweep_taken_at() is None
+
+    def test_a_failed_read_raises_instead_of_reading_as_never(self, sb):
+        """None means "never recorded" -- the watchdog alerts on that -- so a
+        DB failure must not come back as None."""
+        with patch("src.db.holdings.get_supabase_client", return_value=_boom_client()):
+            with pytest.raises(HoldingsLookupError):
+                get_latest_sweep_taken_at()

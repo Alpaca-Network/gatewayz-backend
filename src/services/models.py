@@ -814,12 +814,26 @@ def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = Fal
             # Current: Full aggregated flat catalog
             models = get_cached_full_catalog()
             if models is not None:
+                from src.utils.provider_filter import filter_catalog_by_allowlist
+
+                models = filter_catalog_by_allowlist(models)
                 logger.debug(f"Returning {len(models)} models for 'all'")
                 return filter_valid_enhanced_models(models)
             # get_cached_full_catalog already fetched from DB on miss
             logger.warning("Failed to get catalog from cache or database")
             return []
         else:
+            # A provider outside ENABLED_PROVIDERS is never served, so it has no
+            # catalog to return. Without this, callers that walk every active
+            # provider slug (detect_model_gateway, get_all_models_sequential,
+            # fetch_specific_model_from_*) hit the database for each disabled
+            # provider and log "payload is empty" every cache cycle.
+            from src.utils.provider_filter import is_provider_enabled
+
+            if not is_provider_enabled(gateway):
+                logger.debug(f"get_cached_models: '{gateway}' not in ENABLED_PROVIDERS")
+                return []
+
             # Single provider catalog (use_unique_models has no effect here)
             if use_unique_models:
                 logger.debug(

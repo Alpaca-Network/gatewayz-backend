@@ -6,7 +6,9 @@ admin panel needs: job health (reused, not copied, from admin_wayz's own
 block builders), external integration health
 (``src/services/integrations_health.py``), secrets *presence* -- never
 values -- for a fixed allow-list of env vars, and provider budget
-exhaustion (``src/services/provider_budget_alerts.py``). ``GET /admin/wayz/status``
+exhaustion (``src/services/provider_budget_alerts.py``), and holdings sweep
+coverage (``src/services/holdings/alerts.py``), and delegated staking
+(``src/services/delegation/``). ``GET /admin/wayz/status``
 keeps working unchanged; this route is additive.
 
 Same degradation contract as admin_wayz: every sub-block is computed
@@ -34,6 +36,7 @@ from src.routes.admin_wayz import (
     _safe_block,
 )
 from src.security.deps import require_admin_or_env_key
+from src.services.holdings.alerts import holdings_sweep_health
 from src.services.integrations_health import check_all
 from src.services.privy_migration import migration_counts
 from src.services.provider_alerting import ops_alerts_status
@@ -93,6 +96,43 @@ def _build_provider_budget_block() -> dict[str, Any]:
     return provider_budget_status()
 
 
+def _build_delegation_block() -> dict[str, Any]:
+    """Delegated staking at a glance: on/off, which assets are configured,
+    which are paused by reconciliation (fail closed), and the last run of
+    each of its three jobs -- the reconciliation run's summary carries the
+    per-asset cost vs revenue. Cheap reads only; the full ledger comparison
+    is GET /admin/delegation/reconciliation."""
+    from src.db.delegation import ASSETS, get_controls, get_latest_measurement_taken_at
+    from src.services.delegation.rewards import asset_configured, paused_assets
+    from src.services.ops.job_runs import get_job_runs
+
+    controls = get_controls()
+    paused = paused_assets(controls)
+    latest = get_latest_measurement_taken_at()
+    return {
+        "enabled": bool(Config.DELEGATED_STAKING_ENABLED),
+        "assets": {
+            asset: {
+                "configured": asset_configured(asset),
+                # The payout rule: unreadable / missing / not explicitly
+                # unpaused all mean paused.
+                "paused": asset in paused,
+                "paused_reason": ((controls or {}).get(asset) or {}).get("paused_reason"),
+            }
+            for asset in ASSETS
+        },
+        "last_measurement_at": latest.isoformat() if latest else None,
+        "jobs": get_job_runs(
+            [
+                "delegation_measurements",
+                "delegation_accruals",
+                "delegation_reconciliation",
+                "delegation_attribution",
+            ]
+        ),
+    }
+
+
 def _build_wayz_block(jobs_block: dict[str, Any]) -> dict[str, Any]:
     """The same payload as GET /admin/wayz/status, minus jobs (reported at
     the top level of this response instead, alongside integrations/secrets).
@@ -122,6 +162,11 @@ async def get_admin_status(
         "migration": _safe_block(_build_migration_block, "migration"),
         "provider_budget": _safe_block(_build_provider_budget_block, "provider_budget"),
         "ops_alerts": _safe_block(ops_alerts_status, "ops_alerts"),
+        # Is the holdings sweep actually recording wallets? A job that runs
+        # "ok" while skipping every wallet looks healthy in `jobs`.
+        "holdings_sweeps": _safe_block(holdings_sweep_health, "holdings_sweeps"),
+        # Delegated staking: configured / paused (fail closed) / job runs.
+        "delegation": _safe_block(_build_delegation_block, "delegation"),
     }
 
     return {"success": True, "data": data}

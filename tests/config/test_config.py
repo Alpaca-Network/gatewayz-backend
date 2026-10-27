@@ -53,6 +53,21 @@ class TestConfigEnvironmentDetection:
         assert config.Config.IS_STAGING is False
         assert config.Config.IS_DEVELOPMENT is True
 
+    def test_cardano_testnet_flag_is_ignored_in_production(self, monkeypatch):
+        """A testnet stake key proves nothing about mainnet ADA: production never accepts one."""
+        import importlib
+
+        from src.config import config
+
+        monkeypatch.setenv("DELEGATION_ALLOW_CARDANO_TESTNET", "true")
+        monkeypatch.setenv("APP_ENV", "production")
+        importlib.reload(config)
+        assert config.Config.DELEGATION_ALLOW_CARDANO_TESTNET is False
+
+        monkeypatch.setenv("APP_ENV", "staging")
+        importlib.reload(config)
+        assert config.Config.DELEGATION_ALLOW_CARDANO_TESTNET is True
+
     def test_is_testing_detection_with_testing_env(self, monkeypatch):
         """Test testing environment detection with APP_ENV=testing"""
         from src.config import config

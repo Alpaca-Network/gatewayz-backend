@@ -43,7 +43,7 @@ from src.db.holdings import (
     select_holdings_rate,
     update_token,
 )
-from src.db.user_wallets import get_wallets_for_user
+from src.db.user_wallets import get_wallets_for_user, is_evm_wallet
 from src.schemas.holdings import (
     CreateHoldingsTokenRequest,
     RunHoldingsRewardsRequest,
@@ -193,7 +193,7 @@ async def get_holdings_rewards(
 
     for wallet in get_wallets_for_user(user["id"]):
         address = str(wallet.get("wallet_address") or "")
-        if not address:
+        if not address or not is_evm_wallet(wallet):
             continue
         observed = get_latest_snapshot_usd(address)
         value = observed if observed is not None else Decimal(0)

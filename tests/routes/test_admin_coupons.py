@@ -24,7 +24,8 @@ client = TestClient(app)
 SUPERADMIN = {"id": 1, "email": "root@example.com", "role": "superadmin"}
 ADMIN = {"id": 2, "email": "admin@example.com", "role": "admin"}
 
-NOW = datetime(2026, 9, 16, tzinfo=UTC)
+# Relative to the real clock: the route compares valid_until to datetime.now().
+NOW = datetime.now(UTC).replace(microsecond=0)
 FUTURE = NOW + timedelta(days=30)
 PAST = NOW - timedelta(days=30)
 

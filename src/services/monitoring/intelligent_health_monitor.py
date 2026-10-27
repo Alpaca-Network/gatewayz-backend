@@ -35,6 +35,11 @@ from src.db.model_health import UNMEASURED_STATUS_VALUES, is_unmeasured_status  
 
 logger = logging.getLogger(__name__)
 
+# Health-alert dedupe: repeat an unchanged alert at most hourly, and only
+# re-alert sooner when the health percentage moves by this many points.
+HEALTH_ALERT_REPEAT_SECONDS = 3600.0
+HEALTH_ALERT_MIN_DELTA_PCT = 5
+
 
 # A 400 carrying one of these means the model executed and hit the probe's own
 # token ceiling — liveness proven, not a failure. Reasoning models trip it
@@ -276,6 +281,10 @@ class IntelligentHealthMonitor:
         # (provider, model) -> monotonic timestamps of recent probes, for the
         # per-model hourly cap.
         self._probe_times: dict[tuple[str, str], deque[float]] = {}
+        # Last health alert sent: (severity, rounded health %, monotonic time).
+        # The publish cycle runs every few minutes; without this the same
+        # unchanged alert fired 542 times in 17 hours.
+        self._last_health_alert: tuple[str, int, float] | None = None
 
         # Configuration for each tier
         # HEALTH FIX #1094: Increased timeouts to reduce false timeout failures
@@ -525,9 +534,11 @@ class IntelligentHealthMonitor:
         try:
             from src.config.supabase_config import supabase
 
-            # Query models that are due for checking, ordered by priority
-            response = (
-                supabase.table("model_health_tracking")
+            # Query models that are due for checking, ordered by priority.
+            # The Supabase client is synchronous: every call in this monitor
+            # runs in a thread so it never stalls the API's event loop.
+            response = await asyncio.to_thread(
+                lambda: supabase.table("model_health_tracking")
                 .select("*")
                 .eq("is_enabled", True)
                 .lte("next_check_at", datetime.now(UTC).isoformat())
@@ -953,8 +964,8 @@ class IntelligentHealthMonitor:
 
             for attempt in range(max_retries):
                 try:
-                    current = (
-                        supabase.table("model_health_tracking")
+                    current = await asyncio.to_thread(
+                        lambda: supabase.table("model_health_tracking")
                         .select("*")
                         .eq("provider", result.provider)
                         .eq("model", result.model)
@@ -1121,7 +1132,9 @@ class IntelligentHealthMonitor:
             }
 
             # Upsert to database
-            supabase.table("model_health_tracking").upsert(update_data).execute()
+            await asyncio.to_thread(
+                lambda: supabase.table("model_health_tracking").upsert(update_data).execute()
+            )
 
             # Insert into health history
             history_data = {
@@ -1135,7 +1148,9 @@ class IntelligentHealthMonitor:
                 "http_status_code": result.http_status_code,
                 "circuit_breaker_state": circuit_breaker_state.value,
             }
-            supabase.table("model_health_history").insert(history_data).execute()
+            await asyncio.to_thread(
+                lambda: supabase.table("model_health_history").insert(history_data).execute()
+            )
 
             # Handle incidents. An unmeasured probe opens nothing and resolves
             # nothing: paging on "our key hit a quota" is how a monitoring
@@ -1236,8 +1251,8 @@ class IntelligentHealthMonitor:
 
             for attempt in range(max_retries):
                 try:
-                    active = (
-                        supabase.table("model_health_incidents")
+                    active = await asyncio.to_thread(
+                        lambda: supabase.table("model_health_incidents")
                         .select("*")
                         .eq("provider", result.provider)
                         .eq("model", result.model)
@@ -1294,30 +1309,39 @@ class IntelligentHealthMonitor:
             if active.data:
                 # Update existing incident
                 incident_id = active.data["id"]
-                supabase.table("model_health_incidents").update(
-                    {
-                        "error_count": active.data["error_count"] + 1,
-                        "error_message": result.error_message,
-                        "updated_at": datetime.now(UTC).isoformat(),
-                    }
-                ).eq("id", incident_id).execute()
+                await asyncio.to_thread(
+                    lambda: supabase.table("model_health_incidents")
+                    .update(
+                        {
+                            "error_count": active.data["error_count"] + 1,
+                            "error_message": result.error_message,
+                            "updated_at": datetime.now(UTC).isoformat(),
+                        }
+                    )
+                    .eq("id", incident_id)
+                    .execute()
+                )
             else:
                 # Create new incident
                 severity = self._determine_incident_severity(consecutive_failures)
                 incident_type = self._map_status_to_incident_type(result.status)
 
-                supabase.table("model_health_incidents").insert(
-                    {
-                        "provider": result.provider,
-                        "model": result.model,
-                        "gateway": result.gateway,
-                        "incident_type": incident_type,
-                        "severity": severity.value,
-                        "started_at": result.checked_at.isoformat(),
-                        "error_message": result.error_message,
-                        "status": "active",
-                    }
-                ).execute()
+                await asyncio.to_thread(
+                    lambda: supabase.table("model_health_incidents")
+                    .insert(
+                        {
+                            "provider": result.provider,
+                            "model": result.model,
+                            "gateway": result.gateway,
+                            "incident_type": incident_type,
+                            "severity": severity.value,
+                            "started_at": result.checked_at.isoformat(),
+                            "error_message": result.error_message,
+                            "status": "active",
+                        }
+                    )
+                    .execute()
+                )
 
         except Exception as e:
             logger.error(f"Failed to create/update incident: {e}")
@@ -1329,18 +1353,22 @@ class IntelligentHealthMonitor:
 
             now = datetime.now(UTC)
 
-            supabase.table("model_health_incidents").update(
-                {
-                    "resolved_at": now.isoformat(),
-                    "status": "resolved",
-                    "resolution_notes": "Model recovered and passed health checks",
-                    "updated_at": now.isoformat(),
-                }
-            ).eq("provider", result.provider).eq("model", result.model).eq(
-                "gateway", result.gateway
-            ).eq(
-                "status", "active"
-            ).execute()
+            await asyncio.to_thread(
+                lambda: supabase.table("model_health_incidents")
+                .update(
+                    {
+                        "resolved_at": now.isoformat(),
+                        "status": "resolved",
+                        "resolution_notes": "Model recovered and passed health checks",
+                        "updated_at": now.isoformat(),
+                    }
+                )
+                .eq("provider", result.provider)
+                .eq("model", result.model)
+                .eq("gateway", result.gateway)
+                .eq("status", "active")
+                .execute()
+            )
 
         except Exception as e:
             logger.error(f"Failed to resolve incidents: {e}")
@@ -1381,8 +1409,8 @@ class IntelligentHealthMonitor:
 
             # Query aggregated health data from database
             # Get model health data
-            models_response = (
-                supabase.table("model_health_tracking")
+            models_response = await asyncio.to_thread(
+                lambda: supabase.table("model_health_tracking")
                 .select(
                     "provider, model, gateway, last_status, last_response_time_ms, uptime_percentage_24h, error_count, call_count, last_called_at"
                 )
@@ -1417,7 +1445,7 @@ class IntelligentHealthMonitor:
                 )
 
             if models_data:
-                simple_health_cache.cache_models_health(models_data)
+                await asyncio.to_thread(simple_health_cache.cache_models_health, models_data)
                 logger.debug(f"Published {len(models_data)} models health to Redis cache")
 
             # Aggregate provider data
@@ -1463,14 +1491,14 @@ class IntelligentHealthMonitor:
                 providers_data.append(p)
 
             if providers_data:
-                simple_health_cache.cache_providers_health(providers_data)
+                await asyncio.to_thread(simple_health_cache.cache_providers_health, providers_data)
                 logger.debug(f"Published {len(providers_data)} providers health to Redis cache")
 
             # Get total counts from openrouter_models table (not just tracked)
             # NOTE: We get total counts FIRST so we can properly calculate healthy/unhealthy
             try:
-                catalog_models_response = (
-                    supabase.table("openrouter_models")
+                catalog_models_response = await asyncio.to_thread(
+                    lambda: supabase.table("openrouter_models")
                     .select("id", count="exact", head=True)
                     .execute()
                 )
@@ -1485,8 +1513,10 @@ class IntelligentHealthMonitor:
                     f"Failed to get models from 'openrouter_models' table: {e}, trying models table"
                 )
                 try:
-                    catalog_models_response = (
-                        supabase.table("models").select("id", count="exact", head=True).execute()
+                    catalog_models_response = await asyncio.to_thread(
+                        lambda: supabase.table("models")
+                        .select("id", count="exact", head=True)
+                        .execute()
                     )
                     total_models = (
                         catalog_models_response.count
@@ -1500,8 +1530,10 @@ class IntelligentHealthMonitor:
 
             try:
                 # Get all providers from providers table
-                providers_response = (
-                    supabase.table("providers").select("id", count="exact", head=True).execute()
+                providers_response = await asyncio.to_thread(
+                    lambda: supabase.table("providers")
+                    .select("id", count="exact", head=True)
+                    .execute()
                 )
                 total_providers = (
                     providers_response.count if providers_response.count is not None else 0
@@ -1670,9 +1702,10 @@ class IntelligentHealthMonitor:
                 "last_updated": datetime.now(UTC).isoformat(),
             }
 
-            simple_health_cache.cache_system_health(system_data)
-            simple_health_cache.cache_gateways_health(gateway_health)
-            # HEALTH FIX #1094: Improved logging to clarify tracked vs catalog discrepancy
+            await asyncio.to_thread(simple_health_cache.cache_system_health, system_data)
+            await asyncio.to_thread(simple_health_cache.cache_gateways_health, gateway_health)
+            # Clarify tracked vs catalog counts: the catalog total includes rows for
+            # providers we do not serve, so it is never a health denominator.
             logger.info(
                 f"Published health data to Redis cache: "
                 f"{total_models} models in catalog ({healthy_models} healthy, {unhealthy_models} unhealthy), "
@@ -1681,11 +1714,14 @@ class IntelligentHealthMonitor:
                 f"(Note: tracked count includes models from all {total_gateways} gateways + historical models, not just catalog)"
             )
 
-            # HEALTH FIX #1094: Check for health degradation and send Sentry alerts
+            # Alert on the models we actually measured. Dividing by total_models
+            # (the legacy openrouter_models row count, 451 rows across every
+            # provider ever synced) reported "12.4% healthy" while 56 of 87
+            # measured models were fine.
             await self._check_health_threshold_and_alert(
-                total_models=total_models,
-                healthy_models=healthy_models,
-                unhealthy_models=unhealthy_models,
+                total_models=tracked_models,
+                healthy_models=tracked_healthy_models,
+                unhealthy_models=tracked_unhealthy_models,
                 system_uptime=system_uptime,
             )
 
@@ -1726,14 +1762,17 @@ class IntelligentHealthMonitor:
         """
         Check if health has degraded below threshold and send Sentry alerts.
 
-        Part of fix for issue #1094 - Model Health Degradation.
-
         Alerts when:
         - Overall health drops below 90%
         - Critical degradation below 85%
 
+        An alert is sent only when it carries news: the severity changed, the
+        health percentage moved by at least HEALTH_ALERT_MIN_DELTA_PCT points,
+        or HEALTH_ALERT_REPEAT_SECONDS passed since the last one. Recovering
+        above the threshold resets the state, so the next degradation alerts.
+
         Args:
-            total_models: Total number of models in catalog
+            total_models: Number of models measured (the denominator)
             healthy_models: Number of healthy models
             unhealthy_models: Number of unhealthy models
             system_uptime: System uptime percentage
@@ -1748,11 +1787,15 @@ class IntelligentHealthMonitor:
             # Check threshold - alert if below 90%
             HEALTH_THRESHOLD = 90.0
 
+            if health_pct >= HEALTH_THRESHOLD:
+                self._last_health_alert = None
+                return
+
             if health_pct < HEALTH_THRESHOLD:
                 # Determine severity
                 if health_pct < 85.0:
                     severity = "critical"
-                    emoji = "\ud83d\udea8"
+                    emoji = "\U0001f6a8"
                 elif health_pct < 90.0:
                     severity = "error"
                     emoji = "\u26a0\ufe0f"
@@ -1760,13 +1803,29 @@ class IntelligentHealthMonitor:
                     severity = "warning"
                     emoji = "\u26a0\ufe0f"
 
+                now = time.monotonic()
+                rounded_pct = round(health_pct)
+                last = self._last_health_alert
+                if (
+                    last is not None
+                    and last[0] == severity
+                    and abs(last[1] - rounded_pct) < HEALTH_ALERT_MIN_DELTA_PCT
+                    and now - last[2] < HEALTH_ALERT_REPEAT_SECONDS
+                ):
+                    logger.debug(
+                        "Health still degraded at %.1f%% (%s); alert already sent",
+                        health_pct,
+                        severity,
+                    )
+                    return
+                self._last_health_alert = (severity, rounded_pct, now)
+
                 error_message = (
                     f"{emoji} HEALTH ALERT: Model health degraded to {health_pct:.1f}% "
                     f"(threshold: {HEALTH_THRESHOLD}%)\n"
-                    f"Healthy: {healthy_models}/{total_models} models\n"
+                    f"Healthy: {healthy_models}/{total_models} measured models\n"
                     f"Unhealthy: {unhealthy_models} models\n"
-                    f"System Uptime: {system_uptime:.1f}%\n"
-                    f"Issue: GitHub #1094 - Model Health Degradation"
+                    f"System Uptime: {system_uptime:.1f}%"
                 )
 
                 logger.error(error_message)
@@ -1785,13 +1844,10 @@ class IntelligentHealthMonitor:
                             "total_models": total_models,
                             "system_uptime": system_uptime,
                             "threshold": HEALTH_THRESHOLD,
-                            "github_issue": "#1094",
-                            "fix_docs": "QUICK_START_HEALTH_FIX.md",
                         },
                         tags={
                             "health_alert": "true",
                             "severity": severity,
-                            "issue": "1094",
                         },
                     )
                     logger.info(f"Sent health degradation alert to Sentry (severity: {severity})")
@@ -1826,8 +1882,8 @@ class IntelligentHealthMonitor:
 
             from src.config.supabase_config import supabase
 
-            response = (
-                supabase.table("model_health_tracking")
+            response = await asyncio.to_thread(
+                lambda: supabase.table("model_health_tracking")
                 .select("provider, model, gateway")
                 .eq("is_enabled", True)
                 .execute()
@@ -1851,9 +1907,13 @@ class IntelligentHealthMonitor:
 
             for row in orphans:
                 try:
-                    supabase.table("model_health_tracking").update({"is_enabled": False}).eq(
-                        "provider", row.get("provider")
-                    ).eq("model", row.get("model")).execute()
+                    await asyncio.to_thread(
+                        lambda row=row: supabase.table("model_health_tracking")
+                        .update({"is_enabled": False})
+                        .eq("provider", row.get("provider"))
+                        .eq("model", row.get("model"))
+                        .execute()
+                    )
                     summary["disabled"] += 1
                 except Exception as exc:
                     logger.warning(
@@ -1881,7 +1941,7 @@ class IntelligentHealthMonitor:
 
                 # Call the database function to update tiers
                 try:
-                    supabase.rpc("update_model_tier").execute()
+                    await asyncio.to_thread(lambda: supabase.rpc("update_model_tier").execute())
                     logger.info("Updated model monitoring tiers based on usage")
                 except Exception as rpc_error:
                     # Handle database function not found or schema cache issues
@@ -1930,8 +1990,8 @@ class IntelligentHealthMonitor:
             thirty_days_ago = now - timedelta(days=30)
 
             # Get all tracked models
-            tracked_models = (
-                supabase.table("model_health_tracking")
+            tracked_models = await asyncio.to_thread(
+                lambda: supabase.table("model_health_tracking")
                 .select("provider, model, gateway")
                 .eq("is_enabled", True)
                 .execute()
@@ -1950,57 +2010,18 @@ class IntelligentHealthMonitor:
 
                 for model_data in batch:
                     try:
-                        provider = model_data["provider"]
-                        model = model_data["model"]
-
-                        # Calculate 24h uptime from history
-                        history_24h = (
-                            supabase.table("model_health_history")
-                            .select("status")
-                            .eq("provider", provider)
-                            .eq("model", model)
-                            .gte("checked_at", twenty_four_hours_ago.isoformat())
-                            .execute()
+                        # Four synchronous queries per model: run them in a
+                        # thread so a ~90-model sweep never holds the loop.
+                        await asyncio.to_thread(
+                            self._aggregate_model_uptime_sync,
+                            supabase,
+                            model_data["provider"],
+                            model_data["model"],
+                            now,
+                            twenty_four_hours_ago,
+                            seven_days_ago,
+                            thirty_days_ago,
                         )
-
-                        # Unmeasured probes (429 / auth) are excluded from both
-                        # sides of the ratio — see uptime_from_history.
-                        uptime_24h = uptime_from_history(history_24h.data)
-
-                        # Calculate 7d uptime from history
-                        history_7d = (
-                            supabase.table("model_health_history")
-                            .select("status")
-                            .eq("provider", provider)
-                            .eq("model", model)
-                            .gte("checked_at", seven_days_ago.isoformat())
-                            .execute()
-                        )
-
-                        uptime_7d = uptime_from_history(history_7d.data)
-
-                        # Calculate 30d uptime from history
-                        history_30d = (
-                            supabase.table("model_health_history")
-                            .select("status")
-                            .eq("provider", provider)
-                            .eq("model", model)
-                            .gte("checked_at", thirty_days_ago.isoformat())
-                            .execute()
-                        )
-
-                        uptime_30d = uptime_from_history(history_30d.data)
-
-                        # Update the model_health_tracking table with calculated uptime
-                        supabase.table("model_health_tracking").update(
-                            {
-                                "uptime_percentage_24h": round(uptime_24h, 2),
-                                "uptime_percentage_7d": round(uptime_7d, 2),
-                                "uptime_percentage_30d": round(uptime_30d, 2),
-                                "updated_at": now.isoformat(),
-                            }
-                        ).eq("provider", provider).eq("model", model).execute()
-
                         updated_count += 1
 
                     except Exception as e:
@@ -2016,6 +2037,44 @@ class IntelligentHealthMonitor:
 
         except Exception as e:
             logger.error(f"Failed to aggregate hourly metrics: {e}", exc_info=True)
+
+    @staticmethod
+    def _aggregate_model_uptime_sync(
+        supabase: Any,
+        provider: str,
+        model: str,
+        now: datetime,
+        twenty_four_hours_ago: datetime,
+        seven_days_ago: datetime,
+        thirty_days_ago: datetime,
+    ) -> None:
+        """Recompute one model's 24h/7d/30d uptime from history. Blocking; run in a thread."""
+
+        def history_since(since: datetime) -> list[dict[str, Any]] | None:
+            return (
+                supabase.table("model_health_history")
+                .select("status")
+                .eq("provider", provider)
+                .eq("model", model)
+                .gte("checked_at", since.isoformat())
+                .execute()
+            ).data
+
+        # Unmeasured probes (429 / auth) are excluded from both sides of the
+        # ratio — see uptime_from_history.
+        uptime_24h = uptime_from_history(history_since(twenty_four_hours_ago))
+        uptime_7d = uptime_from_history(history_since(seven_days_ago))
+        uptime_30d = uptime_from_history(history_since(thirty_days_ago))
+
+        # Update the model_health_tracking table with calculated uptime
+        supabase.table("model_health_tracking").update(
+            {
+                "uptime_percentage_24h": round(uptime_24h, 2),
+                "uptime_percentage_7d": round(uptime_7d, 2),
+                "uptime_percentage_30d": round(uptime_30d, 2),
+                "updated_at": now.isoformat(),
+            }
+        ).eq("provider", provider).eq("model", model).execute()
 
     async def _incident_resolution_loop(self):
         """Check for auto-resolvable incidents"""

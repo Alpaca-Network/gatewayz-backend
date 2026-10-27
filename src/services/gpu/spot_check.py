@@ -233,7 +233,8 @@ async def _verify_sampled_row(work: dict) -> str:
     or replay infra) -- the row stays 'sampled' and is picked up again
     later, either next run or via the 24h aging path once stale enough."""
     billing_ref = work["billing_ref"]
-    stash = get_stashed_prompt(billing_ref)
+    # Redis and DB lookups are synchronous; keep them off the event loop.
+    stash = await asyncio.to_thread(get_stashed_prompt, billing_ref)
     if stash is None:
         logger.info(
             "spot-check: no stash for billing_ref=%s (expired or never written); "
@@ -242,7 +243,7 @@ async def _verify_sampled_row(work: dict) -> str:
         )
         return "skipped"
 
-    node = get_node(work.get("node_id"))
+    node = await asyncio.to_thread(get_node, work.get("node_id"))
     if node is None:
         logger.warning(
             "spot-check: node %s not found for work %s", work.get("node_id"), work.get("id")
@@ -406,6 +407,24 @@ def _reconcile_missing_earnings() -> int:
     return created
 
 
+def _age_out_pending_work(agable_before: str) -> list[str]:
+    """Resolve every unsampled row older than `agable_before`. Blocking (DB
+    calls only); run_spot_check_verification runs it in a thread. Returns the
+    outcome written for each row."""
+    outcomes: list[str] = []
+    for work in list_agable_pending_work(agable_before):
+        try:
+            outcome = _resolve_aged_row(work)
+        except Exception as e:
+            logger.warning("spot-check: unexpected error aging work %s: %s", work.get("id"), e)
+            outcome = "skipped"
+        if outcome == "verified":
+            outcome = _resolve_verified_aged_row_outcome(work)
+        set_verification(work["id"], outcome)
+        outcomes.append(outcome)
+    return outcomes
+
+
 async def run_spot_check_verification() -> dict[str, int]:
     """The scheduled job (every COMMUNITY_SPOTCHECK_INTERVAL_MINUTES,
     default 10). Resolves sampled rows via replay (bounded by
@@ -427,7 +446,9 @@ async def run_spot_check_verification() -> dict[str, int]:
     max_replays_per_run = Config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN
     max_replays_per_node = Config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN
 
-    for work in list_sampled_pending_work(sampled_since):
+    # Every DB call in this job is synchronous: run each one in a thread so the
+    # scheduled job never stalls the API's event loop.
+    for work in await asyncio.to_thread(list_sampled_pending_work, sampled_since):
         if replays_this_run >= max_replays_per_run:
             logger.info(
                 "spot-check: per-run replay cap (%s) reached; remaining sampled rows deferred "
@@ -454,23 +475,15 @@ async def run_spot_check_verification() -> dict[str, int]:
         if outcome == "skipped":
             stats["skipped"] += 1
         else:
-            final_outcome = _apply_sampled_outcome(work, outcome)
+            final_outcome = await asyncio.to_thread(_apply_sampled_outcome, work, outcome)
             stats[final_outcome] += 1
 
         await asyncio.sleep(Config.COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS)
 
-    for work in list_agable_pending_work(agable_before):
-        try:
-            outcome = _resolve_aged_row(work)
-        except Exception as e:
-            logger.warning("spot-check: unexpected error aging work %s: %s", work.get("id"), e)
-            outcome = "skipped"
-        if outcome == "verified":
-            outcome = _resolve_verified_aged_row_outcome(work)
-        set_verification(work["id"], outcome)
+    for outcome in await asyncio.to_thread(_age_out_pending_work, agable_before):
         stats[outcome] += 1
 
-    reconciled = _reconcile_missing_earnings()
+    reconciled = await asyncio.to_thread(_reconcile_missing_earnings)
 
     logger.info(
         "spot-check verification run complete | verified=%s failed=%s skipped=%s reconciled=%s",

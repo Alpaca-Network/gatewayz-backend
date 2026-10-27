@@ -392,11 +392,29 @@ class ChatInferenceHandler:
             logger.debug("[ChatHandler] Skipping credit check for free model %s", model_id)
             return max_tokens
 
+        # What those credits can buy at list price once a delegated-staking
+        # inference discount is counted (identity, no DB call, while disabled).
+        from src.services.billing.credit_precheck import calculate_maximum_cost
+        from src.services.delegation.discount import discount_aware_credits_async, discount_enabled
+
+        credit_capacity = user_credits
+        if discount_enabled():
+            # Holds this request's discount (keyed by the same billing ref
+            # deduct_credits settles on), so concurrent pre-checks cannot
+            # all count one balance.
+            max_cost, _, _ = calculate_maximum_cost(model_id, messages, max_tokens)
+            credit_capacity = await discount_aware_credits_async(
+                self.user.get("id"),
+                user_credits,
+                max_cost,
+                self._billing_ref() or self.request_id,
+            )
+
         # Perform pre-flight check (now includes affordability capping)
         check_result = estimate_and_check_credits(
             model_id=model_id,
             messages=messages,
-            user_credits=user_credits,
+            user_credits=credit_capacity,
             max_tokens=max_tokens,
             is_trial=False,
         )
