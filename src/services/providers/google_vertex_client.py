@@ -862,9 +862,9 @@ def diagnose_google_vertex_credentials() -> dict:
             except Exception:
                 step2["details"] = "Raw JSON credentials detected"
         else:
-            step2[
-                "details"
-            ] = "No credentials found in GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_VERTEX_CREDENTIALS_JSON. Will try ADC."
+            step2["details"] = (
+                "No credentials found in GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_VERTEX_CREDENTIALS_JSON. Will try ADC."
+            )
             result["credential_source"] = "adc"
             result["credentials_available"] = True  # ADC might still work
             step2["passed"] = True

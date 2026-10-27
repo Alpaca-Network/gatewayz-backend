@@ -82,7 +82,6 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
 }
 
 
-
 # Stale detection is skipped when a fetch looks partial. Below this many active
 # models a provider is exempt from the 50% rule: deactivation already needs
 # three consecutive misses, and a small provider retiring most of its models
