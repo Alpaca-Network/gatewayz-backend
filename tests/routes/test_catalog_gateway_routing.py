@@ -49,3 +49,19 @@ def test_disabled_or_unknown_is_none():
     assert chat_request.catalog_gateway_for("off/model") is None
     assert chat_request.catalog_gateway_for("nope/nope") is None
     assert chat_request.catalog_gateway_for(None) is None
+
+
+def test_openai_prefix_lock_does_not_drop_a_catalog_provider(monkeypatch):
+    """'openai/gpt-oss-120b' is a DeepInfra listing; the openai/* native-provider
+    lock used to remove DeepInfra from the chain, leaving no providers."""
+    import src.utils.provider_filter as pf
+    from src.services.provider_failover import enforce_model_failover_rules
+
+    monkeypatch.setattr(pf, "filter_chain_by_model_allowlist", lambda model, chain: chain)
+    locked = enforce_model_failover_rules(
+        "openai/gpt-oss-120b", ["deepinfra", "openai", "openrouter", "groq"]
+    )
+    assert "deepinfra" not in locked  # the prefix rule on its own drops it ...
+    assert (
+        chat_request.catalog_gateway_for("openai/gpt-oss-120b") == "deepinfra"
+    )  # ... the catalog keeps it
