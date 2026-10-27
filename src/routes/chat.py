@@ -1093,7 +1093,16 @@ async def chat_completions(
         # call performs only the route-owned bookkeeping (rate-limit + shadow
         # ledger) and does NOT deduct a second time — the prior behaviour billed
         # paid users twice per request.
-        cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
+        try:
+            cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
+        except ValueError as e:
+            if is_anonymous:
+                raise
+            # Authenticated requests were already priced and charged by the
+            # unified handler; this figure only feeds the response and analytics.
+            # Failing here would return a 500 for a request the user paid for.
+            logger.warning("Cost lookup failed after charge for %s: %s", model, e)
+            cost = 0.0
         if not is_anonymous:
             # With already_charged=True this is bookkeeping only (rate-limit usage
             # and the shadow ledger; the handler already deducted credits), so it
