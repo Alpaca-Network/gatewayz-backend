@@ -175,6 +175,44 @@ def filter_models_by_allowlist(provider: str, models: list[dict[str, Any]]) -> l
     return kept
 
 
+def _catalog_row_provider(model: dict[str, Any]) -> str:
+    """Serving provider of a combined-catalog row (transformed or raw DB row).
+
+    ``source_gateway`` first: ``provider_slug`` on a transformed row is the
+    model's author (e.g. "canopylabs"), not the provider that serves it.
+    """
+    providers = model.get("providers")
+    nested = providers.get("slug") if isinstance(providers, dict) else None
+    return model.get("source_gateway") or nested or model.get("provider_slug") or ""
+
+
+def filter_catalog_by_allowlist(models: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Apply PROVIDER_MODEL_ALLOWLIST to a combined, multi-provider catalog.
+
+    The combined catalog is served from a shared cache that more than one code
+    path writes; filtering where it is served keeps a restricted provider's
+    unlisted models out regardless of which writer filled the cache.
+    Returns *models* unchanged (same object) when nothing is restricted.
+    """
+    allowlist = get_model_allowlist()
+    if not allowlist or not models:
+        return models
+    kept = []
+    for m in models:
+        if not isinstance(m, dict):
+            continue
+        provider = _normalize_slug(_catalog_row_provider(m))
+        if provider not in allowlist or any(
+            is_model_allowed(provider, i) for i in _catalog_row_ids(m)
+        ):
+            kept.append(m)
+    if len(kept) != len(models):
+        logger.info(
+            "PROVIDER_MODEL_ALLOWLIST: combined catalog %d -> %d models", len(models), len(kept)
+        )
+    return kept
+
+
 def filter_chain_by_model_allowlist(model_id: str | None, provider_chain: list[str]) -> list[str]:
     """Remove providers whose allowlist excludes *model_id* from a routing chain.
 

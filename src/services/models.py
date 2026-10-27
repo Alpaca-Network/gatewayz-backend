@@ -814,6 +814,9 @@ def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = Fal
             # Current: Full aggregated flat catalog
             models = get_cached_full_catalog()
             if models is not None:
+                from src.utils.provider_filter import filter_catalog_by_allowlist
+
+                models = filter_catalog_by_allowlist(models)
                 logger.debug(f"Returning {len(models)} models for 'all'")
                 return filter_valid_enhanced_models(models)
             # get_cached_full_catalog already fetched from DB on miss
