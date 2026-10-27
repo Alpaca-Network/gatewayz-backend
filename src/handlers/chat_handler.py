@@ -24,9 +24,9 @@ from src.schemas.internal.chat import (
     InternalStreamChunk,
     InternalUsage,
 )
-from src.services.job_usage import record_job_usage
 from src.services.circuit_breaker import CircuitBreakerError
 from src.services.credit_precheck import estimate_and_check_credits
+from src.services.job_usage import record_job_usage
 from src.services.pricing import calculate_cost_split, get_model_pricing
 from src.services.provider_selector import get_selector
 
