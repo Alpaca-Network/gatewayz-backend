@@ -347,9 +347,10 @@ class ChatInferenceHandler:
                 f"[ChatHandler] Job key: request body not readable for content hash: {e}"
             )
             return
-        messages = body.get("messages") if isinstance(body, dict) else None
-        if isinstance(messages, list):
-            self._client_messages = messages
+        path = str(getattr(getattr(self.request, "url", None), "path", "") or "")
+        self._client_messages = job_usage_v2.bundle_messages(
+            body, anthropic=path.endswith("/messages")
+        )
 
     async def _check_credit_sufficiency(
         self,

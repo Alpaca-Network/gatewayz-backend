@@ -344,3 +344,32 @@ def test_record_publishes_the_cache_write_rate_for_premium_providers():
         ju.record_job_usage(user, "anthropic/claude-x", "anthropic", 1, 1, 0.01, "c")
     body = json.loads(app.call_args.kwargs["price_sheet_body"])
     assert body["models"]["anthropic/claude-x"]["cache_write_per_mtok"] == "3.75"
+
+
+def test_bundle_messages_openai_body_is_verbatim():
+    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}], "system": "ignored"}
+    assert v2.bundle_messages(body) == body["messages"]
+
+
+@pytest.mark.parametrize(
+    "system",
+    [
+        "Réponds en français.",
+        [{"type": "text", "text": "Be brief.", "cache_control": {"type": "ephemeral"}}],
+    ],
+)
+def test_bundle_messages_anthropic_body_carries_the_system_prompt(system):
+    body = {"model": "m", "system": system, "messages": [{"role": "user", "content": "2+2?"}]}
+    assert v2.bundle_messages(body, anthropic=True) == [
+        {"role": "system", "content": system},
+        {"role": "user", "content": "2+2?"},
+    ]
+
+
+def test_bundle_messages_anthropic_without_system_is_verbatim():
+    body = {"messages": [{"role": "user", "content": "hi"}]}
+    assert v2.bundle_messages(body, anthropic=True) == body["messages"]
+
+
+def test_bundle_messages_without_messages_is_none():
+    assert v2.bundle_messages({"prompt": "hi"}) is None

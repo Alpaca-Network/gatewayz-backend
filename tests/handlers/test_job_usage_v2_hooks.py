@@ -32,7 +32,7 @@ def _v2_on(monkeypatch):
     monkeypatch.setattr(Config, "JOB_USAGE_V2_ENABLED", True, raising=False)
 
 
-def _starlette_request(body: bytes) -> Request:
+def _starlette_request(body: bytes, path: str = "/v1/chat/completions") -> Request:
     sent = False
 
     async def receive():
@@ -43,7 +43,7 @@ def _starlette_request(body: bytes) -> Request:
         return {"type": "http.request", "body": body, "more_body": False}
 
     req = Request(
-        {"type": "http", "method": "POST", "path": "/v1/chat/completions", "headers": []},
+        {"type": "http", "method": "POST", "path": path, "headers": []},
         receive,
     )
 
@@ -79,9 +79,9 @@ RAW = json.dumps(
 ).encode()
 
 
-def _handler(key_name=f"job:{JOB}", body=RAW):
+def _handler(key_name=f"job:{JOB}", body=RAW, path="/v1/chat/completions"):
     h = ChatInferenceHandler(
-        api_key="gw_key", background_tasks=None, request=_starlette_request(body)
+        api_key="gw_key", background_tasks=None, request=_starlette_request(body, path)
     )
     h.user = {"id": 1, "key_id": 9, "key_name": key_name}
     h.is_anonymous = False
@@ -475,3 +475,31 @@ def test_flag_off_hides_price_sheets_and_v2_reads(monkeypatch):
     with patch.object(price_sheets, "get_price_sheet") as get:
         assert TestClient(app).get("/v1/price-sheets/0x" + "ab" * 32).status_code == 404
     get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_messages_hash_includes_the_system_prompt():
+    raw = json.dumps(
+        {
+            "model": "anthropic/claude-x",
+            "system": "Réponds en français.",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "2+2 ?"}],
+        },
+        ensure_ascii=False,
+    ).encode()
+    h = _handler(body=raw, path="/v1/messages")
+    with _Env(h, response=_response("Quatre.", "stop", 30, 5, 0)) as env:
+        await h.process(_req())
+    sent = json.loads(raw)
+    bundle = {
+        "messages": [{"role": "system", "content": sent["system"]}, *sent["messages"]],
+        "output": "Quatre.",
+    }
+    expected = (
+        "0x"
+        + hashlib.sha256(
+            json.dumps(bundle, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        ).hexdigest()
+    )
+    assert env.rec.call_args.kwargs["content_hash"] == expected

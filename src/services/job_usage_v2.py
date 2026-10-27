@@ -185,6 +185,25 @@ def proof_for(entries: list[dict], index: int) -> dict:
 # --------------------------------------------------------------------------- content
 
 
+def bundle_messages(body: Any, anthropic: bool = False) -> list | None:
+    """The ``messages`` a content bundle covers, from the raw request body.
+
+    OpenAI chat body: its ``messages`` exactly as sent. Anthropic /v1/messages
+    body: the system prompt lives in a separate ``system`` field, and a dispute
+    about an off-task or wrong-language reply cannot be judged without it, so it
+    is prepended as ``{"role": "system", "content": <system exactly as sent>}``.
+    Clients rebuild the same list from what they sent. None when the body has no
+    ``messages`` array (e.g. /v1/completions): that line is judged on metadata.
+    """
+    if not isinstance(body, dict) or not isinstance(body.get("messages"), list):
+        return None
+    messages = body["messages"]
+    system = body.get("system")
+    if anthropic and system not in (None, "", []):
+        return [{"role": "system", "content": system}, *messages]
+    return messages
+
+
 def content_hash(messages: Any, output: str) -> str:
     """sha256 of the content bundle the user keeps and reveals on dispute.
 

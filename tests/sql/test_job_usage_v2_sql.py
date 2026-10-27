@@ -50,13 +50,11 @@ def _v2_entry(request_id="req_1", sheet=SHEET_HASH, content="0x" + "aa" * 32):
 
 def _insert_user(cur) -> int:
     """A users row with every NOT NULL, no-default column filled generically."""
-    cur.execute(
-        """
+    cur.execute("""
         SELECT column_name, data_type FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'users'
           AND is_nullable = 'NO' AND column_default IS NULL
-        """
-    )
+        """)
     cols, vals = [], []
     for name, dtype in cur.fetchall():
         cols.append(f'"{name}"')
