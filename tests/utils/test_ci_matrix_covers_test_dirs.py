@@ -40,6 +40,10 @@ EXPECTED_UNMAPPED = {
     # Collects nothing without live credentials. A category that always reports
     # "no tests ran" is worse than no category: it looks like coverage.
     "smoke",
+    # SQL tests against a throwaway Supabase DB with every migration applied. They
+    # run in their own workflow (migrations-db-test.yml), which starts that DB;
+    # here they would all skip for want of GATEWAYZ_TEST_DATABASE_URL.
+    "sql",
     # Not a test package.
     "__pycache__",
 }
