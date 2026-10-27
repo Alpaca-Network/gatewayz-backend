@@ -5,6 +5,12 @@ from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.db.api_keys import get_api_key_by_key
+from src.db.rate_limit_defaults import (
+    DEFAULT_KEY_BURST_LIMIT,
+    DEFAULT_KEY_CONCURRENCY_LIMIT,
+    DEFAULT_KEY_MAX_REQUESTS_PER_HOUR,
+    DEFAULT_KEY_MAX_TOKENS_PER_HOUR,
+)
 from src.db.users import get_user
 
 logger = logging.getLogger(__name__)
@@ -32,14 +38,26 @@ def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
                 if rate_config.data and len(rate_config.data) > 0:
                     config = rate_config.data[0]
                     return {
-                        "requests_per_minute": config.get("max_requests", 1000)
+                        "requests_per_minute": config.get(
+                            "max_requests", DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+                        )
                         // 60,  # Convert hourly to per-minute
-                        "requests_per_hour": config.get("max_requests", 1000),
-                        "requests_per_day": config.get("max_requests", 1000)
+                        "requests_per_hour": config.get(
+                            "max_requests", DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+                        ),
+                        "requests_per_day": config.get(
+                            "max_requests", DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+                        )
                         * 24,  # Convert hourly to per-day
-                        "tokens_per_minute": config.get("max_tokens", 1000000) // 60,
-                        "tokens_per_hour": config.get("max_tokens", 1000000),
-                        "tokens_per_day": config.get("max_tokens", 1000000) * 24,
+                        "tokens_per_minute": config.get(
+                            "max_tokens", DEFAULT_KEY_MAX_TOKENS_PER_HOUR
+                        )
+                        // 60,
+                        "tokens_per_hour": config.get(
+                            "max_tokens", DEFAULT_KEY_MAX_TOKENS_PER_HOUR
+                        ),
+                        "tokens_per_day": config.get("max_tokens", DEFAULT_KEY_MAX_TOKENS_PER_HOUR)
+                        * 24,
                     }
         except Exception as e:
             logger.warning(f"Failed to get rate limits from new system: {e}")
@@ -80,7 +98,9 @@ async def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> Non
 
             # Prepare rate limit config data
             # Convert per-minute/per-day values to per-hour for storage
-            requests_per_hour = rate_limits.get("requests_per_hour", 1000)
+            requests_per_hour = rate_limits.get(
+                "requests_per_hour", DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+            )
             tokens_per_hour = rate_limits.get("tokens_per_hour", 100000)
 
             rate_limit_config = {
@@ -424,15 +444,18 @@ def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
                 )
                 if config_result.data and len(config_result.data) > 0:
                     config = config_result.data[0]
+                    max_req = config.get("max_requests") or DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+                    max_tok = config.get("max_tokens") or DEFAULT_KEY_MAX_TOKENS_PER_HOUR
                     return {
-                        "requests_per_minute": config.get("max_requests", 1000) // 60,
-                        "requests_per_hour": config.get("max_requests", 1000),
-                        "requests_per_day": config.get("max_requests", 1000) * 24,
-                        "tokens_per_minute": config.get("max_tokens", 1000000) // 60,
-                        "tokens_per_hour": config.get("max_tokens", 1000000),
-                        "tokens_per_day": config.get("max_tokens", 1000000) * 24,
-                        "burst_limit": config.get("burst_limit", 100),
-                        "concurrency_limit": config.get("concurrency_limit", 50),
+                        "requests_per_minute": max_req // 60,
+                        "requests_per_hour": max_req,
+                        "requests_per_day": max_req * 24,
+                        "tokens_per_minute": max_tok // 60,
+                        "tokens_per_hour": max_tok,
+                        "tokens_per_day": max_tok * 24,
+                        "burst_limit": config.get("burst_limit") or DEFAULT_KEY_BURST_LIMIT,
+                        "concurrency_limit": config.get("concurrency_limit")
+                        or DEFAULT_KEY_CONCURRENCY_LIMIT,
                         "window_size_seconds": config.get("window_size", 60),
                     }
         except Exception as e:
@@ -440,14 +463,14 @@ def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
 
         # Fallback to default config
         return {
-            "requests_per_minute": 60,
-            "requests_per_hour": 1000,
-            "requests_per_day": 10000,
-            "tokens_per_minute": 10000,
-            "tokens_per_hour": 100000,
-            "tokens_per_day": 1000000,
-            "burst_limit": 100,
-            "concurrency_limit": 50,
+            "requests_per_minute": DEFAULT_KEY_MAX_REQUESTS_PER_HOUR // 60,
+            "requests_per_hour": DEFAULT_KEY_MAX_REQUESTS_PER_HOUR,
+            "requests_per_day": DEFAULT_KEY_MAX_REQUESTS_PER_HOUR * 24,
+            "tokens_per_minute": DEFAULT_KEY_MAX_TOKENS_PER_HOUR // 60,
+            "tokens_per_hour": DEFAULT_KEY_MAX_TOKENS_PER_HOUR,
+            "tokens_per_day": DEFAULT_KEY_MAX_TOKENS_PER_HOUR * 24,
+            "burst_limit": DEFAULT_KEY_BURST_LIMIT,
+            "concurrency_limit": DEFAULT_KEY_CONCURRENCY_LIMIT,
             "window_size_seconds": 60,
         }
 
@@ -497,8 +520,12 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
                 if existing.data and len(existing.data) > 0:
                     client.table("rate_limit_configs").update(
                         {
-                            "max_requests": config.get("requests_per_hour", 1000),
-                            "max_tokens": config.get("tokens_per_hour", 1000000),
+                            "max_requests": config.get(
+                                "requests_per_hour", DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+                            ),
+                            "max_tokens": config.get(
+                                "tokens_per_hour", DEFAULT_KEY_MAX_TOKENS_PER_HOUR
+                            ),
                             "burst_limit": config.get("burst_limit", 100),
                             "concurrency_limit": config.get("concurrency_limit", 50),
                             "window_size": config.get("window_size_seconds", 60),
@@ -509,8 +536,12 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
                     client.table("rate_limit_configs").insert(
                         {
                             "api_key_id": api_key_id,
-                            "max_requests": config.get("requests_per_hour", 1000),
-                            "max_tokens": config.get("tokens_per_hour", 1000000),
+                            "max_requests": config.get(
+                                "requests_per_hour", DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+                            ),
+                            "max_tokens": config.get(
+                                "tokens_per_hour", DEFAULT_KEY_MAX_TOKENS_PER_HOUR
+                            ),
                             "burst_limit": config.get("burst_limit", 100),
                             "concurrency_limit": config.get("concurrency_limit", 50),
                             "window_size": config.get("window_size_seconds", 60),
@@ -583,12 +614,22 @@ def get_user_rate_limit_configs(user_id: int) -> list[dict[str, Any]]:
                 if config_result.data:
                     cfg = config_result.data[0]
                     config = {
-                        "requests_per_minute": cfg.get("max_requests", 1000) // 60,
-                        "requests_per_hour": cfg.get("max_requests", 1000),
-                        "requests_per_day": cfg.get("max_requests", 1000) * 24,
-                        "tokens_per_minute": cfg.get("max_tokens", 1000000) // 60,
-                        "tokens_per_hour": cfg.get("max_tokens", 1000000),
-                        "tokens_per_day": cfg.get("max_tokens", 1000000) * 24,
+                        "requests_per_minute": cfg.get(
+                            "max_requests", DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+                        )
+                        // 60,
+                        "requests_per_hour": cfg.get(
+                            "max_requests", DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+                        ),
+                        "requests_per_day": cfg.get(
+                            "max_requests", DEFAULT_KEY_MAX_REQUESTS_PER_HOUR
+                        )
+                        * 24,
+                        "tokens_per_minute": cfg.get("max_tokens", DEFAULT_KEY_MAX_TOKENS_PER_HOUR)
+                        // 60,
+                        "tokens_per_hour": cfg.get("max_tokens", DEFAULT_KEY_MAX_TOKENS_PER_HOUR),
+                        "tokens_per_day": cfg.get("max_tokens", DEFAULT_KEY_MAX_TOKENS_PER_HOUR)
+                        * 24,
                     }
             except Exception:
                 logger.debug(f"Could not get config from rate_limit_configs for key {key['id']}")
