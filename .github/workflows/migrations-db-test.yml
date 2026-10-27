@@ -10,7 +10,6 @@ on:
     paths:
       - "supabase/migrations/**"
       - "supabase/config.toml"
-      - "supabase/seed.sql"
       - "tests/sql/**"
       - "src/services/job_usage*.py"
       - ".github/workflows/migrations-db-test.yml"
@@ -40,8 +39,13 @@ jobs:
         with:
           version: latest
 
-      - name: Start local database (applies supabase/migrations + seed.sql)
-        run: supabase db start
+      # seed.sql is dev sample data and is stale (it still inserts users.credits,
+      # dropped in 20260417000000). The SQL tests create their own rows, so the
+      # seed is left out here rather than letting it mask migration results.
+      - name: Start local database (applies supabase/migrations)
+        run: |
+          mv supabase/seed.sql "$RUNNER_TEMP/seed.sql"
+          supabase db start
 
       - uses: actions/setup-python@v5
         with:
