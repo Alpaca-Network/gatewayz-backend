@@ -248,7 +248,7 @@ def split_completion_tokens(
     outside = reasoning > completion_tokens or (
         isinstance(total, int)
         and not isinstance(total, bool)
-        and total >= _int(prompt_tokens) + completion_tokens + reasoning
+        and total == _int(prompt_tokens) + completion_tokens + reasoning
     )
     if outside:
         return completion_tokens, 0
@@ -264,22 +264,34 @@ def _per_mtok(per_token: Any, markup: Any) -> str:
 
 
 def price_sheet(
-    model: str, prompt_per_token: Any, completion_per_token: Any, markup: Any
+    model: str,
+    prompt_per_token: Any,
+    completion_per_token: Any,
+    markup: Any,
+    cache_write_per_token: Any = None,
 ) -> tuple[str, bytes]:
     """(sha256, body) of the one-model sheet a charge was computed from.
 
     Rates are the per-token prices the billing path used, times PRICING_MARKUP,
     per million tokens. The body is the exact canonical JSON whose sha256 is the
     hash: the contract fetches the URL and hashes the bytes it gets back.
-    Reasoning tokens are billed at the output rate.
+    Reasoning tokens are billed at the output rate. ``cache_write_per_token``, when
+    above the input rate, is published as ``cache_write_per_mtok``: the contract
+    (v0.5.0+) then accepts a prompt-cache write charge instead of judging it an
+    overcharge. Contracts before v0.5.0 ignore the field.
     """
+    rates = {
+        "in_per_mtok": _per_mtok(prompt_per_token, markup),
+        "out_per_mtok": _per_mtok(completion_per_token, markup),
+    }
+    if cache_write_per_token is not None and Decimal(str(cache_write_per_token)) > Decimal(
+        str(prompt_per_token or 0)
+    ):
+        rates["cache_write_per_mtok"] = _per_mtok(cache_write_per_token, markup)
     sheet = {
         "version": PRICE_SHEET_VERSION,
         "models": {
-            model: {
-                "in_per_mtok": _per_mtok(prompt_per_token, markup),
-                "out_per_mtok": _per_mtok(completion_per_token, markup),
-            }
+            model: rates,
         },
     }
     body = canonical_json(sheet)

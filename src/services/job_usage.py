@@ -267,7 +267,7 @@ def _build_entry_v2(
 
     billed_out = entry["tokens_out"]
     reasoning = min(max(0, int(tokens_reasoning or 0)), billed_out)
-    sheet_hash, sheet_body = _price_sheet_for(entry["model"], priced_model)
+    sheet_hash, sheet_body = _price_sheet_for(entry["model"], priced_model, entry["provider"])
     entry_v2 = {
         "request_id": (request_id or "")[:128],
         "ts": entry["ts"],
@@ -296,7 +296,9 @@ def _is_hash(value: Any) -> bool:
     )
 
 
-def _price_sheet_for(model: str, priced_model: str | None) -> tuple[str, str | None]:
+def _price_sheet_for(
+    model: str, priced_model: str | None, provider: str | None = None
+) -> tuple[str, str | None]:
     """(hash, body) of the rates this line was charged at; (zero hash, None) if the
     rates cannot be read back, so the line is judged as price_unlisted, not lost."""
     from src.config.config import Config
@@ -305,8 +307,15 @@ def _price_sheet_for(model: str, priced_model: str | None) -> tuple[str, str | N
 
     try:
         pricing = get_model_pricing(priced_model or model)
+        prompt_rate = float(pricing.get("prompt", 0) or 0)
         sheet_hash, body = v2.price_sheet(
-            model, pricing.get("prompt", 0), pricing.get("completion", 0), Config.PRICING_MARKUP
+            model,
+            pricing.get("prompt", 0),
+            pricing.get("completion", 0),
+            Config.PRICING_MARKUP,
+            cache_write_per_token=_cache_write_rate(
+                priced_model or model, provider, pricing, prompt_rate
+            ),
         )
         return sheet_hash, body.decode()
     except Exception as e:
@@ -314,3 +323,17 @@ def _price_sheet_for(model: str, priced_model: str | None) -> tuple[str, str | N
             "job usage v2: no price sheet for %s (priced as %s): %s", model, priced_model, e
         )
         return v2.ZERO_HASH, None
+
+
+def _cache_write_rate(model: str, provider: str | None, pricing: dict, prompt_rate: float):
+    """The per-token rate a prompt-cache write is billed at, as cache_pricing does it."""
+    try:
+        from src.services.pricing.cache_pricing import resolve_cache_multipliers
+
+        return float(
+            pricing.get("cache_write")
+            or prompt_rate * resolve_cache_multipliers(model, provider).write
+        )
+    except Exception as e:  # never cost the sheet over the optional field
+        logger.warning("job usage v2: no cache-write rate for %s: %s", model, e)
+        return None

@@ -313,3 +313,34 @@ def test_flag_off_writes_exactly_the_v1_line(monkeypatch):
     monkeypatch.setattr(Config, "JOB_USAGE_V2_ENABLED", False)
     _, app = _record(tokens_reasoning=1536, content_hash="0x" + "aa" * 32)
     assert app.call_args.kwargs == {}  # the pre-migration append_job_usage call
+
+
+def test_cache_write_rate_is_published_only_above_the_input_rate():
+    _, with_write = v2.price_sheet(
+        "anthropic/claude-x", 3e-6, 15e-6, 1.0, cache_write_per_token=3.75e-6
+    )
+    assert json.loads(with_write)["models"]["anthropic/claude-x"]["cache_write_per_mtok"] == "3.75"
+    _, no_premium = v2.price_sheet("openai/gpt-x", 3e-6, 15e-6, 1.0, cache_write_per_token=3e-6)
+    assert "cache_write_per_mtok" not in json.loads(no_premium)["models"]["openai/gpt-x"]
+    # Without the field the sheet (and its hash) is exactly what it was before.
+    assert v2.price_sheet("m", 1e-6, 2e-6, 1.0) == v2.price_sheet("m", 1e-6, 2e-6, 1.0, None)
+
+
+def test_a_total_inflated_by_something_else_is_not_unbilled_reasoning():
+    usage = {"completion_tokens_details": {"reasoning_tokens": 10}, "total_tokens": 999}
+    assert v2.split_completion_tokens(usage, 10, 50) == (40, 10)
+
+
+def test_record_publishes_the_cache_write_rate_for_premium_providers():
+    user = {"id": 1, "key_name": f"job:{JOB}"}
+    with (
+        patch("src.db.inference_jobs.append_usage", return_value=0) as app,
+        patch(
+            "src.services.pricing.get_model_pricing",
+            return_value={"prompt": 3e-6, "completion": 15e-6, "cache_write": 3.75e-6},
+        ),
+        patch("src.config.config.Config.PRICING_MARKUP", 1.0),
+    ):
+        ju.record_job_usage(user, "anthropic/claude-x", "anthropic", 1, 1, 0.01, "c")
+    body = json.loads(app.call_args.kwargs["price_sheet_body"])
+    assert body["models"]["anthropic/claude-x"]["cache_write_per_mtok"] == "3.75"
