@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.db.rate_limit_defaults import default_rate_limit_config
 from src.security.security import (
     generate_secure_api_key,
     get_audit_logger,
@@ -99,16 +100,7 @@ def create_secure_api_key(
 
         # Create rate limit configuration
         try:
-            rate_limit_config = {
-                "api_key_id": key_id,
-                "window_type": "sliding",
-                "window_size": 3600,  # 1 hour
-                "max_requests": max_requests or 1000,
-                "max_tokens": 1000000,  # 1M tokens per hour
-                "burst_limit": 100,
-                "concurrency_limit": 10,
-                "is_active": True,
-            }
+            rate_limit_config = default_rate_limit_config(key_id, max_requests)
 
             client.table("rate_limit_configs").insert(rate_limit_config).execute()
 
