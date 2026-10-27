@@ -181,6 +181,20 @@ async def lifespan(app):
     logger.info(f"Working Directory: {os.getcwd()}")
     logger.info("Starting health monitoring and observability services...")
 
+    # Size the default thread pool explicitly. Every blocking call on the request
+    # path (auth, plan and credit checks, Redis, the synchronous provider clients)
+    # runs through asyncio.to_thread, and the default pool is min(32, cpus + 4)
+    # threads. Provider calls hold a thread for the whole upstream round trip, so
+    # under concurrency the short DB lookups queued behind them (production,
+    # 2026-10-27: 8 concurrent requests took 4-5 s each with ~1.2 s upstream).
+    from concurrent.futures import ThreadPoolExecutor
+
+    _pool_size = int(os.environ.get("THREADPOOL_MAX_WORKERS", "64"))
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=_pool_size, thread_name_prefix="gw-io")
+    )
+    logger.info(f"Default thread pool: {_pool_size} workers")
+
     # Validate critical environment variables at runtime startup
     from src.config import Config
 

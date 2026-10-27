@@ -18,6 +18,7 @@ same validated-key primitive and adds nothing to the validation path (see
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -145,7 +146,7 @@ async def get_request_identity(
         # (e.g. no matching account) -- keep kind == "api_key" in that case;
         # the existing per-route auth flow (unchanged by this dependency) is
         # still responsible for 404ing on a missing user.
-        user = get_user(api_key)
+        user = await asyncio.to_thread(get_user, api_key)
         user_id = user.get("id") if user else None
         auth_method = user.get("auth_method") if user else None
         wallets = _wallet_addresses_for(user_id) if user_id is not None else ()
