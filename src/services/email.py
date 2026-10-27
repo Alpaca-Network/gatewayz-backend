@@ -24,6 +24,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _RESEND_URL = "https://api.resend.com/emails"
+_BUSINESS_TAGS = [{"name": "business", "value": "gatewayz"}, {"name": "domain", "value": "gatewayz_ai"}]
 _TIMEOUT_SECONDS = 10.0
 _DEFAULT_FROM_EMAIL = "noreply@gatewayz.ai"
 
@@ -81,8 +82,8 @@ def send_email(
     }
     if text:
         payload["text"] = text
-    if tags:
-        payload["tags"] = tags
+    # Shared Resend account: every send is tagged with its business so logs can be filtered.
+    payload["tags"] = [*_BUSINESS_TAGS, *(tags or [])]
 
     try:
         response = httpx.post(
