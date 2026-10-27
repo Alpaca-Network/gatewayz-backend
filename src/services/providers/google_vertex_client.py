@@ -427,10 +427,15 @@ def _process_google_vertex_sdk_response(response: Any, model: str) -> dict:
         # Extract usage metadata if available
         prompt_tokens = 0
         completion_tokens = 0
+        thoughts_tokens = 0
         if hasattr(response, "usage_metadata"):
             usage = response.usage_metadata
-            prompt_tokens = getattr(usage, "prompt_token_count", 0)
-            completion_tokens = getattr(usage, "candidates_token_count", 0)
+            prompt_tokens = getattr(usage, "prompt_token_count", 0) or 0
+            # Gemini bills thinking at the output rate, but candidates_token_count
+            # excludes it; it is reported as thoughts_token_count. Fold it in so
+            # completion_tokens is the billed output, as on OpenAI.
+            thoughts_tokens = getattr(usage, "thoughts_token_count", 0) or 0
+            completion_tokens = (getattr(usage, "candidates_token_count", 0) or 0) + thoughts_tokens
 
         # Extract finish reason
         finish_reason = "stop"  # Default
@@ -464,6 +469,7 @@ def _process_google_vertex_sdk_response(response: Any, model: str) -> dict:
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
+                "completion_tokens_details": {"reasoning_tokens": thoughts_tokens},
             },
         }
 
@@ -547,6 +553,9 @@ def make_google_vertex_request_openai_stream(
             "created": response.get("created"),
             "model": response.get("model"),
             "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+            # The full response already has the provider's counts. Without them the
+            # stream was billed on the len/4 estimate.
+            "usage": response.get("usage"),
         }
 
         logger.debug(f"Yielding finish chunk: {json.dumps(finish_chunk, indent=2, default=str)}")
@@ -606,8 +615,10 @@ def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
 
     # Extract usage information
     usage_metadata = candidate.get("usageMetadata", {})
-    prompt_tokens = int(usage_metadata.get("promptTokenCount", 0))
-    completion_tokens = int(usage_metadata.get("candidatesTokenCount", 0))
+    prompt_tokens = int(usage_metadata.get("promptTokenCount", 0) or 0)
+    # Thinking is billed at the output rate but excluded from candidatesTokenCount.
+    thoughts_tokens = int(usage_metadata.get("thoughtsTokenCount", 0) or 0)
+    completion_tokens = int(usage_metadata.get("candidatesTokenCount", 0) or 0) + thoughts_tokens
 
     finish_reason = candidate.get("finishReason", "STOP")
     finish_reason_map = {
@@ -639,6 +650,7 @@ def _normalize_vertex_candidate_to_openai(candidate: dict, model: str) -> dict:
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
+            "completion_tokens_details": {"reasoning_tokens": thoughts_tokens},
         },
     }
 
@@ -850,9 +862,9 @@ def diagnose_google_vertex_credentials() -> dict:
             except Exception:
                 step2["details"] = "Raw JSON credentials detected"
         else:
-            step2["details"] = (
-                "No credentials found in GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_VERTEX_CREDENTIALS_JSON. Will try ADC."
-            )
+            step2[
+                "details"
+            ] = "No credentials found in GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_VERTEX_CREDENTIALS_JSON. Will try ADC."
             result["credential_source"] = "adc"
             result["credentials_available"] = True  # ADC might still work
             step2["passed"] = True

@@ -38,6 +38,7 @@ from src.services.providers.openrouter_client import (
 )
 from src.services.request_tag import extract_request_tag
 from src.services.upstream.anonymize import scrub_upstream_kwargs
+from src.services.usage_normalization import billed_completion_tokens, client_wants_usage
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,40 @@ def _rfield(obj: Any, name: str, default: Any = None) -> Any:
 # from monopolizing the event loop indefinitely. Configured via MAX_STREAM_DURATION_SECONDS env var.
 # Mirrors the same constant in src/routes/chat.py (anonymous user path).
 _MAX_STREAM_DURATION = int(os.getenv("MAX_STREAM_DURATION_SECONDS", "300"))
+
+# Providers verified to accept stream_options={"include_usage": true}. Without
+# it an OpenAI-style stream carries no usage at all and is billed on a len/4
+# estimate. Extend only after checking the provider's docs: an unaccepted
+# parameter is a 400 on a paid request.
+_STREAM_USAGE_PROVIDERS = frozenset(
+    {"openai", "openrouter", "xai", "deepseek", "together", "fireworks", "deepinfra"}
+)
+
+
+def _internal_usage(
+    prompt_tokens: int, completion_tokens: int, cache_read_tokens: int, cache_write_tokens: int
+) -> InternalUsage | None:
+    """Usage for a stream chunk, or None before any usage is known."""
+    if not (prompt_tokens > 0 or completion_tokens > 0):
+        return None
+    return InternalUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        # Cache counts are extracted for BILLING; carry them onto the chunk so the
+        # caller can see them too. Without this a streaming client is charged the
+        # cache rate but shown no cache tokens, and has no way to verify the
+        # saving it just got.
+        **(
+            {
+                "cache_read_input_tokens": cache_read_tokens,
+                "cache_creation_input_tokens": cache_write_tokens,
+                "prompt_tokens_details": {"cached_tokens": cache_read_tokens},
+            }
+            if (cache_read_tokens or cache_write_tokens)
+            else {}
+        ),
+    )
 
 
 def _cache_aware_split(
@@ -1207,7 +1242,11 @@ class ChatInferenceHandler:
             usage = _rfield(provider_response, "usage")
             if usage:
                 prompt_tokens = _rfield(usage, "prompt_tokens", 0) or 0
-                completion_tokens = _rfield(usage, "completion_tokens", 0) or 0
+                # Reasoning a provider reports outside completion_tokens (xAI) is
+                # billed at the completion rate upstream; bill it here too.
+                completion_tokens = billed_completion_tokens(
+                    usage, prompt_tokens, _rfield(usage, "completion_tokens", 0) or 0
+                )
             else:
                 prompt_tokens = 0
                 completion_tokens = 0
@@ -1578,6 +1617,16 @@ class ChatInferenceHandler:
                 f"[ChatHandler] Streaming from provider={provider_used}, model={provider_model_id}"
             )
 
+            # Ask for the usage chunk where the provider is known to accept it, so
+            # the stream is billed on the provider's counts rather than len/4.
+            # Whether the CLIENT sees a usage chunk still follows its own request.
+            wants_usage = client_wants_usage(request.stream_options)
+            if (provider_used or "").lower() in _STREAM_USAGE_PROVIDERS:
+                so = kwargs.get("stream_options") or {}
+                if hasattr(so, "model_dump"):
+                    so = so.model_dump(exclude_none=True)
+                kwargs["stream_options"] = {**dict(so), "include_usage": True}
+
             # Step 3: Stream from provider
             stream = self._call_provider_stream(
                 provider_used, provider_model_id, messages, **kwargs
@@ -1619,6 +1668,22 @@ class ChatInferenceHandler:
 
                     chunk_count += 1
 
+                    # Usage first, whatever else the chunk carries: OpenAI's
+                    # include_usage chunk has `choices: []`, and reading usage only
+                    # inside the choices branch dropped it, billing the stream on
+                    # the len/4 estimate instead.
+                    chunk_usage = _rfield(provider_chunk, "usage")
+                    if chunk_usage:
+                        prompt_tokens = _rfield(chunk_usage, "prompt_tokens", 0) or 0
+                        completion_tokens = billed_completion_tokens(
+                            chunk_usage,
+                            prompt_tokens,
+                            _rfield(chunk_usage, "completion_tokens", 0) or 0,
+                        )
+                        from src.services.pricing.cache_pricing import extract_cache_tokens
+
+                        cache_read_tokens, cache_write_tokens = extract_cache_tokens(chunk_usage)
+
                     # Extract delta content
                     # (_rfield handles both OpenAI-SDK objects and dict-shaped chunks, e.g. Vertex.)
                     choices = _rfield(provider_chunk, "choices")
@@ -1637,19 +1702,6 @@ class ChatInferenceHandler:
                             if content:
                                 accumulated_content += content
 
-                            # Extract usage from final chunk if available
-                            chunk_usage = _rfield(provider_chunk, "usage")
-                            if chunk_usage:
-                                prompt_tokens = _rfield(chunk_usage, "prompt_tokens", 0) or 0
-                                completion_tokens = (
-                                    _rfield(chunk_usage, "completion_tokens", 0) or 0
-                                )
-                                from src.services.pricing.cache_pricing import extract_cache_tokens
-
-                                cache_read_tokens, cache_write_tokens = extract_cache_tokens(
-                                    chunk_usage
-                                )
-
                             # Yield internal chunk
                             internal_chunk = InternalStreamChunk(
                                 id=self.request_id,
@@ -1659,35 +1711,29 @@ class ChatInferenceHandler:
                                 role=role,
                                 finish_reason=chunk_finish_reason,
                                 tool_calls=tool_calls,
-                                usage=(
-                                    InternalUsage(
-                                        prompt_tokens=prompt_tokens,
-                                        completion_tokens=completion_tokens,
-                                        total_tokens=prompt_tokens + completion_tokens,
-                                        # Cache counts are already extracted above
-                                        # for BILLING; carry them onto the chunk so
-                                        # the caller can see them too. Without this
-                                        # a streaming client is charged the cache
-                                        # rate but shown no cache tokens, and has no
-                                        # way to verify the saving it just got.
-                                        **(
-                                            {
-                                                "cache_read_input_tokens": cache_read_tokens,
-                                                "cache_creation_input_tokens": cache_write_tokens,
-                                                "prompt_tokens_details": {
-                                                    "cached_tokens": cache_read_tokens
-                                                },
-                                            }
-                                            if (cache_read_tokens or cache_write_tokens)
-                                            else {}
-                                        ),
-                                    )
-                                    if prompt_tokens > 0 or completion_tokens > 0
-                                    else None
+                                usage=_internal_usage(
+                                    prompt_tokens,
+                                    completion_tokens,
+                                    cache_read_tokens,
+                                    cache_write_tokens,
                                 ),
                             )
 
                             yield internal_chunk
+
+                    elif chunk_usage and wants_usage:
+                        # A usage-only chunk the client asked for (include_usage).
+                        yield InternalStreamChunk(
+                            id=self.request_id,
+                            model=request.model,
+                            created=int(time.time()),
+                            usage=_internal_usage(
+                                prompt_tokens,
+                                completion_tokens,
+                                cache_read_tokens,
+                                cache_write_tokens,
+                            ),
+                        )
 
             finally:
                 # FREEZE FIX: Always release the underlying provider connection back to the pool.
