@@ -340,6 +340,12 @@ def _validate_key_constraints(
         if requests_used >= key_data["max_requests"]:
             raise ValueError("API key request limit reached")
 
+    # 3b. Job-scoped keys (inference escrow): closed / past deadline / USD cap.
+    # A no-op for every key that is not named job:<id>.
+    from src.services.job_usage import enforce_job_key
+
+    enforce_job_key(key_data, client)
+
     # 4. IP allowlist enforcement
     ip_allowlist = key_data.get("ip_allowlist") or []
     if ip_allowlist and len(ip_allowlist) > 0 and ip_allowlist != [""]:

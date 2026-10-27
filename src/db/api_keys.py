@@ -9,10 +9,10 @@ from src.config.supabase_config import execute_with_retry, get_supabase_client
 from src.config.usage_limits import TRIAL_CREDITS_AMOUNT, TRIAL_DURATION_DAYS
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
+from src.db.rate_limit_defaults import default_rate_limit_config
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
 from src.utils.db_safety import DatabaseResultError, safe_get_first
 from src.utils.security_validators import sanitize_for_logging
-from src.db.rate_limit_defaults import default_rate_limit_config
 
 logger = logging.getLogger(__name__)
 
