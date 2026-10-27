@@ -24,7 +24,10 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _RESEND_URL = "https://api.resend.com/emails"
-_BUSINESS_TAGS = [{"name": "business", "value": "gatewayz"}, {"name": "domain", "value": "gatewayz_ai"}]
+_BUSINESS_TAGS = [
+    {"name": "business", "value": "gatewayz"},
+    {"name": "domain", "value": "gatewayz_ai"},
+]
 _TIMEOUT_SECONDS = 10.0
 _DEFAULT_FROM_EMAIL = "noreply@gatewayz.ai"
 
