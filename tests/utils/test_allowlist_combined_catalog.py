@@ -8,14 +8,16 @@ import json
 
 import pytest
 
-from src.config.config import Config
+import src.config.config as config_module
 from src.utils.provider_filter import filter_catalog_by_allowlist
 
 
 @pytest.fixture
 def restrict_deepinfra(monkeypatch):
+    # Resolve Config at fixture time: other tests reload src.config.config, and
+    # get_model_allowlist reads the current module's Config, not a stale import.
     monkeypatch.setattr(
-        Config,
+        config_module.Config,
         "PROVIDER_MODEL_ALLOWLIST",
         json.dumps({"deepinfra": ["deepseek-ai/DeepSeek-V3.2"]}),
     )
@@ -48,7 +50,7 @@ def test_raw_db_rows_use_nested_provider_slug(restrict_deepinfra):
 
 
 def test_no_allowlist_returns_same_object(monkeypatch):
-    monkeypatch.setattr(Config, "PROVIDER_MODEL_ALLOWLIST", "")
+    monkeypatch.setattr(config_module.Config, "PROVIDER_MODEL_ALLOWLIST", "")
     rows = [{"id": "x", "source_gateway": "deepinfra"}]
     assert filter_catalog_by_allowlist(rows) is rows
 

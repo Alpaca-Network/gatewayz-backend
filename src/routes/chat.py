@@ -359,6 +359,31 @@ async def _enforce_daily_limit_preflight(user: dict) -> None:
         ) from e
 
 
+async def _log_post_usage_plan_check(user_id: int, total_tokens: int, environment_tag: str) -> None:
+    """Post-response plan check: log an overage, never fail the (paid) request."""
+    try:
+        result = await asyncio.to_thread(
+            enforce_plan_limits, user_id, total_tokens, environment_tag
+        )
+        if not result.get("allowed", False):
+            logger.warning(
+                "Plan limit exceeded after usage (user=%s, tokens=%s): %s",
+                user_id,
+                total_tokens,
+                result.get("reason", "unknown"),
+            )
+    except Exception as e:  # noqa: BLE001 - background bookkeeping
+        logger.warning("Post-usage plan check failed for user %s: %s", user_id, e)
+
+
+async def _log_activity_safely(**kwargs) -> None:
+    """Activity logging after the response; failures are logged, never raised."""
+    try:
+        await asyncio.to_thread(log_activity, **kwargs)
+    except Exception as e:  # noqa: BLE001 - background bookkeeping
+        logger.error("Failed to log activity for user %s: %s", kwargs.get("user_id"), e)
+
+
 # Per-step timing for the Server-Timing header and slow-request log
 # (src/utils/request_timing.py). Rebinding the module globals the endpoint
 # calls times each step without touching the request logic.
@@ -642,11 +667,9 @@ async def chat_completions(
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False) and not is_anonymous
 
-        # Pre-check plan limits before making any upstream calls (only for authenticated users)
-        if not is_anonymous:
-            pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-            if not pre_plan.get("allowed", False):
-                raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get("reason", "unknown"))
+        # (The same zero-token plan check used to run twice more here and before
+        # streaming; _ensure_plan_capacity above already made it, and step 2.2
+        # re-checks with the estimated tokens before any upstream call.)
 
         # Allow disabling rate limiting for testing (DEV ONLY) or internal live-test calls.
         # is_live_test is set by security_middleware after validating X-Internal-Source + ADMIN_API_KEY.
@@ -760,12 +783,6 @@ async def chat_completions(
                     )
                 # Unknown ValueError — let it propagate as 500
                 raise
-
-        # Pre-check plan limits before streaming (fail fast) - only for authenticated users
-        if not is_anonymous:
-            pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-            if not pre_plan.get("allowed", False):
-                raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get("reason", "unknown"))
 
         # === 2) Build upstream request ===
         with tracker.stage("request_parsing"):
@@ -1000,14 +1017,13 @@ async def chat_completions(
 
         # Plan limits and usage tracking (only for authenticated users)
         if not is_anonymous:
-            post_plan = await _to_thread(
-                enforce_plan_limits, user["id"], total_tokens, environment_tag
+            # The pre-request check already admitted this request and the unified
+            # handler has charged for it, so refusing the response now would bill
+            # the user for an error. Record the post-usage check after the
+            # response instead of making the caller wait for it (100-450 ms).
+            background_tasks.add_task(
+                _log_post_usage_plan_check, user["id"], total_tokens, environment_tag
             )
-            if not post_plan.get("allowed", False):
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
-                )
 
             if trial.get("is_trial") and not trial.get("is_expired"):
                 try:
@@ -1077,8 +1093,13 @@ async def chat_completions(
         # call performs only the route-owned bookkeeping (rate-limit + shadow
         # ledger) and does NOT deduct a second time — the prior behaviour billed
         # paid users twice per request.
+        cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
         if not is_anonymous:
-            cost = await _handle_credits_and_usage(
+            # With already_charged=True this is bookkeeping only (rate-limit usage
+            # and the shadow ledger; the handler already deducted credits), so it
+            # runs after the response is sent rather than adding 0.5-0.7 s to it.
+            background_tasks.add_task(
+                _handle_credits_and_usage,
                 api_key=api_key,
                 user=user,
                 model=model,
@@ -1091,9 +1112,7 @@ async def chat_completions(
                 request_id=request_id,
                 already_charged=True,
             )
-            await _to_thread(increment_api_key_usage, api_key)
-        else:
-            cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
+            background_tasks.add_task(_to_thread, increment_api_key_usage, api_key)
 
         # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
         await _record_inference_metrics_and_health(
@@ -1112,8 +1131,8 @@ async def chat_completions(
             try:
                 provider_name = get_provider_from_model(model)
                 speed = total_tokens / elapsed if elapsed > 0 else 0
-                await _to_thread(
-                    log_activity,
+                background_tasks.add_task(
+                    _log_activity_safely,
                     user_id=user["id"],
                     model=model,
                     provider=provider_name,

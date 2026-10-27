@@ -46,13 +46,39 @@ def catalog_gateway_for(model_id: str | None) -> str | None:
     from src.utils.provider_filter import is_provider_enabled
 
     want = model_id.split(":", 1)[0].lower()
-    found: set[str] = set()
-    for row in get_cached_models("all") or []:
-        if isinstance(row, dict) and str(row.get("id") or "").lower() == want:
-            gateway = str(row.get("source_gateway") or "").lower()
-            if gateway and is_provider_enabled(gateway):
-                found.add(gateway)
+    found = {
+        g for g in _catalog_gateway_index(get_cached_models).get(want, ()) if is_provider_enabled(g)
+    }
     return found.pop() if len(found) == 1 else None
+
+
+_CATALOG_INDEX_TTL_SECONDS = 60.0
+_catalog_index: tuple[float, dict[str, frozenset[str]]] | None = None
+
+
+def _catalog_gateway_index(get_cached_models) -> dict[str, frozenset[str]]:
+    """lower-cased model id -> gateways listing it, rebuilt at most once a minute.
+
+    Scanning the full catalog on every request cost ~100 ms (production
+    Server-Timing, 2026-10-27); the catalog itself only changes on sync.
+    """
+    import time
+
+    global _catalog_index
+    now = time.monotonic()
+    if _catalog_index is not None and now - _catalog_index[0] < _CATALOG_INDEX_TTL_SECONDS:
+        return _catalog_index[1]
+    index: dict[str, set[str]] = {}
+    for row in get_cached_models("all") or []:
+        if isinstance(row, dict):
+            gateway = str(row.get("source_gateway") or "").lower()
+            mid = str(row.get("id") or "").lower()
+            if gateway and mid:
+                index.setdefault(mid, set()).add(gateway)
+    frozen = {k: frozenset(v) for k, v in index.items()}
+    if frozen:  # never cache an empty (cold) catalog
+        _catalog_index = (now, frozen)
+    return frozen
 
 
 async def prepare_upstream_request(

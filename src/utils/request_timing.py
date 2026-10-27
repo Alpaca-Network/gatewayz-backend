@@ -111,6 +111,9 @@ class RequestTimingMiddleware:
         phases: list[tuple[str, float]] = []
         token = _phases.set(phases)
         start = time.perf_counter()
+        # Background tasks run after the response is sent but before this call
+        # returns; measure what the client waited for, not the bookkeeping after.
+        done: dict[str, Any] = {}
 
         async def send_with_timing(message: dict) -> None:
             if message.get("type") == "http.response.start":
@@ -124,18 +127,22 @@ class RequestTimingMiddleware:
                 except Exception:  # noqa: BLE001 - timing must never break a response
                     pass
             await send(message)
+            if message.get("type") == "http.response.body" and not message.get("more_body", False):
+                if "ms" not in done:
+                    done["ms"] = (time.perf_counter() - start) * 1000
+                    done["phases"] = list(phases)
 
         try:
             await self.app(scope, receive, send_with_timing)
         finally:
-            total = (time.perf_counter() - start) * 1000
+            total = done.get("ms", (time.perf_counter() - start) * 1000)
             if total >= SLOW_REQUEST_MS:
                 try:
                     logger.warning(
                         "slow inference request path=%s total_ms=%.0f phases=%s",
                         scope.get("path"),
                         total,
-                        server_timing_value(phases, total),
+                        server_timing_value(done.get("phases", phases), total),
                     )
                 except Exception:  # noqa: BLE001
                     pass
