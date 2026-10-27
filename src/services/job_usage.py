@@ -180,8 +180,21 @@ def record_job_usage(
     tokens_out: int,
     cost_usd: float,
     commit: str,
+    *,
+    request_id: str | None = None,
+    tokens_reasoning: int = 0,
+    finish_reason: str | None = None,
+    content_hash: str | None = None,
+    priced_model: str | None = None,
+    usage_estimated: bool = False,
 ) -> int | None:
     """Append one billing-metadata line for a job key. Returns the seq, or None.
+
+    The v1 entry is exactly as before (``tokens_out`` = billed completion tokens).
+    A v2 entry for cost disputes is recorded alongside it (see job_usage_v2):
+    ``tokens_reasoning`` is the part of ``tokens_out`` that was hidden reasoning,
+    ``priced_model`` is the model whose rates produced ``cost_usd``. If the v2
+    entry cannot be built the v1 line is still written — v2 never costs v1 a line.
 
     Never raises into the request path, but a lost line is NOT quiet: it is logged
     at ERROR with the job and cost, because a sealed record missing a line no longer
@@ -199,10 +212,36 @@ def record_job_usage(
         "cost_usd": format_usd(cost_usd or 0),
         "commit": (commit or "")[:64],
     }
+    entry_v2, sheet_body = None, None
+    try:
+        from src.services import job_usage_v2
+
+        if job_usage_v2.enabled():
+            entry_v2, sheet_body = _build_entry_v2(
+                entry,
+                cost_usd=cost_usd,
+                request_id=request_id or commit,
+                tokens_reasoning=tokens_reasoning,
+                finish_reason=finish_reason,
+                content_hash=content_hash,
+                priced_model=priced_model,
+            )
+    except Exception as e:
+        logger.error(
+            "job usage v2 entry not built: job=%s model=%s error=%s", job_id, entry["model"], e
+        )
     try:
         from src.db.inference_jobs import append_usage
 
-        return append_usage(job_id, entry)
+        if entry_v2 is None:
+            return append_usage(job_id, entry)
+        return append_usage(
+            job_id,
+            entry,
+            entry_v2=entry_v2,
+            usage_estimated=bool(usage_estimated),
+            price_sheet_body=sheet_body,
+        )
     except Exception as e:
         logger.error(
             "job usage line LOST: job=%s model=%s cost_usd=%s error=%s",
@@ -211,4 +250,90 @@ def record_job_usage(
             entry["cost_usd"],
             e,
         )
+        return None
+
+
+def _build_entry_v2(
+    entry: dict,
+    *,
+    cost_usd: Any,
+    request_id: str | None,
+    tokens_reasoning: int,
+    finish_reason: str | None,
+    content_hash: str | None,
+    priced_model: str | None,
+) -> tuple[dict, str | None]:
+    from src.services import job_usage_v2 as v2
+
+    billed_out = entry["tokens_out"]
+    reasoning = min(max(0, int(tokens_reasoning or 0)), billed_out)
+    sheet_hash, sheet_body = _price_sheet_for(entry["model"], priced_model, entry["provider"])
+    entry_v2 = {
+        "request_id": (request_id or "")[:128],
+        "ts": entry["ts"],
+        "model": entry["model"],
+        "provider": entry["provider"],
+        "tokens_in": entry["tokens_in"],
+        "tokens_out": billed_out - reasoning,
+        "tokens_reasoning": reasoning,
+        "cost_usd": v2.usd9(cost_usd),
+        "status": 200,
+        "finish_reason": (finish_reason or "unknown")[:64],
+        "price_sheet": sheet_hash,
+        "content_hash": content_hash if _is_hash(content_hash) else v2.ZERO_HASH,
+        "commit": entry["commit"],
+    }
+    v2.canonical_entry(entry_v2)  # refuse a line the contract could not parse
+    return entry_v2, sheet_body
+
+
+def _is_hash(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 66
+        and value.startswith("0x")
+        and all(c in "0123456789abcdef" for c in value[2:])
+    )
+
+
+def _price_sheet_for(
+    model: str, priced_model: str | None, provider: str | None = None
+) -> tuple[str, str | None]:
+    """(hash, body) of the rates this line was charged at; (zero hash, None) if the
+    rates cannot be read back, so the line is judged as price_unlisted, not lost."""
+    from src.config.config import Config
+    from src.services import job_usage_v2 as v2
+    from src.services.pricing import get_model_pricing
+
+    try:
+        pricing = get_model_pricing(priced_model or model)
+        prompt_rate = float(pricing.get("prompt", 0) or 0)
+        sheet_hash, body = v2.price_sheet(
+            model,
+            pricing.get("prompt", 0),
+            pricing.get("completion", 0),
+            Config.PRICING_MARKUP,
+            cache_write_per_token=_cache_write_rate(
+                priced_model or model, provider, pricing, prompt_rate
+            ),
+        )
+        return sheet_hash, body.decode()
+    except Exception as e:
+        logger.warning(
+            "job usage v2: no price sheet for %s (priced as %s): %s", model, priced_model, e
+        )
+        return v2.ZERO_HASH, None
+
+
+def _cache_write_rate(model: str, provider: str | None, pricing: dict, prompt_rate: float):
+    """The per-token rate a prompt-cache write is billed at, as cache_pricing does it."""
+    try:
+        from src.services.pricing.cache_pricing import resolve_cache_multipliers
+
+        return float(
+            pricing.get("cache_write")
+            or prompt_rate * resolve_cache_multipliers(model, provider).write
+        )
+    except Exception as e:  # never cost the sheet over the optional field
+        logger.warning("job usage v2: no cache-write rate for %s: %s", model, e)
         return None

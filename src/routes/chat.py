@@ -29,6 +29,7 @@ from src.services.anonymous_rate_limiter import (
     validate_anonymous_request,
 )
 from src.services.auth_rate_limiting import get_client_ip
+from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.passive_health_monitor import capture_model_health
 from src.services.prometheus_metrics import record_free_model_usage
 from src.utils.errors import APIExceptions
@@ -1212,6 +1213,11 @@ async def chat_completions(
         headers = {}
         if rl_final is not None:
             headers.update(get_rate_limit_headers(rl_final))
+        # Job keys only: the content fingerprint on this request's usage line, so
+        # the client knows which (messages, output) bundle to keep for a dispute.
+        content_hash = getattr(getattr(request, "state", None), "gatewayz_content_hash", None)
+        if content_hash:
+            headers[CONTENT_HASH_HEADER] = content_hash
 
         return JSONResponse(content=processed, headers=headers)
 
