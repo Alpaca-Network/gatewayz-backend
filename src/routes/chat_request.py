@@ -29,6 +29,32 @@ from src.utils.security_validators import sanitize_for_logging
 logger = logging.getLogger(__name__)
 
 
+def catalog_gateway_for(model_id: str | None) -> str | None:
+    """The enabled provider our catalog lists `model_id` under, if any.
+
+    /v1/models is what we advertise, so a model it lists must route to the
+    provider it lists it under. Prefix guessing got this wrong for every
+    DeepInfra model (production 2026-10-27): bare ids like 'Qwen/Qwen3-...'
+    fell through to OpenRouter (dead key, not enabled) and
+    'openai/gpt-oss-120b' was sent to OpenAI, which does not serve it.
+    Matching is case-insensitive; a model listed under several providers keeps
+    the existing detection.
+    """
+    if not model_id:
+        return None
+    from src.services.models import get_cached_models
+    from src.utils.provider_filter import is_provider_enabled
+
+    want = model_id.split(":", 1)[0].lower()
+    found: set[str] = set()
+    for row in get_cached_models("all") or []:
+        if isinstance(row, dict) and str(row.get("id") or "").lower() == want:
+            gateway = str(row.get("source_gateway") or "").lower()
+            if gateway and is_provider_enabled(gateway):
+                found.add(gateway)
+    return found.pop() if len(found) == 1 else None
+
+
 async def prepare_upstream_request(
     req,
     original_model: str,
@@ -108,7 +134,9 @@ async def prepare_upstream_request(
 
         # Use routed model for provider detection when code routing is active
         model_for_provider_detection = req.model if is_code_route and req.model else original_model
-        override_provider = detect_provider_from_model_id(model_for_provider_detection)
+        override_provider = await asyncio.to_thread(
+            catalog_gateway_for, model_for_provider_detection
+        ) or detect_provider_from_model_id(model_for_provider_detection)
         if override_provider:
             override_provider = override_provider.lower()
             if override_provider == "hug":
