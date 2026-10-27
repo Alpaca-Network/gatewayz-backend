@@ -186,3 +186,21 @@ async def test_openai_reasoning_inside_completion_is_not_double_billed():
     with _Env("openai", chunks) as env:
         await env.run(_req())
     assert env.billed == (30, 1290)
+
+
+def _source_count(provider, path, source):
+    from src.services.metrics.prometheus_metrics import billing_usage_source
+
+    return billing_usage_source.labels(provider=provider, path=path, source=source)._value.get()
+
+
+@pytest.mark.asyncio
+async def test_usage_source_metric_counts_provider_vs_estimate():
+    before_p = _source_count("deepinfra", "stream", "provider")
+    before_e = _source_count("deepinfra", "stream", "estimated")
+    with _Env("deepinfra", [_chunk("hi", finish="stop"), _usage_only(120, 7)]) as env:
+        await env.run(_req())
+    with _Env("deepinfra", [_chunk("hi", finish="stop")]) as env:
+        await env.run(_req())
+    assert _source_count("deepinfra", "stream", "provider") == before_p + 1
+    assert _source_count("deepinfra", "stream", "estimated") == before_e + 1

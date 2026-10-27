@@ -73,6 +73,19 @@ _STREAM_USAGE_PROVIDERS = frozenset(
 )
 
 
+def _count_usage_source(
+    provider: str | None, path: str, prompt_tokens: int, completion_tokens: int
+) -> None:
+    """billing_usage_source_total: provider counts vs the len/4 estimate. Never raises."""
+    try:
+        from src.services.metrics.prometheus_metrics import billing_usage_source
+
+        source = "estimated" if prompt_tokens == 0 and completion_tokens == 0 else "provider"
+        billing_usage_source.labels(provider=provider or "unknown", path=path, source=source).inc()
+    except Exception as e:  # metrics must never break billing
+        logger.debug(f"[ChatHandler] usage-source metric failed: {e}")
+
+
 def _internal_usage(
     prompt_tokens: int, completion_tokens: int, cache_read_tokens: int, cache_write_tokens: int
 ) -> InternalUsage | None:
@@ -1273,6 +1286,7 @@ class ChatInferenceHandler:
                 raise ValueError("Provider response missing choices")
 
             # Token estimation fallback if provider didn't return usage data
+            _count_usage_source(provider_used, "non_stream", prompt_tokens, completion_tokens)
             if prompt_tokens == 0 and completion_tokens == 0:
                 completion_tokens = max(1, len(content or "") // 4)
                 prompt_chars = sum(
@@ -1436,6 +1450,7 @@ class ChatInferenceHandler:
         self._stream_billed = True
 
         # Step 6: Token estimation fallback if provider didn't provide usage
+        _count_usage_source(provider_used, "stream", prompt_tokens, completion_tokens)
         if prompt_tokens == 0 and completion_tokens == 0:
             # Estimate tokens from content length (1 token ≈ 4 characters)
             # A cancelled stream may legitimately have produced no content yet.
