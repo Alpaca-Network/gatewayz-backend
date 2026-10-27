@@ -19,14 +19,12 @@ def test_every_migration_is_recorded(db):
 def test_rls_is_on_for_every_public_table(db):
     """A table without RLS is readable by anon through PostgREST."""
     with db.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             SELECT c.relname FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity
             ORDER BY 1
-            """
-        )
+            """)
         missing = [r[0] for r in cur.fetchall()]
     # Report, don't fail, on tables that predate this test: the list is the
     # baseline. New tables must not join it.
