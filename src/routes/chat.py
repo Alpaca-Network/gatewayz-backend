@@ -358,6 +358,33 @@ async def _enforce_daily_limit_preflight(user: dict) -> None:
         ) from e
 
 
+# Per-step timing for the Server-Timing header and slow-request log
+# (src/utils/request_timing.py). Rebinding the module globals the endpoint
+# calls times each step without touching the request logic.
+from src.utils import request_timing as _request_timing  # noqa: E402
+
+_to_thread = _request_timing.timed_to_thread(_to_thread)
+for _timed_name in (
+    "resolve_auto_routed_model",
+    "enforce_model_pricing_gate",
+    "_ensure_plan_capacity",
+    "discount_aware_credits_async",
+    "_enforce_daily_limit_preflight",
+    "get_model_pricing_async",
+    "inject_conversation_history",
+    "resolve_model_routing",
+    "prepare_upstream_request",
+    "dispatch_streaming",
+    "dispatch_non_streaming",
+    "_handle_credits_and_usage",
+    "calculate_cost_async",
+    "_record_inference_metrics_and_health",
+    "persist_conversation_turn",
+):
+    if _timed_name in globals():
+        globals()[_timed_name] = _request_timing.timed(globals()[_timed_name])
+
+
 @router.post("/chat/completions", tags=["chat"])
 @traced(name="chat_completions", type="llm")
 async def chat_completions(
@@ -1141,41 +1168,45 @@ async def chat_completions(
             },
         )
 
-        # Save chat completion request metadata to database with cost tracking - run as background task
-        # Calculate cost breakdown for analytics
-        from src.services.pricing import get_model_pricing
+        # Authenticated requests are saved by the unified handler (chat_handler),
+        # which runs inside dispatch_non_streaming; saving here too inserted every
+        # row twice (the second insert failed on the request_id unique key).
+        if is_anonymous:
+            # Save chat completion request metadata to database with cost tracking - run as background task
+            # Calculate cost breakdown for analytics
+            from src.services.pricing import get_model_pricing
 
-        try:
-            pricing_info = get_model_pricing(model)
-            input_cost = prompt_tokens * pricing_info.get("prompt", 0)
-            output_cost = completion_tokens * pricing_info.get("completion", 0)
-        except ValueError:
-            logger.warning(
-                f"[ANALYTICS] Pricing unavailable for high-value model {model}, "
-                f"using zero cost for analytics record"
+            try:
+                pricing_info = get_model_pricing(model)
+                input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+                output_cost = completion_tokens * pricing_info.get("completion", 0)
+            except ValueError:
+                logger.warning(
+                    f"[ANALYTICS] Pricing unavailable for high-value model {model}, "
+                    f"using zero cost for analytics record"
+                )
+                input_cost = 0.0
+                output_cost = 0.0
+
+            background_tasks.add_task(
+                save_chat_completion_request_with_cost,
+                request_id=request_id,
+                model_name=model,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                processing_time_ms=int(elapsed * 1000),
+                cost_usd=cost,
+                input_cost_usd=input_cost,
+                output_cost_usd=output_cost,
+                pricing_source="calculated",
+                status="completed",
+                error_message=None,
+                user_id=user["id"] if not is_anonymous else None,
+                provider_name=provider,
+                model_id=None,
+                api_key_id=api_key_id,
+                is_anonymous=is_anonymous,
             )
-            input_cost = 0.0
-            output_cost = 0.0
-
-        background_tasks.add_task(
-            save_chat_completion_request_with_cost,
-            request_id=request_id,
-            model_name=model,
-            input_tokens=prompt_tokens,
-            output_tokens=completion_tokens,
-            processing_time_ms=int(elapsed * 1000),
-            cost_usd=cost,
-            input_cost_usd=input_cost,
-            output_cost_usd=output_cost,
-            pricing_source="calculated",
-            status="completed",
-            error_message=None,
-            user_id=user["id"] if not is_anonymous else None,
-            provider_name=provider,
-            model_id=None,
-            api_key_id=api_key_id,
-            is_anonymous=is_anonymous,
-        )
 
         # Prepare headers including rate limit information
         headers = {}

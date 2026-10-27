@@ -272,6 +272,12 @@ def create_app() -> FastAPI:
             f"  🛡️  [1] Security middleware enabled with LOCAL fallback (Redis error: {e})"
         )
 
+    # Outermost: per-step timing for inference routes (Server-Timing header and a
+    # WARNING line for slow requests). Pure ASGI, so streaming is untouched.
+    from src.utils.request_timing import RequestTimingMiddleware
+
+    app.add_middleware(RequestTimingMiddleware)
+
     # [0] Path alias — rewrites root /chat/completions, /completions and
     #     /embeddings to their /v1 form before any other layer runs, so every
     #     middleware above sees the canonical path.
@@ -460,9 +466,7 @@ def create_app() -> FastAPI:
     # Write to file for debugging in CI (development/CI only)
     if not Config.IS_PRODUCTION:
         try:
-            with open(
-                "/tmp/route_loading_debug.txt", "w"
-            ) as f:  # nosec B108 - CI debug file, gated behind IS_PRODUCTION
+            with open("/tmp/route_loading_debug.txt", "w") as f:  # nosec B108 - CI debug file, gated behind IS_PRODUCTION
                 f.write("Starting route loading...\n")
                 f.flush()
         except Exception as e:
