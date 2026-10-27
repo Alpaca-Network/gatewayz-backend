@@ -503,3 +503,24 @@ async def test_anthropic_messages_hash_includes_the_system_prompt():
         ).hexdigest()
     )
     assert env.rec.call_args.kwargs["content_hash"] == expected
+
+
+@pytest.mark.asyncio
+async def test_xai_reasoning_is_billed_and_split_once():
+    """#2417 bills xAI reasoning reported outside completion_tokens; the v2 line must
+    then show it as reasoning inside the billed count, not double it or drop it."""
+    h = _handler()
+    resp = {
+        "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 62,
+            "total_tokens": 193,
+            "reasoning_tokens": 121,
+        },
+    }
+    with _Env(h, response=resp) as env:
+        await h.process(_req())
+    _, _, _, tin, tout, _, _ = env.rec.call_args.args
+    assert (tin, tout) == (10, 183)  # billed: visible 62 + reasoning 121
+    assert env.rec.call_args.kwargs["tokens_reasoning"] == 121

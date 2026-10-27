@@ -9,6 +9,7 @@ from src.config.supabase_config import execute_with_retry, get_supabase_client
 from src.config.usage_limits import TRIAL_CREDITS_AMOUNT, TRIAL_DURATION_DAYS
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
+from src.db.rate_limit_defaults import default_rate_limit_config
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
 from src.utils.db_safety import DatabaseResultError, safe_get_first
 from src.utils.security_validators import sanitize_for_logging
@@ -305,16 +306,7 @@ def create_api_key(
 
         # Create rate limit configuration for the new key
         try:
-            rate_limit_config = {
-                "api_key_id": api_key_record["id"],
-                "window_type": "sliding",
-                "window_size": 3600,  # 1 hour
-                "max_requests": max_requests or 1000,
-                "max_tokens": 1000000,  # 1M tokens per hour
-                "burst_limit": 100,
-                "concurrency_limit": 10,
-                "is_active": True,
-            }
+            rate_limit_config = default_rate_limit_config(api_key_record["id"], max_requests)
 
             client.table("rate_limit_configs").insert(rate_limit_config).execute()
 
