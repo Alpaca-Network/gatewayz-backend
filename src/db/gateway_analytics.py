@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 # In-memory cache for trending models (fallback when Redis unavailable)
 _trending_cache: dict[str, tuple[list[dict[str, Any]], datetime]] = {}
-TRENDING_CACHE_TTL_SECONDS = 60  # Cache for 1 minute to prevent DB overload
+# Rankings move slowly and each miss scans up to MAX_ACTIVITY_LOG_ROWS rows, so
+# cache for 10 minutes rather than 1.
+TRENDING_CACHE_TTL_SECONDS = 600
 MAX_ACTIVITY_LOG_ROWS = 50000  # Hard limit to prevent memory issues
 
 

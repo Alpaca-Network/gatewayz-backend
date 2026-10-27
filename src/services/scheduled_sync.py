@@ -990,7 +990,9 @@ async def run_scheduled_gpu_spot_check():
             stats["failed"],
             stats["skipped"],
         )
-        record_job_run(
+        # Synchronous Redis write: keep it off the event loop.
+        await asyncio.to_thread(
+            record_job_run,
             "gpu_spot_check",
             ok=True,
             summary={**stats, "interval_minutes": Config.COMMUNITY_SPOTCHECK_INTERVAL_MINUTES},
@@ -999,7 +1001,8 @@ async def run_scheduled_gpu_spot_check():
     except Exception as e:
         _last_gpu_spotcheck_status["last_ok"] = False
         logger.warning("GPU spot-check verification failed (non-fatal): %s", e)
-        record_job_run(
+        await asyncio.to_thread(
+            record_job_run,
             "gpu_spot_check",
             ok=False,
             error=str(e),
@@ -1467,6 +1470,127 @@ def stop_gpu_liveness_scheduler():
 
 
 # ============================================================================
+# Usage anchoring (docs/usage-anchor/README.md) -- once a day, the Merkle root
+# of the previous UTC day's api_usage ledger rows is written to the
+# UsageAnchor contract on Avalanche C-Chain; a sweep confirms pending
+# transactions, resubmits once after a reorg and retries unsent days. Only
+# starts when USAGE_ANCHOR_ENABLED is on. All DB/RPC work runs in a worker
+# thread -- never on the event loop.
+# ============================================================================
+_usage_anchor_scheduler: AsyncIOScheduler | None = None
+
+
+async def run_scheduled_usage_anchor():
+    """Anchor yesterday (src/services/chain/usage_anchor.py::run_usage_anchor_once)."""
+    from src.services.chain.usage_anchor import run_usage_anchor_once
+
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(run_usage_anchor_once)
+        ok = result.get("status") not in ("failed", "unanchored")
+        log = logger.info if ok else logger.error
+        log("Usage anchor run | %s", result)
+        record_job_run(
+            "usage_anchor",
+            ok=ok,
+            summary=result,
+            error=None if ok else result.get("error"),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+    except Exception as e:
+        logger.error("Usage anchor run failed: %s", e)
+        record_job_run(
+            "usage_anchor",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+async def run_scheduled_usage_anchor_sweep():
+    """Confirm / reconcile in-flight anchors (usage_anchor.py::sweep_usage_anchors)."""
+    from src.services.chain.usage_anchor import sweep_usage_anchors
+
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(sweep_usage_anchors)
+        record_job_run(
+            "usage_anchor_sweep",
+            ok=True,
+            summary=result,
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+    except Exception as e:
+        logger.error("Usage anchor sweep failed: %s", e)
+        record_job_run(
+            "usage_anchor_sweep",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+def start_usage_anchor_scheduler():
+    """Start the daily anchor cron + confirmation sweep (app lifespan)."""
+    global _usage_anchor_scheduler
+
+    if not Config.USAGE_ANCHOR_ENABLED:
+        logger.info("Usage anchoring DISABLED: USAGE_ANCHOR_ENABLED is off")
+        return
+
+    hour = Config.USAGE_ANCHOR_HOUR_UTC
+    minute = Config.USAGE_ANCHOR_MINUTE_UTC
+    sweep_minutes = Config.USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES
+    logger.info(
+        "Starting usage anchor scheduler (daily at %02d:%02d UTC, sweep every %s min)",
+        hour,
+        minute,
+        sweep_minutes,
+    )
+    try:
+        _usage_anchor_scheduler = AsyncIOScheduler()
+        _usage_anchor_scheduler.add_job(
+            run_scheduled_usage_anchor,
+            trigger=CronTrigger(hour=hour, minute=minute, timezone="UTC"),
+            id="usage_anchor",
+            name="Usage Anchor Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _usage_anchor_scheduler.add_job(
+            run_scheduled_usage_anchor_sweep,
+            trigger=IntervalTrigger(minutes=sweep_minutes),
+            id="usage_anchor_sweep",
+            name="Usage Anchor Confirmation Sweep",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _usage_anchor_scheduler.start()
+        logger.info("✅ Usage anchor scheduler started")
+    except Exception as e:
+        logger.error("❌ Failed to start usage anchor scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_usage_anchor_scheduler():
+    """Stop the usage anchor APScheduler gracefully (called during shutdown)."""
+    global _usage_anchor_scheduler
+
+    if _usage_anchor_scheduler is None:
+        return
+    logger.info("Stopping usage anchor scheduler...")
+    try:
+        _usage_anchor_scheduler.shutdown(wait=True)
+        logger.info("✅ Usage anchor scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping usage anchor scheduler: %s", e)
+    finally:
+        _usage_anchor_scheduler = None
+
+
+# ============================================================================
 # Staking rewards (gatewayz-backend staking rewards, boss's rule: WAYZ
 # stakers are paid in inference credits) -- daily job that pays every
 # staked wallet's reward for "yesterday" (UTC). Runs once a day at
@@ -1610,6 +1734,7 @@ def holdings_snapshot_cron_hours(snapshots_per_day: int) -> list[int]:
 async def run_scheduled_holdings_snapshots():
     """Run one holdings observation sweep
     (src/services/holdings/snapshots.py::run_holdings_snapshots_once)."""
+    from src.services.holdings.alerts import alert_if_sweep_recorded_nothing
     from src.services.holdings.snapshots import run_holdings_snapshots_once
 
     run_started_at = datetime.now(UTC)
@@ -1622,18 +1747,52 @@ async def run_scheduled_holdings_snapshots():
             return
 
         logger.info(
-            "✅ Holdings snapshots OK | considered=%s recorded=%s empty=%s rows=%s skipped=%s",
+            "✅ Holdings snapshots OK | considered=%s recorded=%s empty=%s rows=%s skipped=%s "
+            "failed_chains=%s",
             result.get("wallets_considered"),
             result.get("wallets_recorded"),
             result.get("wallets_empty"),
             result.get("rows_recorded"),
             result.get("skipped"),
+            result.get("failed_chains"),
         )
         record_job_run("holdings_snapshots", ok=True, summary=result, duration_ms=duration_ms)
+        # A sweep that saw eligible wallets and recorded none is the failure
+        # mode that went unnoticed for three days in Oct 2026 -- tell ops.
+        # Off the event loop: delivery is a synchronous HTTP call. Guarded
+        # separately so an alerting bug can never overwrite this run's record.
+        try:
+            await asyncio.to_thread(alert_if_sweep_recorded_nothing, result)
+        except Exception as e:
+            logger.error("Holdings sweep alert check failed: %s", e)
     except Exception as e:
         logger.warning("Holdings snapshots run failed (non-fatal): %s", e)
         record_job_run(
             "holdings_snapshots",
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+
+
+async def run_scheduled_holdings_sweep_watchdog():
+    """Hourly: alert when no sweep has recorded a wallet for
+    HOLDINGS_SWEEP_STALE_HOURS while eligible wallets exist
+    (src/services/holdings/alerts.py::check_sweep_staleness). Catches the
+    sweep not running at all, which its own post-run alert cannot."""
+    from src.services.holdings.alerts import check_sweep_staleness
+
+    run_started_at = datetime.now(UTC)
+    try:
+        status = await asyncio.to_thread(check_sweep_staleness)
+        duration_ms = int((datetime.now(UTC) - run_started_at).total_seconds() * 1000)
+        if status.get("stale"):
+            logger.warning("Holdings sweep is stale: %s", status)
+        record_job_run("holdings_sweep_watchdog", ok=True, summary=status, duration_ms=duration_ms)
+    except Exception as e:
+        logger.warning("Holdings sweep watchdog failed (non-fatal): %s", e)
+        record_job_run(
+            "holdings_sweep_watchdog",
             ok=False,
             error=str(e),
             duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
@@ -1716,6 +1875,17 @@ def start_holdings_snapshots_scheduler():
             max_instances=1,
             coalesce=True,
         )
+        # The staleness watchdog shares this scheduler: it exists to watch
+        # this job, and its lifecycle is this job's.
+        _holdings_snapshots_scheduler.add_job(
+            run_scheduled_holdings_sweep_watchdog,
+            trigger=CronTrigger(minute=(minute + 30) % 60, timezone="UTC"),
+            id="holdings_sweep_watchdog",
+            name="Holdings Sweep Watchdog",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         _holdings_snapshots_scheduler.start()
         logger.info("✅ Holdings snapshots scheduler started (%s sweeps/day)", len(hours))
     except Exception as e:
@@ -1781,6 +1951,161 @@ def stop_holdings_rewards_scheduler():
         logger.error("❌ Error stopping holdings rewards scheduler: %s", e)
     finally:
         _holdings_rewards_scheduler = None
+
+
+# ============================================================================
+# Delegated staking (src/services/delegation/) -- an inference allowance for
+# stake delegated to the Gatewayz StakeWise vault / Cardano pool. Three jobs on
+# one scheduler:
+#
+#   delegation_measurements -- DELEGATION_MEASUREMENTS_PER_DAY sweeps a day at
+#     evenly spaced hours (same spacing as holdings), recording each linked
+#     wallet's delegated amount, zero included.
+#   delegation_reconciliation -- daily: record the revenue that reached us and
+#     pause an asset whose granted cost outran it (fail closed).
+#   delegation_accruals -- daily, after reconciliation, paying for YESTERDAY
+#     (v2 allowance model only; a no-op in the default reward_share model).
+#   delegation_attribution -- daily, after reconciliation: each linked wallet's
+#     pro-rata share of the revenue just recorded, granted as an inference
+#     discount (v3 reward_share model).
+#
+# Always started; every job no-ops (records "skipped: disabled") while
+# DELEGATED_STAKING_ENABLED is off, and per asset while its vault / pool is
+# unset, so the ops page shows them as off rather than missing.
+# ============================================================================
+_delegation_scheduler: AsyncIOScheduler | None = None
+
+
+async def _run_delegation_job(name: str, fn, *args) -> dict[str, Any] | None:
+    """Run one delegation job off the event loop and record it. Never raises."""
+    run_started_at = datetime.now(UTC)
+    try:
+        result = await asyncio.to_thread(fn, *args)
+        duration_ms = int((datetime.now(UTC) - run_started_at).total_seconds() * 1000)
+        if not result.get("skipped"):
+            logger.info("✅ %s OK | %s", name, result)
+        record_job_run(name, ok=True, summary=result, duration_ms=duration_ms)
+        return result
+    except Exception as e:
+        logger.warning("%s run failed (non-fatal): %s", name, e)
+        record_job_run(
+            name,
+            ok=False,
+            error=str(e),
+            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
+        )
+        return None
+
+
+async def run_scheduled_delegation_measurements():
+    from src.services.delegation.alerts import alert_if_measured_nothing
+    from src.services.delegation.measurements import run_delegation_measurements_once
+
+    result = await _run_delegation_job("delegation_measurements", run_delegation_measurements_once)
+    if result:
+        try:
+            await asyncio.to_thread(alert_if_measured_nothing, result)
+        except Exception as e:
+            logger.error("Delegation measurement alert check failed: %s", e)
+
+
+async def run_scheduled_delegation_accruals():
+    from src.services.delegation.rewards import run_delegation_accruals_once
+
+    await _run_delegation_job("delegation_accruals", run_delegation_accruals_once)
+
+
+async def run_scheduled_delegation_reconciliation():
+    from src.services.delegation.reconciliation import run_delegation_reconciliation_once
+
+    await _run_delegation_job("delegation_reconciliation", run_delegation_reconciliation_once)
+
+
+async def run_scheduled_delegation_attribution():
+    from src.services.delegation.attribution import run_delegation_attribution_once
+
+    await _run_delegation_job("delegation_attribution", run_delegation_attribution_once)
+
+
+def start_delegation_scheduler():
+    """Start the delegated-staking jobs (app lifespan). Always starts."""
+    global _delegation_scheduler
+
+    hours = holdings_snapshot_cron_hours(Config.DELEGATION_MEASUREMENTS_PER_DAY)
+    hour_expr = ",".join(str(h) for h in hours)
+    try:
+        _delegation_scheduler = AsyncIOScheduler()
+        _delegation_scheduler.add_job(
+            run_scheduled_delegation_measurements,
+            trigger=CronTrigger(
+                hour=hour_expr,
+                minute=Config.DELEGATION_MEASUREMENT_CRON_MINUTE_UTC,
+                timezone="UTC",
+            ),
+            id="delegation_measurements",
+            name="Delegation Measurements Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _delegation_scheduler.add_job(
+            run_scheduled_delegation_reconciliation,
+            trigger=CronTrigger(
+                hour=Config.DELEGATION_RECONCILIATION_CRON_HOUR_UTC,
+                minute=Config.DELEGATION_RECONCILIATION_CRON_MINUTE_UTC,
+                timezone="UTC",
+            ),
+            id="delegation_reconciliation",
+            name="Delegation Reconciliation Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _delegation_scheduler.add_job(
+            run_scheduled_delegation_accruals,
+            trigger=CronTrigger(
+                hour=Config.DELEGATION_ACCRUAL_CRON_HOUR_UTC,
+                minute=Config.DELEGATION_ACCRUAL_CRON_MINUTE_UTC,
+                timezone="UTC",
+            ),
+            id="delegation_accruals",
+            name="Delegation Accruals Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _delegation_scheduler.add_job(
+            run_scheduled_delegation_attribution,
+            trigger=CronTrigger(
+                hour=Config.DELEGATION_ATTRIBUTION_CRON_HOUR_UTC,
+                minute=Config.DELEGATION_ATTRIBUTION_CRON_MINUTE_UTC,
+                timezone="UTC",
+            ),
+            id="delegation_attribution",
+            name="Delegation Reward-Share Attribution Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _delegation_scheduler.start()
+        logger.info("✅ Delegation scheduler started (measurements at UTC hours %s)", hour_expr)
+    except Exception as e:
+        logger.error("❌ Failed to start delegation scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_delegation_scheduler():
+    global _delegation_scheduler
+
+    if _delegation_scheduler is None:
+        return
+    try:
+        _delegation_scheduler.shutdown(wait=True)
+        logger.info("✅ Delegation scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping delegation scheduler: %s", e)
+    finally:
+        _delegation_scheduler = None
 
 
 def get_pricing_drift_status() -> dict[str, Any]:

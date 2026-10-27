@@ -73,7 +73,7 @@ END $$;
 -- =============================================================================
 -- Create test users with various subscription states
 
-INSERT INTO users (username, email, credits, is_active, auth_method, subscription_status, welcome_email_sent, privy_user_id)
+INSERT INTO users (username, email, purchased_credits, is_active, auth_method, subscription_status, welcome_email_sent, privy_user_id)
 VALUES
     -- Admin user
     ('admin_user', 'admin@test.example.com', 10000.00, true, 'email', 'active', true, 'privy_admin_001'),

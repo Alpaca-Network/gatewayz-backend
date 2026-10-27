@@ -200,6 +200,33 @@ class Config:
     )
     # Placeholder; the real value is a product decision, not set here.
     WAYZ_DAILY_INFERENCE_CAPACITY = int(_get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0"))
+    # Daily usage anchoring (docs/usage-anchor/README.md): once a day, the
+    # Merkle root of the previous UTC day's api_usage ledger rows is written
+    # to the UsageAnchor contract on Avalanche C-Chain. Only the root goes
+    # on-chain. Off by default; with no contract address or key set the job
+    # refuses to run. USAGE_ANCHOR_PRIVATE_KEY is a dedicated signer -- never
+    # the payout-pool key -- and is never logged. USAGE_ANCHOR_SALT_KEY salts
+    # every leaf so a leaf cannot be guessed from public data.
+    USAGE_ANCHOR_ENABLED = _get_env_var("USAGE_ANCHOR_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    USAGE_ANCHOR_CHAIN_ID = int(_get_env_var("USAGE_ANCHOR_CHAIN_ID", "43113"))
+    USAGE_ANCHOR_RPC_URL = _get_env_var(
+        "USAGE_ANCHOR_RPC_URL", "https://api.avax-test.network/ext/bc/C/rpc"
+    )
+    USAGE_ANCHOR_CONTRACT_ADDRESS = _get_env_var("USAGE_ANCHOR_CONTRACT_ADDRESS")
+    USAGE_ANCHOR_PRIVATE_KEY = _get_env_var("USAGE_ANCHOR_PRIVATE_KEY")
+    USAGE_ANCHOR_SALT_KEY = _get_env_var("USAGE_ANCHOR_SALT_KEY")
+    # Daily cron time (UTC) for anchoring the previous day -- see
+    # src/services/scheduled_sync.py::start_usage_anchor_scheduler.
+    USAGE_ANCHOR_HOUR_UTC = int(_get_env_var("USAGE_ANCHOR_HOUR_UTC", "0"))
+    USAGE_ANCHOR_MINUTE_UTC = int(_get_env_var("USAGE_ANCHOR_MINUTE_UTC", "15"))
+    USAGE_ANCHOR_MIN_CONFIRMATIONS = int(_get_env_var("USAGE_ANCHOR_MIN_CONFIRMATIONS", "3"))
+    USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES = int(
+        _get_env_var("USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES", "10")
+    )
     # Staking rewards (gatewayz-backend staking rewards, boss's rule: WAYZ
     # stakers are paid in inference credits; providers who offer inference
     # are paid in ETH on Base -- see PROVIDER_PAYOUT_ASSET below).
@@ -229,12 +256,22 @@ class Config:
     # fresh environment works without configuration; production should point
     # these at a paid provider, since public endpoints rate-limit and a
     # rate-limited chain is reported as a *failed* read (never a zero balance).
+    #
+    # Precedence per chain (src/services/holdings/chains.py): an explicit
+    # <CHAIN>_RPC_URL that differs from the public default below, then an
+    # Alchemy URL derived from ALCHEMY_API_KEY, then the public default. A
+    # transport failure on the chosen endpoint is retried on the public
+    # endpoints before the chain is declared unread. The key is a secret: it
+    # is never logged, and RPC URLs are redacted from every error message.
+    ALCHEMY_API_KEY = _get_env_var("ALCHEMY_API_KEY")
     ETHEREUM_RPC_URL = _get_env_var("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com")
     BNB_CHAIN_RPC_URL = _get_env_var("BNB_CHAIN_RPC_URL", "https://bsc-dataseed.binance.org")
     # Mainnet C-Chain -- distinct from AVALANCHE_FUJI_RPC_URL (testnet, WAYZ staking).
     AVALANCHE_RPC_URL = _get_env_var("AVALANCHE_RPC_URL", "https://api.avax.network/ext/bc/C/rpc")
     BASE_RPC_URL = _get_env_var("BASE_RPC_URL", "https://mainnet.base.org")
-    POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-rpc.com")
+    # polygon-rpc.com started answering 401 (key required), which failed every
+    # holdings sweep: one unreadable chain skips the whole wallet.
+    POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-bor-rpc.publicnode.com")
     ARBITRUM_RPC_URL = _get_env_var("ARBITRUM_RPC_URL", "https://arb1.arbitrum.io/rpc")
     # Ships dark, exactly like STAKING_REWARDS_ENABLED did -- the schema, jobs
     # and endpoints land inert until the rates/caps are a confirmed product
@@ -298,6 +335,123 @@ class Config:
     # starts exactly on a UTC day boundary where its taken_at could land on
     # either side of the day it is meant to belong to.
     HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC = int(_get_env_var("HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC", "5"))
+    # Ops alerting for the observation sweep (src/services/holdings/alerts.py).
+    # A sweep that considered wallets but recorded none alerts immediately; a
+    # watchdog alerts when no sweep has recorded a wallet for this many hours
+    # while eligible wallets exist. Each condition alerts at most once per
+    # HOLDINGS_ALERT_COOLDOWN_HOURS.
+    HOLDINGS_SWEEP_STALE_HOURS = float(_get_env_var("HOLDINGS_SWEEP_STALE_HOURS", "8"))
+    HOLDINGS_ALERT_COOLDOWN_HOURS = float(_get_env_var("HOLDINGS_ALERT_COOLDOWN_HOURS", "12"))
+    # Delegated staking (src/services/delegation/, docs/delegation/README.md):
+    # users stake ETH from their own wallet into a Gatewayz-run StakeWise V3
+    # vault, or delegate ADA to a Gatewayz Cardano pool. Non-custodial -- the
+    # stake never leaves the user's control -- and the staking rewards accrue
+    # to us through the vault fee / pool margin. We grant inference credits
+    # at an admin-set, changeable rate; never a fixed or guaranteed return.
+    #
+    # Ships dark: off by default, and with the vault address and pool id unset
+    # every reader and job no-ops for that asset even if the flag is on.
+    DELEGATED_STAKING_ENABLED = _get_env_var("DELEGATED_STAKING_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    STAKEWISE_VAULT_ADDRESS = (_get_env_var("STAKEWISE_VAULT_ADDRESS", "") or "").strip() or None
+    STAKEWISE_VAULT_CHAIN_ID = _int_env("STAKEWISE_VAULT_CHAIN_ID", 1)
+    # bech32 pool id (pool1...).
+    CARDANO_POOL_ID = (_get_env_var("CARDANO_POOL_ID", "") or "").strip() or None
+    KOIOS_BASE_URL = _get_env_var("KOIOS_BASE_URL", "https://api.koios.rest/api/v1")
+    # Optional bearer token for Koios' paid tiers. A secret: never logged.
+    KOIOS_API_KEY = _get_env_var("KOIOS_API_KEY")
+    # Accept stake_test1... addresses when linking a Cardano wallet, and report
+    # cardano.network "preprod" on /delegation/status so the frontend switches
+    # to preprod (testnet demos; point KOIOS_BASE_URL at preprod Koios too).
+    # Never on in production: a testnet stake key proves nothing about mainnet
+    # ADA, so APP_ENV=production ignores the flag.
+    DELEGATION_ALLOW_CARDANO_TESTNET = not IS_PRODUCTION and _get_env_var(
+        "DELEGATION_ALLOW_CARDANO_TESTNET", "false"
+    ).lower() in {"1", "true", "yes"}
+    # Counsel cleared delegated staking everywhere except the US and Canada
+    # (2026-10-14). ISO 3166-1 alpha-2, comma-separated. An account seen in or
+    # attesting from one of these cannot start delegating (link a stake
+    # address, attest) and is granted nothing new; exits, reads and spending
+    # an existing discount balance are never blocked.
+    DELEGATION_RESTRICTED_COUNTRIES = frozenset(
+        c.strip().upper()
+        for c in (_get_env_var("DELEGATION_RESTRICTED_COUNTRIES", "US,CA") or "").split(",")
+        if c.strip()
+    )
+    # Request header carrying the caller's country (e.g. cf-ipcountry). Unset
+    # by default: api.gatewayz.ai is served straight from Railway's edge, which
+    # sets no country header, and a header the edge does not overwrite is
+    # whatever the client sent. Set it only behind an edge that always sets it.
+    # Unset -> the self-attestation is the only check.
+    DELEGATION_COUNTRY_HEADER = (_get_env_var("DELEGATION_COUNTRY_HEADER", "") or "").lower()
+    # m in A = R / (1 - m): our gross margin on inference. A credit costs us
+    # (1 - m) dollars, which is what reconciliation charges against revenue.
+    DELEGATION_INFERENCE_MARGIN = _decimal_env("DELEGATION_INFERENCE_MARGIN", "0.20")
+    # R: expected staking revenue to us per USD staked per day, per asset.
+    # Only feeds the SUGGESTED rate shown to admins; the paid rate is always
+    # the one an admin set in delegation_allowance_rates. 0 = no suggestion.
+    DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ETH = _decimal_env(
+        "DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ETH", "0"
+    )
+    DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ADA = _decimal_env(
+        "DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ADA", "0"
+    )
+    # Per-account daily ceiling (all wallets and assets together) and a global
+    # daily budget across every account. Conservative placeholders.
+    DELEGATION_DAILY_CAP_CREDITS = _decimal_env("DELEGATION_DAILY_CAP_CREDITS", "5")
+    DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS = _decimal_env(
+        "DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS", "50"
+    )
+    # Measurement sweeps per UTC day, and how many a day needs before it can be
+    # paid (lowest-of-day only resists farming with several readings).
+    DELEGATION_MEASUREMENTS_PER_DAY = _int_env("DELEGATION_MEASUREMENTS_PER_DAY", 4)
+    DELEGATION_MIN_MEASUREMENTS_PER_DAY = _int_env("DELEGATION_MIN_MEASUREMENTS_PER_DAY", 2)
+    # Reconciliation fails closed when the cost of credits granted exceeds
+    # revenue x (1 + tolerance) + grace. Grace is an absolute USD allowance for
+    # the revenue lag at launch (Cardano rewards land ~2 epochs late); 0 means
+    # any unbacked grant pauses the asset.
+    DELEGATION_RECONCILIATION_TOLERANCE = _decimal_env(
+        "DELEGATION_RECONCILIATION_TOLERANCE", "0.05"
+    )
+    DELEGATION_RECONCILIATION_GRACE_USD = _decimal_env("DELEGATION_RECONCILIATION_GRACE_USD", "0")
+    DELEGATION_MEASUREMENT_CRON_MINUTE_UTC = _int_env("DELEGATION_MEASUREMENT_CRON_MINUTE_UTC", 10)
+    DELEGATION_ACCRUAL_CRON_HOUR_UTC = _int_env("DELEGATION_ACCRUAL_CRON_HOUR_UTC", 0)
+    DELEGATION_ACCRUAL_CRON_MINUTE_UTC = _int_env("DELEGATION_ACCRUAL_CRON_MINUTE_UTC", 50)
+    DELEGATION_RECONCILIATION_CRON_HOUR_UTC = _int_env("DELEGATION_RECONCILIATION_CRON_HOUR_UTC", 0)
+    DELEGATION_RECONCILIATION_CRON_MINUTE_UTC = _int_env(
+        "DELEGATION_RECONCILIATION_CRON_MINUTE_UTC", 30
+    )
+    # v3 (src/services/delegation/attribution.py, discount.py): how delegation
+    # pays out. "reward_share" (default) grants DELEGATION_REWARD_SHARE of the
+    # revenue each wallet's stake actually earned us as an inference DISCOUNT
+    # balance; "allowance" is the v2 admin-rate credit grant, kept for
+    # rollback. In reward_share mode the v2 accrual grants nothing.
+    DELEGATION_PAYOUT_MODEL = (
+        (_get_env_var("DELEGATION_PAYOUT_MODEL", "reward_share") or "reward_share").strip().lower()
+    )
+    # Share of attributed revenue returned as discount, clamped 0..1.
+    DELEGATION_REWARD_SHARE = _decimal_env("DELEGATION_REWARD_SHARE", "0.95")
+    # d: the part of a request's list price drawn from the discount balance
+    # (the user pays 1 - d in credits), clamped 0..0.99 -- never 1, so every
+    # request still writes a credit row and passes the daily usage limit.
+    DELEGATION_DISCOUNT_PERCENT = _decimal_env("DELEGATION_DISCOUNT_PERCENT", "0.99")
+    # Billing applies the discount only when this AND DELEGATED_STAKING_ENABLED
+    # are on. Off -> deduct_credits is unchanged and makes no extra DB call.
+    DELEGATION_DISCOUNT_ENABLED = _get_env_var("DELEGATION_DISCOUNT_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # How long a request's pre-check hold on the discount balance lives if
+    # the request is never billed (60..3600 s). Settled holds go at once.
+    DELEGATION_DISCOUNT_HOLD_TTL_SECONDS = _int_env("DELEGATION_DISCOUNT_HOLD_TTL_SECONDS", 900)
+    # The daily attribution job: after reconciliation (00:30) has recorded
+    # the revenue it divides.
+    DELEGATION_ATTRIBUTION_CRON_HOUR_UTC = _int_env("DELEGATION_ATTRIBUTION_CRON_HOUR_UTC", 0)
+    DELEGATION_ATTRIBUTION_CRON_MINUTE_UTC = _int_env("DELEGATION_ATTRIBUTION_CRON_MINUTE_UTC", 40)
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.
@@ -1075,6 +1229,14 @@ class Config:
         if _raw_enabled and _raw_enabled.strip()
         else None  # None = all providers enabled
     )
+
+    # Per-provider model allowlist, JSON: {"deepinfra": ["meta-llama/Llama-3.3-70B-Instruct", ...]}.
+    # A provider listed here only lists, routes and caches the named models
+    # (its native ids, case-insensitive, "<provider>/" prefix optional). Providers
+    # not listed are unrestricted. Unset, empty or invalid JSON restricts nothing.
+    # Parsed in src/utils/provider_filter.py. North Star §5: breadth from a wide
+    # host like DeepInfra is curated, not mirrored.
+    PROVIDER_MODEL_ALLOWLIST: str = os.environ.get("PROVIDER_MODEL_ALLOWLIST", "")
 
     # Health-gated catalog. When true, models whose models.health_status == 'down'
     # are hidden from the served catalog. This is INERT until an active health sweep

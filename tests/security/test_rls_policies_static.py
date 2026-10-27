@@ -97,6 +97,23 @@ TARGET_TABLES = frozenset(
         # posture, added in 20260913120000_emission_rewards.sql.
         "emission_epochs",
         "provider_scores",
+        # Delegated staking (inference-as-yield v2) -- same service-role-only,
+        # RLS-enabled-with-explicit-REVOKE posture, added in
+        # 20261008230000_delegated_staking.sql.
+        "delegation_measurements",
+        "delegation_allowance_rates",
+        "delegation_accruals",
+        "delegation_revenue",
+        "delegation_controls",
+        # v3 reward share as an inference discount -- same posture, added in
+        # 20261011120000_delegation_reward_share_discount.sql.
+        "delegation_reward_attributions",
+        "inference_discount_balances",
+        "inference_discount_ledger",
+        "inference_discount_holds",
+        # US / Canada block -- same posture, added in
+        # 20261014120000_delegation_eligibility.sql.
+        "delegation_eligibility",
     }
 )
 

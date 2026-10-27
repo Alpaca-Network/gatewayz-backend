@@ -49,6 +49,12 @@ class ModelResolution:
 
 _index_lock = threading.RLock()
 _exact: set[str] | None = None
+# lower-cased id -> the id exactly as the catalog spells it. Matching is
+# case-insensitive, but the id handed downstream must keep the catalog's case:
+# pricing and routing look ids up case-sensitively, so a lower-cased
+# 'deepseek-ai/deepseek-v3.2' missed 'deepseek-ai/DeepSeek-V3.2' and every
+# mixed-case model (all of DeepInfra) failed as model_not_priced.
+_catalog_case: dict[str, str] = {}
 _by_suffix: dict[str, tuple[str, ...]] | None = None
 _aliases: dict[str, str] | None = None
 
@@ -77,8 +83,13 @@ def _load_catalog_ids() -> list[str]:
 
     def _collect(rows) -> None:
         for r in rows or []:
-            if isinstance(r, dict) and r.get("id"):
-                ids.append(str(r["id"]))
+            if not isinstance(r, dict):
+                continue
+            # Unique-catalog rows strip the provider prefix from "id"; their
+            # "canonical_id" is the fully-qualified form /v1/models advertises.
+            mid = r.get("canonical_id") or r.get("id")
+            if mid:
+                ids.append(str(mid))
 
     try:
         from src.services.models import get_cached_models
@@ -108,13 +119,17 @@ def _build_index() -> None:
     ids = _load_catalog_ids()
     exact: set[str] = set()
     suffix: dict[str, list[str]] = {}
+    case: dict[str, str] = {}
     for mid in ids:
         low = mid.lower()
         exact.add(low)
+        case.setdefault(low, mid)
         bare = low.rsplit("/", 1)[-1]
         if bare != low:
             suffix.setdefault(bare, []).append(mid)
     _exact = exact
+    _catalog_case.clear()
+    _catalog_case.update(case)
     _by_suffix = {k: tuple(sorted(v)) for k, v in suffix.items()}
     _aliases = _load_alias_map()
     logger.info(
@@ -200,6 +215,7 @@ def resolve_catalog_model_id(model_id: str) -> ModelResolution:
     low = core.lower()
 
     def _finish(canonical: str, how: str) -> ModelResolution:
+        canonical = _catalog_case.get(canonical.lower(), canonical)
         return ModelResolution(canonical + (_FREE_SUFFIX if free else ""), how)
 
     _ensure_index()

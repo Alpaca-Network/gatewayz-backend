@@ -25,7 +25,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.schemas.proxy import ProxyRequest
-from src.security.deps import get_optional_api_key
+from src.security.deps import get_optional_api_key_strict
+from src.security.identity import RequestIdentity, get_request_identity_strict
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,12 @@ async def create_completion(
     req: CompletionsRequest,
     background_tasks: BackgroundTasks,
     request: Request = None,
-    api_key: str | None = Depends(get_optional_api_key),
+    # Same strict pair as /v1/chat/completions: chat_completions is called
+    # directly below, so its dependencies are not resolved for us — identity
+    # must be resolved here and passed through, or it receives the bare
+    # Depends() default and every request 500s.
+    api_key: str | None = Depends(get_optional_api_key_strict),
+    identity: RequestIdentity = Depends(get_request_identity_strict),
 ):
     """Legacy text completions.
 
@@ -180,6 +186,7 @@ async def create_completion(
         api_key=api_key,
         session_id=None,
         request=request,
+        identity=identity,
     )
 
     if isinstance(result, StreamingResponse):

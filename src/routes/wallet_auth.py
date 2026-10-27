@@ -32,6 +32,7 @@ from src.db.user_wallets import (
     get_wallets_for_user,
     link_wallet,
     unlink_wallet,
+    wallet_namespace,
 )
 from src.routes.auth import _generate_unique_username, _handle_existing_user
 from src.schemas import AuthMethod, PrivyAuthRequest, PrivyAuthResponse, PrivyUserData
@@ -305,6 +306,18 @@ def _pay_pending_holdings_rewards(address: str, user_id: int) -> None:
         logger.warning("holdings.pay_pending_holdings_for_wallet failed for %s: %s", address, e)
 
 
+def _pay_pending_delegation_rewards(address: str, user_id: int) -> None:
+    """A wallet just got linked -- pay any delegated-staking allowance that
+    accrued while it was unlinked (src/services/delegation/rewards.py). Lazy
+    import + never raises, same convention as the helpers above."""
+    try:
+        from src.services.delegation.rewards import pay_pending_delegation_for_wallet
+
+        pay_pending_delegation_for_wallet(address, user_id)
+    except Exception as e:
+        logger.warning("delegation.pay_pending_delegation_for_wallet failed: %s", e)
+
+
 def _wallet_signup_new_user(
     address: str,
     background_tasks: BackgroundTasks,  # noqa: ARG001 -- kept for signature symmetry
@@ -361,6 +374,7 @@ def _wallet_signup_new_user(
     else:
         _pay_pending_staking_rewards(address, user_id)
         _pay_pending_holdings_rewards(address, user_id)
+        _pay_pending_delegation_rewards(address, user_id)
 
     return PrivyAuthResponse(
         success=True,
@@ -430,6 +444,8 @@ async def wallet_link_nonce(
 def _wallet_view(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "wallet_address": row.get("wallet_address"),
+        # "eip155" (EVM) or "cip34" (Cardano stake address).
+        "chain_namespace": wallet_namespace(row),
         "source": row.get("source"),
         "wallet_client_type": row.get("wallet_client_type"),
         "is_primary": row.get("is_primary", False),
@@ -473,6 +489,7 @@ async def wallet_link(
 
     _pay_pending_staking_rewards(body.wallet_address, user_id)
     _pay_pending_holdings_rewards(body.wallet_address, user_id)
+    _pay_pending_delegation_rewards(body.wallet_address, user_id)
     return {"success": True, "data": {"wallet": _wallet_view(wallet_row)}}
 
 
@@ -482,12 +499,29 @@ async def list_wallets(user_id: int = Depends(get_user_id)) -> dict[str, Any]:
     return {"success": True, "data": {"wallets": [_wallet_view(w) for w in wallets]}}
 
 
+def _normalize_linked_address(value: str) -> str:
+    """An address as user_wallets stores it: a lower-cased 0x EVM address,
+    or a lower-cased bech32 Cardano stake address (linked via
+    src/routes/wallet_auth_cardano.py). Raises ValueError otherwise."""
+    lowered = value.lower() if isinstance(value, str) else value
+    if isinstance(lowered, str) and lowered.startswith(("stake1", "stake_test1")):
+        from src.services.delegation.cip8 import Cip8VerificationError, parse_stake_address
+
+        try:
+            # Testnet allowed: removing a link is never a privilege.
+            parse_stake_address(lowered, allow_testnet=True)
+        except Cip8VerificationError as e:
+            raise ValueError("wallet_address is not a valid Cardano stake address") from e
+        return lowered
+    return normalize_wallet_address(value)
+
+
 @router.delete("/auth/wallets/{wallet_address}", tags=["wallet_auth"])
 async def unlink_wallet_route(
     wallet_address: str, user_id: int = Depends(get_user_id)
 ) -> dict[str, Any]:
     try:
-        address = normalize_wallet_address(wallet_address)
+        address = _normalize_linked_address(wallet_address)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
