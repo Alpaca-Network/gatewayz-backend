@@ -926,7 +926,11 @@ class ChatInferenceHandler:
                     if provider_name == "community":
                         kwargs = {**kwargs, "_gatewayz_billing_ref": self._billing_ref()}
                     # All non-OpenRouter providers use sync streaming clients
-                    stream = routing["stream"](messages, model_id, **kwargs)
+                    # Opening a sync stream waits for the provider's first response;
+                    # do it in a thread so it doesn't block the event loop.
+                    stream = await asyncio.to_thread(
+                        routing["stream"], messages, model_id, **kwargs
+                    )
                     is_sync_stream = True
                 else:
                     # Fallback to OpenRouter for unknown providers
@@ -1336,8 +1340,13 @@ class ChatInferenceHandler:
                     f"[ChatHandler] Model {request.model} not in registry, "
                     f"using provider='{provider_used}', model_id='{provider_model_id}'"
                 )
-                provider_response = self._call_provider(
-                    provider_used, provider_model_id, messages, **kwargs
+                # The provider clients are synchronous. Called inline, the upstream
+                # round trip blocked the event loop: with one worker, every other
+                # request waited for it (production 2026-10-27: 8 concurrent
+                # requests took ~8 s each instead of ~1 s). The registry branch
+                # above already runs _call_provider in a thread.
+                provider_response = await asyncio.to_thread(
+                    self._call_provider, provider_used, provider_model_id, messages, **kwargs
                 )
 
             logger.info(
