@@ -70,3 +70,20 @@ def test_slow_requests_are_logged(client, monkeypatch, caplog):
     with caplog.at_level("WARNING", logger="src.utils.request_timing"):
         client.post("/v1/chat/completions")
     assert any("slow inference request" in m for m in caplog.messages)
+
+
+def test_background_work_is_not_counted_as_request_time(monkeypatch, caplog):
+    from starlette.background import BackgroundTask
+
+    async def slow_background():
+        await asyncio.sleep(0.3)
+
+    async def endpoint(request):
+        return JSONResponse({"ok": True}, background=BackgroundTask(slow_background))
+
+    app = Starlette(routes=[Route("/v1/chat/completions", endpoint, methods=["POST"])])
+    app.add_middleware(rt.RequestTimingMiddleware)
+    monkeypatch.setattr(rt, "SLOW_REQUEST_MS", 250.0)
+    with caplog.at_level("WARNING", logger="src.utils.request_timing"):
+        TestClient(app).post("/v1/chat/completions")
+    assert not any("slow inference request" in m for m in caplog.messages)

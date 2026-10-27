@@ -25,6 +25,7 @@ def _catalog(monkeypatch):
     import src.utils.provider_filter as pf
 
     monkeypatch.setattr(models, "get_cached_models", lambda gateway="all", **k: CATALOG)
+    monkeypatch.setattr(chat_request, "_catalog_index", None)
     monkeypatch.setattr(pf, "is_provider_enabled", lambda slug: slug != "zai")
 
 
