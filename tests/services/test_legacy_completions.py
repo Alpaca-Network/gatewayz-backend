@@ -122,3 +122,38 @@ class TestRequestSchema:
     def test_list_prompt_accepted(self):
         req = CompletionsRequest(model="m", prompt=["a", "b"])
         assert isinstance(req.prompt, list)
+
+
+class TestIdentityIsForwarded:
+    """/v1/completions calls chat_completions directly, so FastAPI does not
+    resolve chat's dependencies; the route must resolve identity and pass it.
+    Without it every request crashed with "'Depends' object has no attribute
+    'is_anonymous'" (production, 2026-10-27)."""
+
+    def test_create_completion_passes_resolved_identity(self, monkeypatch):
+        import asyncio
+
+        import src.routes.chat as chat_module
+        from src.routes.completions import CompletionsRequest, create_completion
+
+        seen = {}
+
+        async def fake_chat_completions(**kwargs):
+            seen.update(kwargs)
+            return {
+                "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+
+        monkeypatch.setattr(chat_module, "chat_completions", fake_chat_completions)
+        identity = object()
+        asyncio.run(
+            create_completion(
+                req=CompletionsRequest(model="m", prompt="hello"),
+                background_tasks=None,
+                request=None,
+                api_key="k",
+                identity=identity,
+            )
+        )
+        assert seen["identity"] is identity
