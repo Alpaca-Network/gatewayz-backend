@@ -244,6 +244,16 @@ class Config:
         "true",
         "yes",
     }
+    # Opt-in dispute content vault (src/services/dispute_vault.py). Needs
+    # JOB_USAGE_V2_ENABLED and migration 20261027000000. Keys: "k1:<base64 of 32
+    # bytes>", newest first, comma-separated; the first encrypts, all decrypt.
+    DISPUTE_VAULT_ENABLED = _get_env_var("DISPUTE_VAULT_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    DISPUTE_VAULT_KEYS = _get_env_var("DISPUTE_VAULT_KEYS", "")
+    DISPUTE_VAULT_PUBLIC_BASE = _get_env_var("DISPUTE_VAULT_PUBLIC_BASE", "https://api.gatewayz.ai")
     # Ships dark, exactly like STAKING_REWARDS_ENABLED did -- the schema, jobs
     # and endpoints land inert until the rates/caps are a confirmed product
     # decision.

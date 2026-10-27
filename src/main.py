@@ -471,6 +471,8 @@ def create_app() -> FastAPI:
         ("jobs", "Inference Jobs"),
         # Content-addressed rate sheets that job usage lines are charged against.
         ("price_sheets", "Price Sheets"),
+        # Opt-in, encrypted, 72 h dispute content vault for job usage lines.
+        ("dispute_content", "Dispute Content Vault"),
     ]
 
     # Define non-v1 routes (loaded directly on app without prefix)
