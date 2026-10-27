@@ -233,8 +233,10 @@ def test_published_sheets_are_immutable_for_the_backend(db):
     import psycopg
 
     with db.cursor() as cur:
+        # Other tests may already have committed this sheet; sheets are shared.
         cur.execute(
-            "INSERT INTO price_sheets (hash, body) VALUES (%s, %s)", (SHEET_HASH, SHEET_BODY_S)
+            "INSERT INTO price_sheets (hash, body) VALUES (%s, %s) ON CONFLICT (hash) DO NOTHING",
+            (SHEET_HASH, SHEET_BODY_S),
         )
         cur.execute("SAVEPOINT s")
         cur.execute("SET LOCAL ROLE service_role")
