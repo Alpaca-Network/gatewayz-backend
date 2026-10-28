@@ -49,3 +49,33 @@ async def test_provider_call_runs_in_a_worker_thread():
 
     assert "thread" in seen, "provider was never called"
     assert seen["thread"] is not threading.main_thread()
+
+
+def test_usage_record_deferred_but_charge_awaited():
+    """deduct_credits runs before responding; the analytics insert is deferred."""
+    import asyncio as _asyncio
+    from unittest.mock import MagicMock, patch
+
+    from src.handlers.chat_handler import ChatInferenceHandler
+
+    bg = MagicMock()
+    handler = ChatInferenceHandler.__new__(ChatInferenceHandler)
+    handler.is_anonymous = False
+    handler.user = {"id": 1}
+    handler.api_key = "gw_live_x"
+    handler.background_tasks = bg
+    handler.request = None
+    handler.request_id = "r1"
+    import time as _time
+
+    handler.start_time = _time.monotonic()
+    with (
+        patch("src.handlers.chat_handler.deduct_credits") as deduct,
+        patch("src.handlers.chat_handler.record_usage") as usage,
+        patch.object(ChatInferenceHandler, "_billing_ref", return_value="ref"),
+    ):
+        _asyncio.run(handler._charge_user(0.01, "m", 1, 1, defer_usage_record=True))
+    deduct.assert_called_once()
+    usage.assert_not_called()
+    bg.add_task.assert_called_once()
+    assert bg.add_task.call_args.args[0] is usage
