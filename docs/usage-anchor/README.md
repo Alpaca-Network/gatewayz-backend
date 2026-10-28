@@ -176,3 +176,20 @@ daily Merkle root of its usage records on Avalanche C-Chain", with a link to
 the contract on Snowtrace. Never claim or imply a partnership with,
 endorsement by, or funding from Avalanche, Ava Labs or the Avalanche
 Foundation.
+
+## End-to-end rehearsal (local chain)
+
+`tests/services/chain/test_usage_anchor_anvil.py` runs the real job, client,
+sweep, proof builder and offline verifier against the real `UsageAnchor`
+bytecode on Anvil (only Supabase is replaced by an in-memory store). It covers
+anchor → confirm → idempotent re-run → proof → verify, a tampered leaf failing
+verification, another user's record being unprovable, and changed history
+being refused without a transaction. Marked `integration` (skipped by default
+and in CI, which has no Foundry):
+
+```bash
+pytest -m integration tests/services/chain/test_usage_anchor_anvil.py -p no:xdist -o addopts=""
+```
+
+Needs Foundry and a gatewayz-protocol checkout (`USAGE_ANCHOR_PROTOCOL_DIR`,
+default `../gatewayz-protocol`). Run it before any change to the job or client.

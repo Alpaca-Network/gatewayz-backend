@@ -42,6 +42,7 @@ from src.services.providers.openrouter_client import (
 from src.services.request_tag import extract_request_tag
 from src.services.upstream.anonymize import scrub_upstream_kwargs
 from src.services.usage_normalization import billed_completion_tokens, client_wants_usage
+from src.utils.request_timing import phase
 
 logger = logging.getLogger(__name__)
 
@@ -1011,6 +1012,7 @@ class ChatInferenceHandler:
         model_name: str,
         prompt_tokens: int,
         completion_tokens: int,
+        defer_usage_record: bool = False,
     ) -> None:
         """
         Charge user credits or track trial usage.
@@ -1058,17 +1060,14 @@ class ChatInferenceHandler:
                 billing_ref,
             )
 
-            # Record usage for analytics
+            # Record usage for analytics. It is not billing (deduct_credits above
+            # is), so a non-streaming response need not wait for the insert.
             elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
-            await asyncio.to_thread(
-                record_usage,
-                self.user["id"],
-                self.api_key,
-                model_name,
-                total_tokens,
-                cost,
-                elapsed_ms,
-            )
+            usage_args = (self.user["id"], self.api_key, model_name, total_tokens, cost, elapsed_ms)
+            if defer_usage_record and self.background_tasks:
+                self.background_tasks.add_task(record_usage, *usage_args)
+            else:
+                await asyncio.to_thread(record_usage, *usage_args)
 
             logger.debug(
                 f"[ChatHandler] Charged ${cost:.6f} for {total_tokens} tokens "
@@ -1277,11 +1276,12 @@ class ChatInferenceHandler:
             ]
 
             # Step 1.6: Pre-flight credit check (may cap max_tokens to affordable limit)
-            effective_max_tokens = await self._check_credit_sufficiency(
-                model_id=request.model,
-                messages=messages,
-                max_tokens=request.max_tokens,
-            )
+            with phase("handler_credit_check"):
+                effective_max_tokens = await self._check_credit_sufficiency(
+                    model_id=request.model,
+                    messages=messages,
+                    max_tokens=request.max_tokens,
+                )
 
             # Step 2: Build provider kwargs
             kwargs = {
@@ -1319,13 +1319,14 @@ class ChatInferenceHandler:
 
             if model_in_registry:
                 # Use intelligent routing with failover for multi-provider models
-                result = await asyncio.to_thread(
-                    selector.execute_with_failover,
-                    model_id=request.model,
-                    execute_fn=lambda provider_name, provider_model_id: self._call_provider(
-                        provider_name, provider_model_id, messages, **kwargs
-                    ),
-                )
+                with phase("handler_provider_call"):
+                    result = await asyncio.to_thread(
+                        selector.execute_with_failover,
+                        model_id=request.model,
+                        execute_fn=lambda provider_name, provider_model_id: self._call_provider(
+                            provider_name, provider_model_id, messages, **kwargs
+                        ),
+                    )
 
                 if not result["success"]:
                     error_msg = result.get("error", "All providers failed")
@@ -1366,9 +1367,10 @@ class ChatInferenceHandler:
                 # request waited for it (production 2026-10-27: 8 concurrent
                 # requests took ~8 s each instead of ~1 s). The registry branch
                 # above already runs _call_provider in a thread.
-                provider_response = await asyncio.to_thread(
-                    self._call_provider, provider_used, provider_model_id, messages, **kwargs
-                )
+                with phase("handler_provider_call"):
+                    provider_response = await asyncio.to_thread(
+                        self._call_provider, provider_used, provider_model_id, messages, **kwargs
+                    )
 
             logger.info(
                 f"[ChatHandler] Provider call successful: provider={provider_used}, "
@@ -1433,17 +1435,18 @@ class ChatInferenceHandler:
 
             # Step 5: Calculate cost (loss-proof: never bill below the served provider)
             priced: dict = {}
-            cost, input_cost, output_cost = await asyncio.to_thread(
-                _loss_proof_cost_split,
-                request.model,
-                provider_model_id,
-                prompt_tokens,
-                completion_tokens,
-                cache_read_tokens,
-                cache_write_tokens,
-                provider_used,
-                priced=priced,
-            )
+            with phase("handler_cost"):
+                cost, input_cost, output_cost = await asyncio.to_thread(
+                    _loss_proof_cost_split,
+                    request.model,
+                    provider_model_id,
+                    prompt_tokens,
+                    completion_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    provider_used,
+                    priced=priced,
+                )
 
             logger.debug(
                 f"[ChatHandler] Cost calculation: total=${cost:.6f}, "
@@ -1455,8 +1458,11 @@ class ChatInferenceHandler:
             # request record and response below, so they reflect the billed amount.
             cost = self._apply_byok_fee(cost)
 
-            # Step 6: Charge user
-            await self._charge_user(cost, request.model, prompt_tokens, completion_tokens)
+            # Step 6: Charge user (before responding: billing stays exact)
+            with phase("handler_charge"):
+                await self._charge_user(
+                    cost, request.model, prompt_tokens, completion_tokens, defer_usage_record=True
+                )
 
             # Step 7: Save request record
             self._save_request_record(
