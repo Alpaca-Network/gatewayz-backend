@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -26,6 +27,11 @@ _usage_cache_ttl = 10  # 10 seconds TTL - short to minimize over-usage window
 # that can trigger Cloudflare rate limiting (400 Bad Request with HTML response)
 _user_plan_cache: dict[str, dict[str, Any]] = {}
 _user_plan_cache_ttl = 30  # 30 seconds TTL - user plans change infrequently
+
+# is_admin_tier_user runs 3-4 times per inference request (plan limits twice,
+# the rate limiter, the daily limiter), each an uncached user_plans query.
+_admin_tier_cache: dict[int, tuple[bool, float]] = {}
+_admin_tier_cache_ttl = 60.0
 
 
 def clear_usage_cache(user_id: int | None = None) -> None:
@@ -698,6 +704,11 @@ def is_admin_tier_user(user_id: int) -> bool:
     if not ADMIN_BYPASS_LIMITS:
         return False
 
+    now = time.monotonic()
+    cached = _admin_tier_cache.get(user_id)
+    if cached is not None and now - cached[1] < _admin_tier_cache_ttl:
+        return cached[0]
+
     try:
         client = get_supabase_client()
 
@@ -715,10 +726,13 @@ def is_admin_tier_user(user_id: int) -> bool:
                 plan = row.get("plans", {})
                 if isinstance(plan, dict) and plan.get("plan_type") == ADMIN_PLAN_TYPE:
                     logger.info(f"User {user_id} has active admin tier - bypassing all limits")
+                    _admin_tier_cache[user_id] = (True, now)
                     return True
 
+        _admin_tier_cache[user_id] = (False, now)
         return False
 
     except Exception as e:
+        # Not cached: a transient DB error must not pin the answer for a minute.
         logger.error(f"Error checking admin tier for user {user_id}: {e}")
         return False
