@@ -79,7 +79,9 @@ async def test_get_api_key_valid_logs_usage(monkeypatch, mod):
     # validate -> returns same key
     seen = {}
 
-    def fake_validate(api_key, client_ip=None, referer=None, *, method=None, path=None):
+    def fake_validate(
+        api_key, client_ip=None, referer=None, *, method=None, path=None, lease_sink=None
+    ):
         seen["path"] = path  # lets a job key be held to its routes
         return api_key
 

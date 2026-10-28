@@ -38,6 +38,7 @@ from src.schemas.proxy import ProxyRequest
 from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
 from src.security.security import ApiKeyLookupUnavailable, validate_api_key_security
+from src.services.job_usage import JOB_BUSY, job_lease_of
 from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.providers.anthropic_transformer import (
     transform_anthropic_to_openai,
@@ -468,6 +469,7 @@ async def create_message(
     if resolved_key and not api_key:
         # x-api-key bypassed the Bearer dependency; apply the same key security
         # checks (IP allowlist, referrer domains, max_requests).
+        lease_sink = [] if request is not None and not job_lease_of(request) else None
         try:
             validate_api_key_security(
                 resolved_key,
@@ -475,13 +477,20 @@ async def create_message(
                 referer=request.headers.get("referer") if request else None,
                 method=request.method if request else None,
                 path=request.url.path if request else None,
+                lease_sink=lease_sink,
             )
         except ApiKeyLookupUnavailable as e:
             raise _anthropic_error(
                 503, "api_error", "Authentication temporarily unavailable"
             ) from e
         except ValueError as e:
+            if JOB_BUSY in str(e):
+                raise _anthropic_error(429, "rate_limit_error", str(e)) from e
             raise _anthropic_error(401, "authentication_error", str(e)) from e
+        finally:
+            # Released by JobLeaseMiddleware when the response finishes.
+            if lease_sink:
+                request.state.job_lease = lease_sink[0]
 
     if not req.messages:
         raise _anthropic_error(400, "invalid_request_error", "messages must not be empty")

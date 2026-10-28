@@ -198,6 +198,7 @@ def validate_api_key_security(
     *,
     method: str | None = None,
     path: str | None = None,
+    lease_sink: list | None = None,
 ) -> str:
     """
     Validate API key with comprehensive security checks
@@ -215,6 +216,8 @@ def validate_api_key_security(
         referer: HTTP Referer header (optional)
         method, path: the request's, so a job-scoped key can be held to the
             routes that record its usage (optional; omitted = no route check)
+        lease_sink: list that receives a job key's in-flight lease (job_id,
+            lease_id); the caller must release it (JobLeaseMiddleware)
 
     Returns:
         API key if valid
@@ -265,7 +268,14 @@ def validate_api_key_security(
 
             # Validate key constraints
             _validate_key_constraints(
-                key_data, client_ip, referer, table_name, client, method=method, path=path
+                key_data,
+                client_ip,
+                referer,
+                table_name,
+                client,
+                method=method,
+                path=path,
+                lease_sink=lease_sink,
             )
 
             logger.info(f"API key validated successfully from {table_name}")
@@ -304,6 +314,7 @@ def _validate_key_constraints(
     *,
     method: str | None = None,
     path: str | None = None,
+    lease_sink: list | None = None,
 ) -> None:
     """
     Validate API key constraints and security policies
@@ -362,7 +373,7 @@ def _validate_key_constraints(
     # A no-op for every key that is not named job:<id>.
     from src.services.job_usage import enforce_job_key
 
-    enforce_job_key(key_data, client, method=method, path=path)
+    enforce_job_key(key_data, client, method=method, path=path, lease_sink=lease_sink)
 
     # 4. IP allowlist enforcement
     ip_allowlist = key_data.get("ip_allowlist") or []

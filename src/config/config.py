@@ -281,6 +281,11 @@ class Config:
         "true",
         "yes",
     }
+    # Job keys: billed requests in flight at once per job (migration 20261028130000).
+    # A burst can overshoot the job's cap by at most this many requests' cost. A
+    # lease a crashed worker never released blocks its slot for at most the TTL.
+    JOB_MAX_INFLIGHT = int(_get_env_var("JOB_MAX_INFLIGHT", "4"))
+    JOB_LEASE_TTL_SECONDS = int(_get_env_var("JOB_LEASE_TTL_SECONDS", "900"))
     # Ships dark, exactly like STAKING_REWARDS_ENABLED did -- the schema, jobs
     # and endpoints land inert until the rates/caps are a confirmed product
     # decision.

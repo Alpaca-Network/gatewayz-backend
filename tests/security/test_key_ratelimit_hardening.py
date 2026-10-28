@@ -20,7 +20,9 @@ def test_messages_x_api_key_runs_validate_api_key_security():
     }
     calls = {}
 
-    def fake_validate(api_key, client_ip=None, referer=None, *, method=None, path=None):
+    def fake_validate(
+        api_key, client_ip=None, referer=None, *, method=None, path=None, lease_sink=None
+    ):
         calls["key"] = api_key
         calls["route"] = (method, path)  # lets a job key be held to its routes
         raise ValueError("IP address not allowed")

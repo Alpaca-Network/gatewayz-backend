@@ -41,6 +41,7 @@ JOB_CAP_REACHED = "Job spend cap reached"
 JOB_NOT_RUNNING = "Job is not running"
 # "not allowed" maps to 403 not_allowed in deps._KEY_FAILURE_MAP.
 JOB_ROUTE_NOT_ALLOWED = "Route not allowed for a job-scoped key"
+JOB_BUSY = "Job has too many requests in flight"
 
 # The only billed routes whose billing appends a usage line (chat_handler, and
 # /v1/completions, which is translated to a chat completion). A job key spending
@@ -166,13 +167,21 @@ def job_route_allowed(method: str | None, path: str | None) -> bool:
 
 
 def enforce_job_key(
-    key_data: dict, client: Any, *, method: str | None = None, path: str | None = None
+    key_data: dict,
+    client: Any,
+    *,
+    method: str | None = None,
+    path: str | None = None,
+    lease_sink: list | None = None,
 ) -> None:
     """Raise ValueError if a job key may not spend. No-op for non-job keys.
 
-    The cap is checked before each request; cost is only known afterwards, so the
-    last admitted request can take spend past the cap by its own cost, and by the
-    cost of any request admitted concurrently with it (no reservation yet).
+    The cap is checked before each request; cost is only known afterwards. A
+    billed request (a POST, with ``lease_sink`` given) is also admitted through
+    ``admit_job_request``, which re-checks the cap under the job's row lock and
+    holds at most ``JOB_MAX_INFLIGHT`` requests in flight. Spend can therefore
+    pass the cap by at most that many requests' cost. The lease goes into
+    ``lease_sink``; JobLeaseMiddleware releases it when the response finishes.
     """
     if not is_job_key_name(key_data.get("key_name")):
         return
@@ -192,6 +201,67 @@ def enforce_job_key(
         raise ValueError(JOB_NOT_RUNNING)
     if Decimal(str(job["spent_usd"])) >= Decimal(str(job["cap_usd"])):
         raise ValueError(JOB_CAP_REACHED)
+    if lease_sink is not None and method and method.upper() not in _JOB_KEY_READ_METHODS:
+        lease = _admit(client, key_data["id"])
+        if lease is not None:
+            lease_sink.append(lease)
+
+
+_ADMIT_ERRORS = {
+    "job_busy": JOB_BUSY,
+    "job_cap_reached": JOB_CAP_REACHED,
+    "job_not_running": JOB_NOT_RUNNING,
+}
+
+
+def _admit(client: Any, api_key_id: int) -> tuple[str, str] | None:
+    """(job_id, lease_id) from admit_job_request, or None when it can't be taken.
+
+    Refusals raise ValueError. Any other failure (e.g. the migration is not applied
+    yet) is logged at ERROR and admits the request on the plain checks above: an
+    unbounded burst is the pre-lease behaviour, not an outage.
+    """
+    from src.config import Config
+
+    try:
+        result = client.rpc(
+            "admit_job_request",
+            {
+                "p_api_key_id": api_key_id,
+                "p_max_inflight": Config.JOB_MAX_INFLIGHT,
+                "p_ttl_seconds": Config.JOB_LEASE_TTL_SECONDS,
+            },
+        ).execute()
+    except Exception as e:
+        for code, message in _ADMIT_ERRORS.items():
+            if code in str(e):
+                raise ValueError(message) from e
+        logger.error("job admission unavailable, in-flight limit NOT applied: %s", e)
+        return None
+    data = result.data
+    if isinstance(data, list):
+        data = data[0] if data else None
+    if not isinstance(data, dict) or not data.get("lease_id"):
+        return None
+    return data["job_id"], str(data["lease_id"])
+
+
+def job_lease_of(request: Any) -> tuple[str, str] | None:
+    """The in-flight lease taken for this request, if any (request.state.job_lease)."""
+    state = getattr(request, "state", None)
+    return getattr(state, "job_lease", None) if state is not None else None
+
+
+def release_job_lease(job_id: str, lease_id: str) -> None:
+    """Free an in-flight slot. Never raises: a lease that fails to release expires."""
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        get_supabase_client().rpc(
+            "release_job_request", {"p_job_id": job_id, "p_lease_id": lease_id}
+        ).execute()
+    except Exception as e:
+        logger.error("job lease not released (expires on its own): job=%s error=%s", job_id, e)
 
 
 def record_job_usage(
