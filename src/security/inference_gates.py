@@ -52,7 +52,9 @@ async def enforce_model_pricing_gate(
     # Callers send vendor-native ids (`claude-sonnet-4-6`) as well as
     # fully-qualified ones. Resolve first so the rest of this gate — and
     # everything downstream — works on one canonical string.
-    resolution = resolve_catalog_model_id(model_id)
+    # Off the event loop: a cold resolution index is built from the catalog
+    # cache (2.4 s measured in production on 2026-10-27).
+    resolution = await asyncio.to_thread(resolve_catalog_model_id, model_id)
     if resolution.canonical_id is None:
         if resolution.matched_by == "ambiguous":
             listed = ", ".join(f"'{c}'" for c in resolution.candidates)
@@ -80,7 +82,7 @@ async def enforce_model_pricing_gate(
         # pre-resolution treatment (the pricing checks below decide), and a cold
         # or unreachable catalog falls through for every id — otherwise a cache
         # outage would answer "that model does not exist" to the entire API.
-        if "/" in model_id or index_is_empty():
+        if "/" in model_id or await asyncio.to_thread(index_is_empty):
             resolved = model_id
         else:
             logger.info(
@@ -137,7 +139,7 @@ async def enforce_model_pricing_gate(
         # pattern, and 503 tells their SDK to retry it forever. Measured in
         # production 2026-09-09: `anthropic/claude-sonnet-4-5` -> 503 while the
         # identical bare `claude-sonnet-4-5` -> 400.
-        if not resolved_from_catalog and not index_is_empty():
+        if not resolved_from_catalog and not await asyncio.to_thread(index_is_empty):
             raise HTTPException(
                 status_code=400,
                 detail={

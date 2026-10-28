@@ -3,6 +3,7 @@ FastAPI Security Dependencies
 Dependency injection functions for authentication and authorization
 """
 
+import asyncio
 import logging
 import os
 import secrets
@@ -227,12 +228,12 @@ async def get_api_key(
 
     try:
         # Validate API key with security checks
-        validated_key = validate_api_key_security(
-            api_key=api_key, client_ip=client_ip, referer=referer
+        validated_key = await asyncio.to_thread(
+            validate_api_key_security, api_key=api_key, client_ip=client_ip, referer=referer
         )
 
         # Log successful authentication
-        user = get_user(api_key)
+        user = await asyncio.to_thread(get_user, api_key)
         if user and request:
             audit_logger.log_api_key_usage(
                 user_id=user["id"],
