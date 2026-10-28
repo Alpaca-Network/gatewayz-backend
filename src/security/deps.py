@@ -229,7 +229,12 @@ async def get_api_key(
     try:
         # Validate API key with security checks
         validated_key = await asyncio.to_thread(
-            validate_api_key_security, api_key=api_key, client_ip=client_ip, referer=referer
+            validate_api_key_security,
+            api_key=api_key,
+            client_ip=client_ip,
+            referer=referer,
+            method=request.method if request else None,
+            path=request.url.path if request else None,
         )
 
         # Log successful authentication

@@ -300,6 +300,9 @@ class ChatInferenceHandler:
         # the client sent them, and the content fingerprint computed at billing.
         self._client_messages: Any = None
         self.content_hash: str | None = None
+        # A job key's usage line, built in _save_request_record and written by
+        # _flush_job_line() before the response is released.
+        self._pending_job_line: tuple[tuple, dict] | None = None
 
         logger.debug(
             f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}"
@@ -1172,15 +1175,24 @@ class ChatInferenceHandler:
                 save_kwargs["request_id"] or "",
             )
             job_kwargs = self._job_line_kwargs(save_kwargs["request_id"], job_line)
-            if self.background_tasks and not cancelled:
-                self.background_tasks.add_task(record_job_usage, *job_args, **job_kwargs)
-            else:
-                record_job_usage(*job_args, **job_kwargs)
+            if is_job_key_name(self.user.get("key_name") if self.user else None):
+                # Written by _flush_job_line() before the response is released, never
+                # as a response background task: a client that closes the job as soon
+                # as it has its answer would otherwise seal a record missing this line.
+                self._pending_job_line = (job_args, job_kwargs)
 
         logger.debug(
             f"[ChatHandler] Saved request record: request_id={self.request_id}, "
             f"status={status}, tokens={input_tokens}+{output_tokens}"
         )
+
+    async def _flush_job_line(self) -> None:
+        """Append the pending job usage line (see _save_request_record). Off the event
+        loop; record_job_usage never raises."""
+        pending, self._pending_job_line = self._pending_job_line, None
+        if pending is not None:
+            args, kwargs = pending
+            await asyncio.to_thread(record_job_usage, *args, **kwargs)
 
     def _job_line_kwargs(self, request_id: str | None, job_line: dict | None) -> dict[str, Any]:
         """v2 fields for record_job_usage; {} unless this is a job key.
@@ -1455,6 +1467,7 @@ class ChatInferenceHandler:
                     "usage_estimated": usage_estimated,
                 },
             )
+            await self._flush_job_line()
 
             # Step 8: Return InternalChatResponse with all metadata
             elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
@@ -1635,6 +1648,7 @@ class ChatInferenceHandler:
                 "usage_estimated": usage_estimated,
             },
         )
+        await self._flush_job_line()
 
         logger.info(
             f"[ChatHandler] Streaming request completed: "

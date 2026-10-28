@@ -473,6 +473,8 @@ async def create_message(
                 resolved_key,
                 client_ip=request.client.host if request and request.client else None,
                 referer=request.headers.get("referer") if request else None,
+                method=request.method if request else None,
+                path=request.url.path if request else None,
             )
         except ApiKeyLookupUnavailable as e:
             raise _anthropic_error(

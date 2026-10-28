@@ -77,9 +77,13 @@ async def test_get_api_key_valid_logs_usage(monkeypatch, mod):
     fake_audit = FakeAuditLogger()
     monkeypatch.setattr(mod, "audit_logger", fake_audit)
     # validate -> returns same key
-    monkeypatch.setattr(
-        mod, "validate_api_key_security", lambda api_key, client_ip=None, referer=None: api_key
-    )
+    seen = {}
+
+    def fake_validate(api_key, client_ip=None, referer=None, *, method=None, path=None):
+        seen["path"] = path  # lets a job key be held to its routes
+        return api_key
+
+    monkeypatch.setattr(mod, "validate_api_key_security", fake_validate)
     # user lookup
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 42, "key_id": 7, "credits": 1.23})
 
@@ -96,6 +100,7 @@ async def test_get_api_key_valid_logs_usage(monkeypatch, mod):
 
     # assert
     assert out == "sk-valid-123"
+    assert seen["path"] == "/v1/completions"
     assert len(fake_audit.api_usage_calls) == 1
     call = fake_audit.api_usage_calls[0]
     assert call["user_id"] == 42

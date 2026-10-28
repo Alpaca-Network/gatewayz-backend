@@ -7,6 +7,7 @@ ordinary keys are untouched.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -44,6 +45,7 @@ def _save(h, status="completed"):
             status=status,
             cost_usd=0.002,
         )
+        asyncio.run(h._flush_job_line())
     return rec
 
 
@@ -59,11 +61,35 @@ def test_failed_request_records_nothing():
     _save(_handler(f"job:{JOB}"), status="failed").assert_not_called()
 
 
-def test_background_tasks_are_used_when_available():
+def test_job_line_is_never_a_response_background_task():
+    """Codex P1 on #2382: a background task runs after the client has its answer, so
+    a client closing the job right away sealed a record missing the line. The line
+    is held for _flush_job_line(), which the billing paths await before responding."""
     bg = MagicMock()
-    rec = _save(_handler(f"job:{JOB}", background=bg))
-    rec.assert_not_called()  # deferred, not run inline on the response path
-    assert any(c.args and c.args[0] is rec for c in bg.add_task.call_args_list)
+    h = _handler(f"job:{JOB}", background=bg)
+    with (
+        patch("src.handlers.chat_handler.save_chat_completion_request_with_cost"),
+        patch("src.handlers.chat_handler.record_job_usage") as rec,
+    ):
+        h._save_request_record(
+            model_name="m",
+            provider_name="p",
+            input_tokens=1,
+            output_tokens=1,
+            status="completed",
+            cost_usd=0.001,
+        )
+        assert not any(c.args and c.args[0] is rec for c in bg.add_task.call_args_list)
+        rec.assert_not_called()
+        asyncio.run(h._flush_job_line())
+        rec.assert_called_once()
+        asyncio.run(h._flush_job_line())  # flushing twice writes once
+        rec.assert_called_once()
+
+
+def test_ordinary_key_holds_no_job_line():
+    rec = _save(_handler("prod", background=MagicMock()))
+    rec.assert_not_called()
 
 
 def test_key_validation_enforces_the_job_cap():
@@ -82,6 +108,80 @@ def test_key_validation_enforces_the_job_cap():
     key = {"id": 9, "key_name": f"job:{JOB}", "is_active": True}
     with pytest.raises(ValueError, match=ju.JOB_CAP_REACHED):
         _validate_key_constraints(key, None, None, "api_keys_new", client)
+
+
+def _running_job_client():
+    client = MagicMock()
+    q = client.table.return_value.select.return_value.eq.return_value
+    q.execute.return_value = MagicMock(
+        data=[
+            {
+                "status": "running",
+                "cap_usd": "1",
+                "spent_usd": "0",
+                "deadline": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            }
+        ]
+    )
+    return client
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("POST", "/v1/embeddings"),
+        ("POST", "/v1/audio/transcriptions"),
+        ("POST", "/v1/tools/execute"),
+        ("POST", "/v1/images/generations"),
+    ],
+)
+def test_job_key_is_refused_on_routes_that_record_no_usage(method, path):
+    """Codex P1 on #2382: those routes bill the account but never append a line,
+    so a job key could spend there past its cap and outside its sealed record."""
+    key = {"id": 9, "key_name": f"job:{JOB}", "is_active": True}
+    with pytest.raises(ValueError, match=ju.JOB_ROUTE_NOT_ALLOWED):
+        _validate_key_constraints(
+            key, None, None, "api_keys_new", _running_job_client(), method=method, path=path
+        )
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("POST", "/v1/chat/completions"),
+        ("POST", "/v1/messages"),
+        ("POST", "/v1/completions"),
+        ("POST", "/v1/chat/completions/"),
+        ("GET", "/v1/models"),
+        (None, None),
+    ],
+)
+def test_job_key_may_call_instrumented_and_read_routes(method, path):
+    key = {"id": 9, "key_name": f"job:{JOB}", "is_active": True}
+    _validate_key_constraints(
+        key, None, None, "api_keys_new", _running_job_client(), method=method, path=path
+    )
+
+
+def test_route_refusal_is_a_403():
+    from src.security.deps import ceiling_http_exception
+
+    exc = ceiling_http_exception(ju.JOB_ROUTE_NOT_ALLOWED)
+    assert exc.status_code == 403
+    assert exc.detail["error"]["code"] == "not_allowed"
+
+
+def test_ordinary_key_is_not_route_limited():
+    client = MagicMock()
+    _validate_key_constraints(
+        {"id": 9, "key_name": "prod", "is_active": True},
+        None,
+        None,
+        "api_keys_new",
+        client,
+        method="POST",
+        path="/v1/embeddings",
+    )
 
 
 def test_key_validation_leaves_ordinary_keys_alone():

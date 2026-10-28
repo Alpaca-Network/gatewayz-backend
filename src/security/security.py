@@ -192,7 +192,12 @@ class ApiKeyLookupUnavailable(Exception):
 
 
 def validate_api_key_security(
-    api_key: str, client_ip: str | None = None, referer: str | None = None
+    api_key: str,
+    client_ip: str | None = None,
+    referer: str | None = None,
+    *,
+    method: str | None = None,
+    path: str | None = None,
 ) -> str:
     """
     Validate API key with comprehensive security checks
@@ -208,6 +213,8 @@ def validate_api_key_security(
         api_key: API key to validate
         client_ip: Client IP address (optional)
         referer: HTTP Referer header (optional)
+        method, path: the request's, so a job-scoped key can be held to the
+            routes that record its usage (optional; omitted = no route check)
 
     Returns:
         API key if valid
@@ -257,7 +264,9 @@ def validate_api_key_security(
             key_data = result.data[0]
 
             # Validate key constraints
-            _validate_key_constraints(key_data, client_ip, referer, table_name, client)
+            _validate_key_constraints(
+                key_data, client_ip, referer, table_name, client, method=method, path=path
+            )
 
             logger.info(f"API key validated successfully from {table_name}")
             return api_key
@@ -292,6 +301,9 @@ def _validate_key_constraints(
     referer: str | None,
     table_name: str,
     client: Any,
+    *,
+    method: str | None = None,
+    path: str | None = None,
 ) -> None:
     """
     Validate API key constraints and security policies
@@ -350,7 +362,7 @@ def _validate_key_constraints(
     # A no-op for every key that is not named job:<id>.
     from src.services.job_usage import enforce_job_key
 
-    enforce_job_key(key_data, client)
+    enforce_job_key(key_data, client, method=method, path=path)
 
     # 4. IP allowlist enforcement
     ip_allowlist = key_data.get("ip_allowlist") or []

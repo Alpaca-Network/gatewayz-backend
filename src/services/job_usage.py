@@ -39,6 +39,15 @@ JOB_KEY_SCOPES = {"read": ["inference"], "write": ["inference"]}
 
 JOB_CAP_REACHED = "Job spend cap reached"
 JOB_NOT_RUNNING = "Job is not running"
+# "not allowed" maps to 403 not_allowed in deps._KEY_FAILURE_MAP.
+JOB_ROUTE_NOT_ALLOWED = "Route not allowed for a job-scoped key"
+
+# The only billed routes whose billing appends a usage line (chat_handler, and
+# /v1/completions, which is translated to a chat completion). A job key spending
+# anywhere else would bypass both the cap (only the append raises spent_usd) and
+# the sealed record, so it is refused there. Reads (GET) stay open: they bill nothing.
+JOB_KEY_BILLED_PATHS = frozenset({"/v1/chat/completions", "/v1/completions", "/v1/messages"})
+_JOB_KEY_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def job_key_name(job_id: str) -> str:
@@ -148,11 +157,22 @@ def _parse_ts(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def enforce_job_key(key_data: dict, client: Any) -> None:
+def job_route_allowed(method: str | None, path: str | None) -> bool:
+    """Whether a job key may call this route. No method/path (a caller that does
+    not pass them) is not checked."""
+    if not method or not path or method.upper() in _JOB_KEY_READ_METHODS:
+        return True
+    return path.rstrip("/") in JOB_KEY_BILLED_PATHS
+
+
+def enforce_job_key(
+    key_data: dict, client: Any, *, method: str | None = None, path: str | None = None
+) -> None:
     """Raise ValueError if a job key may not spend. No-op for non-job keys.
 
     The cap is checked before each request; cost is only known afterwards, so the
-    last admitted request can take spend past the cap by at most its own cost.
+    last admitted request can take spend past the cap by its own cost, and by the
+    cost of any request admitted concurrently with it (no reservation yet).
     """
     if not is_job_key_name(key_data.get("key_name")):
         return
@@ -165,6 +185,8 @@ def enforce_job_key(key_data: dict, client: Any) -> None:
     if not result.data:
         # A user-chosen key name that merely looks like a job key. Not ours.
         return
+    if not job_route_allowed(method, path):
+        raise ValueError(JOB_ROUTE_NOT_ALLOWED)
     job = result.data[0]
     if job["status"] != "running" or _parse_ts(job["deadline"]) <= datetime.now(UTC):
         raise ValueError(JOB_NOT_RUNNING)
