@@ -243,7 +243,7 @@ async def test_ordinary_key_gets_no_v2_fields_and_no_hash():
     h = _handler(key_name="prod")
     with _Env(h, response=_response("4", "stop", 30, 5, 0)) as env:
         await h.process(_req())
-    assert env.rec.call_args.kwargs == {}
+    env.rec.assert_not_called()  # ordinary keys record no job line at all
     assert h._client_messages is None
     assert not hasattr(h.request.state, "gatewayz_content_hash")
 

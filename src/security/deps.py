@@ -17,6 +17,7 @@ from src.security.security import (
     audit_logger,
     validate_api_key_security,
 )
+from src.services.job_usage import job_lease_of
 from src.services.user_lookup_cache import get_user
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
@@ -62,6 +63,7 @@ _KEY_FAILURE_MAP: tuple[tuple[str, int, str, str], ...] = (
     ("IP address", 403, "ip_not_allowed", "This IP address is not allowed for this API key."),
     ("Domain", 403, "domain_not_allowed", "This domain is not allowed for this API key."),
     ("not allowed", 403, "not_allowed", "This request is not allowed for this API key."),
+    ("in flight", 429, "job_busy", "This job has too many requests in flight."),
 )
 
 
@@ -226,11 +228,26 @@ async def get_api_key(
         referer = request.headers.get("referer")
         user_agent = request.headers.get("user-agent")
 
+    # One in-flight lease per request for a job key, even though get_api_key can
+    # run twice for one request (see identity.get_request_identity).
+    lease_sink = [] if request is not None and not job_lease_of(request) else None
+
     try:
         # Validate API key with security checks
-        validated_key = await asyncio.to_thread(
-            validate_api_key_security, api_key=api_key, client_ip=client_ip, referer=referer
-        )
+        try:
+            validated_key = await asyncio.to_thread(
+                validate_api_key_security,
+                api_key=api_key,
+                client_ip=client_ip,
+                referer=referer,
+                method=request.method if request else None,
+                path=request.url.path if request else None,
+                lease_sink=lease_sink,
+            )
+        finally:
+            # Kept even if a later check refused the request, so it is released.
+            if lease_sink:
+                request.state.job_lease = lease_sink[0]
 
         # Log successful authentication
         user = await asyncio.to_thread(get_user, api_key)

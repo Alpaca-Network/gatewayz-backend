@@ -226,6 +226,11 @@ def create_app() -> FastAPI:
             "  🎯 [6] Auto-Sentry middleware enabled (automatic error capture for all routes)"
         )
 
+    # [4b] JobLease — frees a job key's in-flight slot when its response finishes
+    from src.middleware.job_lease_middleware import JobLeaseMiddleware
+
+    app.add_middleware(JobLeaseMiddleware)
+
     # [4] RequestID — assigns a unique X-Request-ID to every request
     from src.middleware.request_id_middleware import RequestIDMiddleware
 
