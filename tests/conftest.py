@@ -335,3 +335,25 @@ def _no_live_daily_limit_preflight(monkeypatch):
         return None
 
     monkeypatch.setattr(chat_route, "_enforce_daily_limit_preflight", _allow)
+
+
+@pytest.fixture(autouse=True)
+def _reset_hot_path_caches():
+    """Short-TTL in-process caches on the inference path must not leak between tests."""
+    from src.db import ip_whitelist, plans
+    from src.security import security
+    from src.services.monitoring import health_routing
+    from src.utils import api_key_lookup
+
+    caches = (
+        plans._admin_tier_cache,
+        ip_whitelist._global_entries_cache,
+        security._last_used_written,
+        health_routing._health_memo,
+        api_key_lookup._key_id_cache,
+    )
+    for cache in caches:
+        cache.clear()
+    yield
+    for cache in caches:
+        cache.clear()

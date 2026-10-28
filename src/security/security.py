@@ -10,6 +10,7 @@ import hmac
 import logging
 import os
 import secrets
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -280,6 +281,11 @@ def validate_api_key_security(
     raise ValueError("Invalid API key")
 
 
+# key id -> monotonic time last_used_at was last written (see step 6 below).
+_last_used_written: dict[Any, float] = {}
+_LAST_USED_WRITE_INTERVAL = 60.0
+
+
 def _validate_key_constraints(
     key_data: dict[str, Any],
     client_ip: str | None,
@@ -363,13 +369,17 @@ def _validate_key_constraints(
             logger.warning(f"Domain {referer} not in allowlist {domain_referrers}")
             raise ValueError("Domain not allowed for this API key")
 
-    # 6. Update last used timestamp
-    try:
-        client.table(table_name).update({"last_used_at": datetime.now(UTC).isoformat()}).eq(
-            "id", key_id
-        ).execute()
-    except Exception as e:
-        logger.warning(f"Failed to update last_used_at for key {key_id}: {e}")
+    # 6. Update last used timestamp, at most once a minute per key: it was a
+    # database write on the critical path of every inference request.
+    now = time.monotonic()
+    if now - _last_used_written.get(key_id, float("-inf")) >= _LAST_USED_WRITE_INTERVAL:
+        try:
+            client.table(table_name).update({"last_used_at": datetime.now(UTC).isoformat()}).eq(
+                "id", key_id
+            ).execute()
+            _last_used_written[key_id] = now
+        except Exception as e:
+            logger.warning(f"Failed to update last_used_at for key {key_id}: {e}")
 
     logger.debug(f"API key {key_id} passed all security checks")
 
