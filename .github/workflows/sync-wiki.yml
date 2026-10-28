@@ -13,6 +13,9 @@ on:
       - ".github/workflows/sync-wiki.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: wiki-sync
   cancel-in-progress: true
@@ -20,7 +23,7 @@ concurrency:
 jobs:
   sync-wiki:
     name: Regenerate Wiki Pages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout backend repo
@@ -33,7 +36,7 @@ jobs:
         with:
           repository: ${{ github.repository }}.wiki
           path: wiki
-          token: ${{ secrets.WIKI_PAT }}
+          token: ${{ github.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
