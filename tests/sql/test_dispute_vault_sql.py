@@ -95,18 +95,14 @@ def test_oversized_ciphertext_is_refused(db):
 
 def test_service_role_can_delete_but_never_rewrite(db):
     with db.cursor() as cur:
-        cur.execute(
-            """
+        cur.execute("""
             SELECT privilege_type FROM information_schema.role_table_grants
             WHERE grantee = 'service_role' AND table_name = 'dispute_content'
             ORDER BY 1
-            """
-        )
+            """)
         assert [r[0] for r in cur.fetchall()] == ["DELETE", "INSERT", "SELECT"]
-        cur.execute(
-            """
+        cur.execute("""
             SELECT count(*) FROM information_schema.role_table_grants
             WHERE grantee IN ('anon', 'authenticated') AND table_name IN ('dispute_content', 'dispute_reveals')
-            """
-        )
+            """)
         assert cur.fetchone()[0] == 0
