@@ -1210,6 +1210,7 @@ class ChatInferenceHandler:
             state = getattr(self.request, "state", None)
             if state is not None:
                 state.gatewayz_content_hash = content_hash
+            self._keep_for_disputes(request_id, job_line.get("output") or "", content_hash)
         return {
             "request_id": request_id,
             "tokens_reasoning": int(job_line.get("tokens_reasoning") or 0),
@@ -1218,6 +1219,26 @@ class ChatInferenceHandler:
             "priced_model": job_line.get("priced_model"),
             "usage_estimated": bool(job_line.get("usage_estimated")),
         }
+
+    def _keep_for_disputes(self, request_id: str | None, output: str, content_hash: str) -> None:
+        """Opt-in dispute vault: keep this request's bundle, encrypted, until the
+        job's dispute window closes. Only when the client sent
+        X-Gatewayz-Dispute-Vault: on; off the request path when a background
+        task runner is available (services/dispute_vault.py)."""
+        try:
+            from src.services import dispute_vault
+            from src.services.job_usage import JOB_KEY_PREFIX
+
+            if not dispute_vault.opted_in(self.request) or not dispute_vault.enabled():
+                return
+            job_id = (self.user or {}).get("key_name", "")[len(JOB_KEY_PREFIX) :]
+            args = (job_id, request_id, self._client_messages, output, content_hash)
+            if self.background_tasks:
+                self.background_tasks.add_task(dispute_vault.store, *args)
+            else:
+                dispute_vault.store(*args)
+        except Exception as e:  # the vault must never cost the request its usage line
+            logger.error("dispute vault: not scheduled for %s: %s", request_id, e)
 
     async def process(self, request: InternalChatRequest) -> InternalChatResponse:
         """
