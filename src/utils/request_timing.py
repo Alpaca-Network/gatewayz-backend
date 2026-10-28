@@ -43,6 +43,23 @@ def record(name: str, ms: float) -> None:
         phases.append((name, ms))
 
 
+class phase:
+    """``with phase("name"):`` records the block's duration (sync code too)."""
+
+    __slots__ = ("name", "start")
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.start = 0.0
+
+    def __enter__(self) -> phase:
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        record(self.name, (time.perf_counter() - self.start) * 1000)
+
+
 def timed(fn: Any, name: str | None = None) -> Any:
     """Wrap a coroutine function so each call records its duration."""
     if not inspect.iscoroutinefunction(fn) or getattr(fn, "__request_timed__", False):

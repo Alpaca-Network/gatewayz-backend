@@ -510,6 +510,20 @@ async def lifespan(app):
                 except Exception as e:
                     logger.warning(f"Unique models cache warmup warning: {e}")
 
+                # Build the model-resolution and catalog-routing indexes now that
+                # the caches they read are warm. Otherwise the first inference
+                # request after a deploy builds them (pricing gate: 1.7 s cold,
+                # measured 2026-10-28).
+                try:
+                    from src.routes.chat_request import catalog_gateway_for
+                    from src.services.model_resolution import index_is_empty
+
+                    await asyncio.to_thread(index_is_empty)
+                    await asyncio.to_thread(catalog_gateway_for, "warmup/warmup")
+                    logger.info("✅ Model resolution and routing indexes built")
+                except Exception as e:
+                    logger.warning(f"Model index warmup warning: {e}")
+
                 # Phase 4: Warm provider connections (HTTP, not DB)
                 await asyncio.sleep(2)
                 try:

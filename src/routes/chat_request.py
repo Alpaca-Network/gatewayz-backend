@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from src.routes.chat_helpers import validate_and_adjust_max_tokens
 from src.services.health_routing import (
@@ -24,6 +25,7 @@ from src.services.provider_failover import (
     enforce_model_failover_rules,
     filter_by_circuit_breaker,
 )
+from src.utils.request_timing import phase, record
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -160,9 +162,10 @@ async def prepare_upstream_request(
 
         # Use routed model for provider detection when code routing is active
         model_for_provider_detection = req.model if is_code_route and req.model else original_model
-        catalog_provider = await asyncio.to_thread(
-            catalog_gateway_for, model_for_provider_detection
-        )
+        with phase("prep_catalog_route"):
+            catalog_provider = await asyncio.to_thread(
+                catalog_gateway_for, model_for_provider_detection
+            )
         override_provider = catalog_provider or detect_provider_from_model_id(
             model_for_provider_detection
         )
@@ -231,6 +234,7 @@ async def prepare_upstream_request(
         # This ensures that routing decisions are actually applied downstream
         effective_model = req.model if req.model else original_model
 
+        _t0 = time.perf_counter()
         provider_chain = build_provider_failover_chain(provider)
         if catalog_provider and provider == catalog_provider:
             # The catalog chose the provider. The name-prefix rules (openai/* ->
@@ -242,7 +246,9 @@ async def prepare_upstream_request(
             provider_chain = filter_chain_by_model_allowlist(effective_model, provider_chain)
         else:
             provider_chain = enforce_model_failover_rules(effective_model, provider_chain)
-        provider_chain = filter_by_circuit_breaker(effective_model, provider_chain)
+        record("prep_chain", (time.perf_counter() - _t0) * 1000)
+        with phase("prep_circuit_breaker"):
+            provider_chain = filter_by_circuit_breaker(effective_model, provider_chain)
 
         # Gatewayz One Phase 2 — smart-router reordering (flag-gated, off by default).
         # Reorders the chain by the policy-based router using the Phase 1 offers
@@ -260,6 +266,7 @@ async def prepare_upstream_request(
 
         # HEALTH FIX #1094: Check model health and reorder provider chain to prioritize healthy providers
         # This proactively routes requests away from unhealthy models BEFORE they fail
+        _t0 = time.perf_counter()
         if should_use_health_based_routing() and provider_chain:
             primary_provider = provider_chain[0]
             is_healthy, health_error = is_model_healthy(effective_model, primary_provider)
@@ -299,6 +306,7 @@ async def prepare_upstream_request(
                     f"✓ Health check passed for model '{effective_model}' on '{primary_provider}'"
                 )
 
+        record("prep_health", (time.perf_counter() - _t0) * 1000)
         # Health routing above can add a provider after the allowlist was applied
         # in enforce_model_failover_rules; apply it once more so it has the last say.
         from src.utils.provider_filter import filter_chain_by_model_allowlist
