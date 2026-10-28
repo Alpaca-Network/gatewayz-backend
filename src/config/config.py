@@ -282,7 +282,7 @@ class Config:
         "yes",
     }
     # Opt-in dispute content vault (src/services/dispute_vault.py). Needs
-    # JOB_USAGE_V2_ENABLED and migration 20261027000000. Keys: "k1:<base64 of 32
+    # JOB_USAGE_V2_ENABLED and migration 20261028120000. Keys: "k1:<base64 of 32
     # bytes>", newest first, comma-separated; the first encrypts, all decrypt.
     DISPUTE_VAULT_ENABLED = _get_env_var("DISPUTE_VAULT_ENABLED", "false").lower() in {
         "1",

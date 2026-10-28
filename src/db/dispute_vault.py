@@ -1,4 +1,4 @@
-"""DB access for the dispute content vault (migration 20261027000000).
+"""DB access for the dispute content vault (migration 20261028120000).
 
 Rows hold ciphertext only; encryption and decryption happen in
 services/dispute_vault.py with a key the database never sees.

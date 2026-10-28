@@ -5,7 +5,7 @@ contests a v2 usage line must keep and reveal the content bundle themselves.
 With it, a request on a job key that sends ``X-Gatewayz-Dispute-Vault: on`` has
 its bundle -- the same bytes ``job_usage_v2.content_hash`` fingerprints -- kept
 encrypted until the dispute window closes (72 h after the job closes; see
-migration 20261027000000). Contesting is then one call:
+migration 20261028120000). Contesting is then one call:
 
     POST /v1/jobs/{job_id}/usage/{i}/reveal   -> {content_uri, content_hash, expires_at}
 

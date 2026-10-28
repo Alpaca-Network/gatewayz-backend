@@ -1,6 +1,6 @@
 """Dispute content vault against the real migrated schema (CI-only).
 
-Migration 20261027000000. Proves the window rule (72 h after close, or after the
+Migration 20261028120000. Proves the window rule (72 h after close, or after the
 deadline), the hourly purge, cascades, and that stored ciphertext can be deleted
 but never rewritten.
 """
