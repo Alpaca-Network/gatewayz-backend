@@ -269,6 +269,8 @@ class TestAuthAuditLine:
             client=SimpleNamespace(host="203.0.113.9"),
             headers={"user-agent": "GenVM/1.0"},
             url=SimpleNamespace(path="/v1/chat/completions"),
+            method="POST",
+            state=SimpleNamespace(),
         )
         creds = SimpleNamespace(credentials="gw_live_validatorkey")
 
