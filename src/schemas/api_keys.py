@@ -12,6 +12,8 @@ class CreateApiKeyRequest(BaseModel):
     ip_allowlist: list[str] | None = None
     domain_referrers: list[str] | None = None
     action: str = "create"
+    # "validator" = no-logging mode (src/services/key_purpose.py); None/"general" = normal.
+    purpose: str | None = None
 
 
 class ApiKeyResponse(BaseModel):
@@ -33,6 +35,7 @@ class ApiKeyResponse(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     last_used_at: str | None = None
+    purpose: str = "general"
 
 
 class ListApiKeysResponse(BaseModel):
@@ -62,6 +65,8 @@ class UpdateApiKeyRequest(BaseModel):
     is_active: bool | None = None
     action: str | None = None
     environment_tag: str | None = None
+    # "validator" turns no-logging mode on; "general" turns it off; None leaves it.
+    purpose: str | None = None
 
 
 class UpdateApiKeyResponse(BaseModel):

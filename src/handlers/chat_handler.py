@@ -29,6 +29,7 @@ from src.services import job_usage_v2
 from src.services.circuit_breaker import CircuitBreakerError
 from src.services.credit_precheck import estimate_and_check_credits
 from src.services.job_usage import is_job_key_name, record_job_usage
+from src.services.key_purpose import enforce_same_model, is_validator_key
 from src.services.pricing import calculate_cost_split, get_model_pricing
 from src.services.provider_selector import get_selector
 
@@ -551,6 +552,14 @@ class ChatInferenceHandler:
             reset_byok_context(token)
         except Exception:
             pass
+
+    def _enforce_validator_registry_hops(self, selector, requested_model: str) -> None:
+        """Validator keys only: refuse when any enabled registry hop is a different model."""
+        if not is_validator_key(self.user):
+            return
+        registry_model = selector.registry.get_model(requested_model)
+        for provider in registry_model.get_enabled_providers() if registry_model else []:
+            enforce_same_model(self.user, requested_model, provider.model_id)
 
     def _call_provider(
         self,
@@ -1330,6 +1339,11 @@ class ChatInferenceHandler:
             model_in_registry = selector.registry.get_model(request.model) is not None
 
             if model_in_registry:
+                # Validator keys: every hop the selector might take must serve the
+                # requested model. Checked up front -- refusing inside execute_fn
+                # would count as a provider failure and trip its circuit breaker.
+                self._enforce_validator_registry_hops(selector, request.model)
+
                 # Use intelligent routing with failover for multi-provider models
                 with phase("handler_provider_call"):
                     result = await asyncio.to_thread(
@@ -1370,6 +1384,7 @@ class ChatInferenceHandler:
                     request.provider or detect_provider_from_model_id(request.model) or "openrouter"
                 )
                 provider_model_id = transform_model_id(request.model, provider_used)
+                enforce_same_model(self.user, request.model, provider_model_id)
                 logger.info(
                     f"[ChatHandler] Model {request.model} not in registry, "
                     f"using provider='{provider_used}', model_id='{provider_model_id}'"
@@ -1788,6 +1803,7 @@ class ChatInferenceHandler:
 
                 provider_used = primary_provider.name
                 provider_model_id = primary_provider.model_id
+                enforce_same_model(self.user, request.model, provider_model_id)
             else:
                 # Use provider hint from chat.py (already detected from model ID + catalog)
                 from src.services.model_transformations import (
@@ -1799,6 +1815,7 @@ class ChatInferenceHandler:
                     request.provider or detect_provider_from_model_id(request.model) or "openrouter"
                 )
                 provider_model_id = transform_model_id(request.model, provider_used)
+                enforce_same_model(self.user, request.model, provider_model_id)
                 logger.info(
                     f"[ChatHandler] Model {request.model} not in registry, "
                     f"using provider='{provider_used}', model_id='{provider_model_id}' (streaming)"

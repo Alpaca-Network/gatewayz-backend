@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.services.key_purpose import suppress_request_logging
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,11 @@ def log_activity(
     Returns:
         Created activity record or None on error
     """
+    # Validator keys (src/services/key_purpose.py) are not logged beyond
+    # billing; activity_log is per-request analytics, so it is skipped.
+    if suppress_request_logging():
+        return None
+
     try:
         client = get_supabase_client()
 
