@@ -82,6 +82,21 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
 }
 
 
+# Stale detection is skipped when a fetch looks partial. Below this many active
+# models a provider is exempt from the 50% rule: deactivation already needs
+# three consecutive misses, and a small provider retiring most of its models
+# (Groq, 2026-10: 5 of 11 still served) must not be frozen out of cleanup.
+STALE_GUARD_MIN_ACTIVE = 20
+
+
+def _should_run_stale_detection(fetched: int, pre_sync_active: int) -> bool:
+    if pre_sync_active <= 0 or fetched <= 0:
+        return False
+    if pre_sync_active < STALE_GUARD_MIN_ACTIVE:
+        return True
+    return fetched >= pre_sync_active * 0.5
+
+
 def safe_decimal(value: Any) -> Decimal | None:
     """Safely convert a value to Decimal"""
     if value is None:
@@ -1085,7 +1100,7 @@ def sync_provider_models(
                 except ValueError:
                     purge_after_days = None
 
-                if pre_sync_active_count > 0 and len(seen_ids) >= pre_sync_active_count * 0.5:
+                if _should_run_stale_detection(len(seen_ids), pre_sync_active_count):
                     stale_result = process_stale_models(
                         provider_id=provider["id"],
                         seen_provider_model_ids=seen_ids,
@@ -1109,7 +1124,7 @@ def sync_provider_models(
                 elif pre_sync_active_count > 0:
                     logger.warning(
                         f"[{provider_slug.upper()}] Skipping stale detection: "
-                        f"fetched {len(seen_ids)} < 50% of {pre_sync_active_count} existing active models"
+                        f"fetched {len(seen_ids)} of {pre_sync_active_count} existing active models"
                     )
             except Exception as stale_e:
                 logger.error(f"[{provider_slug.upper()}] Stale model tracking failed: {stale_e}")

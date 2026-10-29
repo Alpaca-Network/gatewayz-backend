@@ -20,8 +20,11 @@ def test_messages_x_api_key_runs_validate_api_key_security():
     }
     calls = {}
 
-    def fake_validate(api_key, client_ip=None, referer=None):
+    def fake_validate(
+        api_key, client_ip=None, referer=None, *, method=None, path=None, lease_sink=None
+    ):
         calls["key"] = api_key
+        calls["route"] = (method, path)  # lets a job key be held to its routes
         raise ValueError("IP address not allowed")
 
     chat = AsyncMock(return_value={})
@@ -35,6 +38,7 @@ def test_messages_x_api_key_runs_validate_api_key_security():
             headers={"x-api-key": "placeholder-not-a-real-key", "anthropic-version": "2023-06-01"},
         )
     assert calls.get("key") == "placeholder-not-a-real-key"
+    assert calls.get("route") == ("POST", "/v1/messages")
     assert resp.status_code in (401, 402, 403), resp.text
     chat.assert_not_called()
 

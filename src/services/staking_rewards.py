@@ -27,7 +27,11 @@ from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 from src.config.config import Config
-from src.db.credit_transactions import TransactionType, get_transaction_by_request_id
+from src.db.credit_transactions import (
+    TransactionType,
+    get_transaction_by_request_id,
+    reward_request_uuid,
+)
 from src.db.staking_rewards import (
     create_accrual,
     get_accrual,
@@ -38,7 +42,7 @@ from src.db.staking_rewards import (
     mark_accrual_paid,
     mark_accrual_pending_failed,
 )
-from src.db.user_wallets import get_wallet, get_wallets_for_user
+from src.db.user_wallets import get_wallet, get_wallets_for_user, is_evm_wallet
 from src.db.users import add_credits_to_user
 from src.db.wallet_stakes import get_max_last_synced_at, get_wallet_stake, list_wallets_with_stake
 
@@ -110,8 +114,12 @@ def is_stake_sync_stale() -> bool:
     return _is_sync_stale()
 
 
+def _staking_request_id(wallet_address: str, reward_date_str: str) -> str:
+    return reward_request_uuid(f"staking_reward:{wallet_address}:{reward_date_str}")
+
+
 def _find_ledger_id(wallet_address: str, reward_date_str: str) -> int | None:
-    row = get_transaction_by_request_id(f"staking_reward:{wallet_address}:{reward_date_str}")
+    row = get_transaction_by_request_id(_staking_request_id(wallet_address, reward_date_str))
     return row.get("id") if row else None
 
 
@@ -147,7 +155,7 @@ def _pay_or_leave_pending(accrual: dict[str, Any], capped: bool = False) -> tupl
                 "rate_id": accrual["rate_id"],
                 "capped": capped,
             },
-            request_id=f"staking_reward:{wallet_address}:{reward_date_str}",
+            request_id=_staking_request_id(wallet_address, reward_date_str),
         )
     except Exception as e:
         mark_accrual_pending_failed(accrual["id"], type(e).__name__)
@@ -409,6 +417,8 @@ def get_rewards_view_for_user(user_id: int) -> dict[str, Any]:
 
     wallets_out = []
     for w in get_wallets_for_user(user_id):
+        if not is_evm_wallet(w):
+            continue
         address = w["wallet_address"]
         stake_row = get_wallet_stake(address)
         staked_amount_wei = stake_row["staked_amount"] if stake_row else "0"

@@ -7,6 +7,7 @@ It handles provider routing, cost calculation, credit deduction, and logging.
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -24,8 +25,11 @@ from src.schemas.internal.chat import (
     InternalStreamChunk,
     InternalUsage,
 )
+from src.services import job_usage_v2
 from src.services.circuit_breaker import CircuitBreakerError
 from src.services.credit_precheck import estimate_and_check_credits
+from src.services.job_usage import is_job_key_name, record_job_usage
+from src.services.key_purpose import enforce_same_model, is_validator_key
 from src.services.pricing import calculate_cost_split, get_model_pricing
 from src.services.provider_selector import get_selector
 
@@ -36,9 +40,10 @@ from src.services.providers.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
 )
-from src.services.key_purpose import enforce_same_model, is_validator_key
 from src.services.request_tag import extract_request_tag
 from src.services.upstream.anonymize import scrub_upstream_kwargs
+from src.services.usage_normalization import billed_completion_tokens, client_wants_usage
+from src.utils.request_timing import phase
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +68,53 @@ def _rfield(obj: Any, name: str, default: Any = None) -> Any:
 # from monopolizing the event loop indefinitely. Configured via MAX_STREAM_DURATION_SECONDS env var.
 # Mirrors the same constant in src/routes/chat.py (anonymous user path).
 _MAX_STREAM_DURATION = int(os.getenv("MAX_STREAM_DURATION_SECONDS", "300"))
+
+# Providers verified to accept stream_options={"include_usage": true}. Without
+# it an OpenAI-style stream carries no usage at all and is billed on a len/4
+# estimate. Extend only after checking the provider's docs: an unaccepted
+# parameter is a 400 on a paid request.
+_STREAM_USAGE_PROVIDERS = frozenset(
+    {"openai", "openrouter", "xai", "deepseek", "together", "fireworks", "deepinfra"}
+)
+
+
+def _count_usage_source(
+    provider: str | None, path: str, prompt_tokens: int, completion_tokens: int
+) -> None:
+    """billing_usage_source_total: provider counts vs the len/4 estimate. Never raises."""
+    try:
+        from src.services.metrics.prometheus_metrics import billing_usage_source
+
+        source = "estimated" if prompt_tokens == 0 and completion_tokens == 0 else "provider"
+        billing_usage_source.labels(provider=provider or "unknown", path=path, source=source).inc()
+    except Exception as e:  # metrics must never break billing
+        logger.debug(f"[ChatHandler] usage-source metric failed: {e}")
+
+
+def _internal_usage(
+    prompt_tokens: int, completion_tokens: int, cache_read_tokens: int, cache_write_tokens: int
+) -> InternalUsage | None:
+    """Usage for a stream chunk, or None before any usage is known."""
+    if not (prompt_tokens > 0 or completion_tokens > 0):
+        return None
+    return InternalUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        # Cache counts are extracted for BILLING; carry them onto the chunk so the
+        # caller can see them too. Without this a streaming client is charged the
+        # cache rate but shown no cache tokens, and has no way to verify the
+        # saving it just got.
+        **(
+            {
+                "cache_read_input_tokens": cache_read_tokens,
+                "cache_creation_input_tokens": cache_write_tokens,
+                "prompt_tokens_details": {"cached_tokens": cache_read_tokens},
+            }
+            if (cache_read_tokens or cache_write_tokens)
+            else {}
+        ),
+    )
 
 
 def _cache_aware_split(
@@ -110,8 +162,12 @@ def _loss_proof_cost_split(
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
     provider: str | None = None,
+    priced: dict | None = None,
 ) -> tuple[float, float, float]:
     """Cost split that never bills below the provider that actually served the request.
+
+    ``priced``, when given, is filled with ``{"model": <id whose rates priced the
+    charge>}`` so a usage line can publish the rates it was billed at.
 
     The gateway is cost-plus (PRICING_MARKUP is applied on top of upstream cost).
     Pricing is resolved per canonical ``model_id`` via a ``.limit(1)`` lookup that can
@@ -147,6 +203,8 @@ def _loss_proof_cost_split(
         cache_write_tokens,
         provider,
     )
+    if priced is not None:
+        priced["model"] = requested_model
     if not provider_model_id or provider_model_id == requested_model:
         return base
     try:
@@ -173,6 +231,8 @@ def _loss_proof_cost_split(
                     requested_model,
                     base[0],
                 )
+                if priced is not None:
+                    priced["model"] = provider_model_id
                 return served
     except Exception as e:
         # Any failure (high-value guard, unresolved id, etc.) → keep the safe base cost.
@@ -238,6 +298,13 @@ class ChatInferenceHandler:
         # X-Gatewayz-Dropped-Params response header so that a silently ignored
         # tool_choice or response_format is visible rather than mysterious.
         self.dropped_params: list[str] = []
+        # Job keys only (cost disputes): the request body's `messages` exactly as
+        # the client sent them, and the content fingerprint computed at billing.
+        self._client_messages: Any = None
+        self.content_hash: str | None = None
+        # A job key's usage line, built in _save_request_record and written by
+        # _flush_job_line() before the response is released.
+        self._pending_job_line: tuple[tuple, dict] | None = None
 
         logger.debug(
             f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}"
@@ -307,6 +374,37 @@ class ChatInferenceHandler:
 
         logger.debug(f"[ChatHandler] User context loaded: user_id={self.user.get('id')}")
 
+    def _records_v2(self) -> bool:
+        """A job key, with v2 usage lines (cost disputes) switched on."""
+        return (
+            bool(self.user)
+            and is_job_key_name(self.user.get("key_name"))
+            and job_usage_v2.enabled()
+        )
+
+    async def _capture_client_messages(self) -> None:
+        """Keep the client's original ``messages`` for a job key's content hash.
+
+        Read from the raw request body, before any normalisation: by the billing
+        hook ``messages`` has been rebuilt from InternalChatRequest (and
+        /v1/messages converted from Anthropic format), which no client could
+        reproduce. Starlette caches the body FastAPI already read, so this is a
+        parse, not a second read. No-op for every other key; never raises.
+        """
+        if not self._records_v2() or self.request is None or not hasattr(self.request, "body"):
+            return
+        try:
+            body = json.loads(await self.request.body())
+        except Exception as e:
+            logger.warning(
+                f"[ChatHandler] Job key: request body not readable for content hash: {e}"
+            )
+            return
+        path = str(getattr(getattr(self.request, "url", None), "path", "") or "")
+        self._client_messages = job_usage_v2.bundle_messages(
+            body, anthropic=path.endswith("/messages")
+        )
+
     async def _check_credit_sufficiency(
         self,
         model_id: str,
@@ -347,11 +445,29 @@ class ChatInferenceHandler:
             logger.debug("[ChatHandler] Skipping credit check for free model %s", model_id)
             return max_tokens
 
+        # What those credits can buy at list price once a delegated-staking
+        # inference discount is counted (identity, no DB call, while disabled).
+        from src.services.billing.credit_precheck import calculate_maximum_cost
+        from src.services.delegation.discount import discount_aware_credits_async, discount_enabled
+
+        credit_capacity = user_credits
+        if discount_enabled():
+            # Holds this request's discount (keyed by the same billing ref
+            # deduct_credits settles on), so concurrent pre-checks cannot
+            # all count one balance.
+            max_cost, _, _ = calculate_maximum_cost(model_id, messages, max_tokens)
+            credit_capacity = await discount_aware_credits_async(
+                self.user.get("id"),
+                user_credits,
+                max_cost,
+                self._billing_ref() or self.request_id,
+            )
+
         # Perform pre-flight check (now includes affordability capping)
         check_result = estimate_and_check_credits(
             model_id=model_id,
             messages=messages,
-            user_credits=user_credits,
+            user_credits=credit_capacity,
             max_tokens=max_tokens,
             is_trial=False,
         )
@@ -823,7 +939,11 @@ class ChatInferenceHandler:
                     if provider_name == "community":
                         kwargs = {**kwargs, "_gatewayz_billing_ref": self._billing_ref()}
                     # All non-OpenRouter providers use sync streaming clients
-                    stream = routing["stream"](messages, model_id, **kwargs)
+                    # Opening a sync stream waits for the provider's first response;
+                    # do it in a thread so it doesn't block the event loop.
+                    stream = await asyncio.to_thread(
+                        routing["stream"], messages, model_id, **kwargs
+                    )
                     is_sync_stream = True
                 else:
                     # Fallback to OpenRouter for unknown providers
@@ -904,6 +1024,7 @@ class ChatInferenceHandler:
         model_name: str,
         prompt_tokens: int,
         completion_tokens: int,
+        defer_usage_record: bool = False,
     ) -> None:
         """
         Charge user credits or track trial usage.
@@ -951,17 +1072,14 @@ class ChatInferenceHandler:
                 billing_ref,
             )
 
-            # Record usage for analytics
+            # Record usage for analytics. It is not billing (deduct_credits above
+            # is), so a non-streaming response need not wait for the insert.
             elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
-            await asyncio.to_thread(
-                record_usage,
-                self.user["id"],
-                self.api_key,
-                model_name,
-                total_tokens,
-                cost,
-                elapsed_ms,
-            )
+            usage_args = (self.user["id"], self.api_key, model_name, total_tokens, cost, elapsed_ms)
+            if defer_usage_record and self.background_tasks:
+                self.background_tasks.add_task(record_usage, *usage_args)
+            else:
+                await asyncio.to_thread(record_usage, *usage_args)
 
             logger.debug(
                 f"[ChatHandler] Charged ${cost:.6f} for {total_tokens} tokens "
@@ -983,6 +1101,7 @@ class ChatInferenceHandler:
         input_cost_usd: float = 0.0,
         output_cost_usd: float = 0.0,
         cancelled: bool = False,
+        job_line: dict | None = None,
     ) -> None:
         """
         Log request metadata to chat_completion_requests table.
@@ -994,6 +1113,9 @@ class ChatInferenceHandler:
             output_tokens: Completion tokens
             status: Request status (completed, failed, partial)
             error_message: Error message if failed
+            job_line: v2 usage-line facts for a job key: ``output`` (visible text),
+                ``tokens_reasoning``, ``finish_reason``, ``priced_model``,
+                ``usage_estimated``
         """
         elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
 
@@ -1048,10 +1170,84 @@ class ChatInferenceHandler:
         else:
             save_chat_completion_request_with_cost(**save_kwargs)
 
+        # Inference-escrow usage line; a no-op unless this is a job-scoped key.
+        # Same billing_ref as the request row, so the two join.
+        if status == "completed" and not self.is_anonymous:
+            job_args = (
+                self.user,
+                model_name,
+                provider_name,
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                save_kwargs["request_id"] or "",
+            )
+            job_kwargs = self._job_line_kwargs(save_kwargs["request_id"], job_line)
+            if is_job_key_name(self.user.get("key_name") if self.user else None):
+                # Written by _flush_job_line() before the response is released, never
+                # as a response background task: a client that closes the job as soon
+                # as it has its answer would otherwise seal a record missing this line.
+                self._pending_job_line = (job_args, job_kwargs)
+
         logger.debug(
             f"[ChatHandler] Saved request record: request_id={self.request_id}, "
             f"status={status}, tokens={input_tokens}+{output_tokens}"
         )
+
+    async def _flush_job_line(self) -> None:
+        """Append the pending job usage line (see _save_request_record). Off the event
+        loop; record_job_usage never raises."""
+        pending, self._pending_job_line = self._pending_job_line, None
+        if pending is not None:
+            args, kwargs = pending
+            await asyncio.to_thread(record_job_usage, *args, **kwargs)
+
+    def _job_line_kwargs(self, request_id: str | None, job_line: dict | None) -> dict[str, Any]:
+        """v2 fields for record_job_usage; {} unless this is a job key.
+
+        Computes the content fingerprint here, in memory, and exposes it on
+        ``request.state`` so the route can return it as X-Gatewayz-Content-Hash.
+        """
+        if not job_line or not self._records_v2():
+            return {}
+        content_hash = job_usage_v2.ZERO_HASH
+        if self._client_messages is not None:
+            content_hash = job_usage_v2.content_hash(
+                self._client_messages, job_line.get("output") or ""
+            )
+            self.content_hash = content_hash
+            state = getattr(self.request, "state", None)
+            if state is not None:
+                state.gatewayz_content_hash = content_hash
+            self._keep_for_disputes(request_id, job_line.get("output") or "", content_hash)
+        return {
+            "request_id": request_id,
+            "tokens_reasoning": int(job_line.get("tokens_reasoning") or 0),
+            "finish_reason": job_line.get("finish_reason"),
+            "content_hash": content_hash,
+            "priced_model": job_line.get("priced_model"),
+            "usage_estimated": bool(job_line.get("usage_estimated")),
+        }
+
+    def _keep_for_disputes(self, request_id: str | None, output: str, content_hash: str) -> None:
+        """Opt-in dispute vault: keep this request's bundle, encrypted, until the
+        job's dispute window closes. Only when the client sent
+        X-Gatewayz-Dispute-Vault: on; off the request path when a background
+        task runner is available (services/dispute_vault.py)."""
+        try:
+            from src.services import dispute_vault
+            from src.services.job_usage import JOB_KEY_PREFIX
+
+            if not dispute_vault.opted_in(self.request) or not dispute_vault.enabled():
+                return
+            job_id = (self.user or {}).get("key_name", "")[len(JOB_KEY_PREFIX) :]
+            args = (job_id, request_id, self._client_messages, output, content_hash)
+            if self.background_tasks:
+                self.background_tasks.add_task(dispute_vault.store, *args)
+            else:
+                dispute_vault.store(*args)
+        except Exception as e:  # the vault must never cost the request its usage line
+            logger.error("dispute vault: not scheduled for %s: %s", request_id, e)
 
     async def process(self, request: InternalChatRequest) -> InternalChatResponse:
         """
@@ -1081,6 +1277,7 @@ class ChatInferenceHandler:
         try:
             # Step 1: Initialize user context
             await self._initialize_user_context()
+            await self._capture_client_messages()
 
             logger.info(
                 f"[ChatHandler] Processing request: model={request.model}, "
@@ -1100,11 +1297,12 @@ class ChatInferenceHandler:
             ]
 
             # Step 1.6: Pre-flight credit check (may cap max_tokens to affordable limit)
-            effective_max_tokens = await self._check_credit_sufficiency(
-                model_id=request.model,
-                messages=messages,
-                max_tokens=request.max_tokens,
-            )
+            with phase("handler_credit_check"):
+                effective_max_tokens = await self._check_credit_sufficiency(
+                    model_id=request.model,
+                    messages=messages,
+                    max_tokens=request.max_tokens,
+                )
 
             # Step 2: Build provider kwargs
             kwargs = {
@@ -1147,13 +1345,14 @@ class ChatInferenceHandler:
                 self._enforce_validator_registry_hops(selector, request.model)
 
                 # Use intelligent routing with failover for multi-provider models
-                result = await asyncio.to_thread(
-                    selector.execute_with_failover,
-                    model_id=request.model,
-                    execute_fn=lambda provider_name, provider_model_id: self._call_provider(
-                        provider_name, provider_model_id, messages, **kwargs
-                    ),
-                )
+                with phase("handler_provider_call"):
+                    result = await asyncio.to_thread(
+                        selector.execute_with_failover,
+                        model_id=request.model,
+                        execute_fn=lambda provider_name, provider_model_id: self._call_provider(
+                            provider_name, provider_model_id, messages, **kwargs
+                        ),
+                    )
 
                 if not result["success"]:
                     error_msg = result.get("error", "All providers failed")
@@ -1190,9 +1389,15 @@ class ChatInferenceHandler:
                     f"[ChatHandler] Model {request.model} not in registry, "
                     f"using provider='{provider_used}', model_id='{provider_model_id}'"
                 )
-                provider_response = self._call_provider(
-                    provider_used, provider_model_id, messages, **kwargs
-                )
+                # The provider clients are synchronous. Called inline, the upstream
+                # round trip blocked the event loop: with one worker, every other
+                # request waited for it (production 2026-10-27: 8 concurrent
+                # requests took ~8 s each instead of ~1 s). The registry branch
+                # above already runs _call_provider in a thread.
+                with phase("handler_provider_call"):
+                    provider_response = await asyncio.to_thread(
+                        self._call_provider, provider_used, provider_model_id, messages, **kwargs
+                    )
 
             logger.info(
                 f"[ChatHandler] Provider call successful: provider={provider_used}, "
@@ -1204,10 +1409,18 @@ class ChatInferenceHandler:
             usage = _rfield(provider_response, "usage")
             if usage:
                 prompt_tokens = _rfield(usage, "prompt_tokens", 0) or 0
-                completion_tokens = _rfield(usage, "completion_tokens", 0) or 0
+                # Reasoning a provider reports outside completion_tokens (xAI) is
+                # billed at the completion rate upstream; bill it here too.
+                completion_tokens = billed_completion_tokens(
+                    usage, prompt_tokens, _rfield(usage, "completion_tokens", 0) or 0
+                )
             else:
                 prompt_tokens = 0
                 completion_tokens = 0
+            # Hidden reasoning inside the billed completion count (cost disputes).
+            _, reasoning_tokens = job_usage_v2.split_completion_tokens(
+                usage, prompt_tokens, completion_tokens
+            )
 
             # Prompt-cache accounting. Cache reads cost a fraction of full input
             # tokens; billing them at the input rate is the difference between
@@ -1231,7 +1444,9 @@ class ChatInferenceHandler:
                 raise ValueError("Provider response missing choices")
 
             # Token estimation fallback if provider didn't return usage data
-            if prompt_tokens == 0 and completion_tokens == 0:
+            _count_usage_source(provider_used, "non_stream", prompt_tokens, completion_tokens)
+            usage_estimated = prompt_tokens == 0 and completion_tokens == 0
+            if usage_estimated:
                 completion_tokens = max(1, len(content or "") // 4)
                 prompt_chars = sum(
                     len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
@@ -1246,16 +1461,19 @@ class ChatInferenceHandler:
             total_tokens = prompt_tokens + completion_tokens
 
             # Step 5: Calculate cost (loss-proof: never bill below the served provider)
-            cost, input_cost, output_cost = await asyncio.to_thread(
-                _loss_proof_cost_split,
-                request.model,
-                provider_model_id,
-                prompt_tokens,
-                completion_tokens,
-                cache_read_tokens,
-                cache_write_tokens,
-                provider_used,
-            )
+            priced: dict = {}
+            with phase("handler_cost"):
+                cost, input_cost, output_cost = await asyncio.to_thread(
+                    _loss_proof_cost_split,
+                    request.model,
+                    provider_model_id,
+                    prompt_tokens,
+                    completion_tokens,
+                    cache_read_tokens,
+                    cache_write_tokens,
+                    provider_used,
+                    priced=priced,
+                )
 
             logger.debug(
                 f"[ChatHandler] Cost calculation: total=${cost:.6f}, "
@@ -1267,8 +1485,11 @@ class ChatInferenceHandler:
             # request record and response below, so they reflect the billed amount.
             cost = self._apply_byok_fee(cost)
 
-            # Step 6: Charge user
-            await self._charge_user(cost, request.model, prompt_tokens, completion_tokens)
+            # Step 6: Charge user (before responding: billing stays exact)
+            with phase("handler_charge"):
+                await self._charge_user(
+                    cost, request.model, prompt_tokens, completion_tokens, defer_usage_record=True
+                )
 
             # Step 7: Save request record
             self._save_request_record(
@@ -1280,7 +1501,15 @@ class ChatInferenceHandler:
                 cost_usd=cost,
                 input_cost_usd=input_cost,
                 output_cost_usd=output_cost,
+                job_line={
+                    "output": content or "",
+                    "tokens_reasoning": reasoning_tokens,
+                    "finish_reason": finish_reason,
+                    "priced_model": priced.get("model"),
+                    "usage_estimated": usage_estimated,
+                },
             )
+            await self._flush_job_line()
 
             # Step 8: Return InternalChatResponse with all metadata
             elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
@@ -1381,20 +1610,26 @@ class ChatInferenceHandler:
         cache_read_tokens: int,
         cache_write_tokens: int,
         cancelled: bool,
+        tokens_reasoning: int = 0,
+        finish_reason: str | None = None,
     ) -> None:
         """Estimate usage if needed, charge the user and save the request row.
 
         Idempotent per handler (``_stream_billed``) and, across processes, on
         the billing_ref passed to ``deduct_credits``. ``cancelled`` marks a
         client abort: usage is whatever streamed so far (estimated if the
-        provider's usage chunk never arrived).
+        provider's usage chunk never arrived). ``finish_reason`` is the last
+        chunk's, or ``cancelled`` / ``timeout`` when the stream was cut short;
+        ``tokens_reasoning`` is hidden reasoning inside ``completion_tokens``.
         """
         if self._stream_billed:
             return
         self._stream_billed = True
 
         # Step 6: Token estimation fallback if provider didn't provide usage
-        if prompt_tokens == 0 and completion_tokens == 0:
+        _count_usage_source(provider_used, "stream", prompt_tokens, completion_tokens)
+        usage_estimated = prompt_tokens == 0 and completion_tokens == 0
+        if usage_estimated:
             # Estimate tokens from content length (1 token ≈ 4 characters)
             # A cancelled stream may legitimately have produced no content yet.
             completion_tokens = (
@@ -1416,6 +1651,7 @@ class ChatInferenceHandler:
 
         # Step 7: Calculate cost and charge user after stream completes
         # (loss-proof: never bill below the provider that actually served)
+        priced: dict = {}
         cost, input_cost, output_cost = await asyncio.to_thread(
             _loss_proof_cost_split,
             model,
@@ -1425,6 +1661,7 @@ class ChatInferenceHandler:
             cache_read_tokens,
             cache_write_tokens,
             provider_used,
+            priced=priced,
         )
 
         logger.debug(f"[ChatHandler] Streaming cost: ${cost:.6f}")
@@ -1445,7 +1682,15 @@ class ChatInferenceHandler:
             cost_usd=cost,
             input_cost_usd=input_cost,
             output_cost_usd=output_cost,
+            job_line={
+                "output": accumulated_content,
+                "tokens_reasoning": 0 if usage_estimated else tokens_reasoning,
+                "finish_reason": "cancelled" if cancelled else finish_reason,
+                "priced_model": priced.get("model"),
+                "usage_estimated": usage_estimated,
+            },
         )
+        await self._flush_job_line()
 
         logger.info(
             f"[ChatHandler] Streaming request completed: "
@@ -1488,10 +1733,13 @@ class ChatInferenceHandler:
         accumulated_content = ""  # For token estimation fallback
         chunk_count = 0
         stream_started = False  # True once an upstream call may have consumed tokens
+        reasoning_tokens = 0  # hidden reasoning inside completion_tokens (job usage lines)
+        last_finish_reason: str | None = None  # the real one, for job usage lines
 
         try:
             # Step 1: Initialize user context
             await self._initialize_user_context()
+            await self._capture_client_messages()
 
             logger.info(
                 f"[ChatHandler] Processing streaming request: model={request.model}, "
@@ -1577,6 +1825,16 @@ class ChatInferenceHandler:
                 f"[ChatHandler] Streaming from provider={provider_used}, model={provider_model_id}"
             )
 
+            # Ask for the usage chunk where the provider is known to accept it, so
+            # the stream is billed on the provider's counts rather than len/4.
+            # Whether the CLIENT sees a usage chunk still follows its own request.
+            wants_usage = client_wants_usage(request.stream_options)
+            if (provider_used or "").lower() in _STREAM_USAGE_PROVIDERS:
+                so = kwargs.get("stream_options") or {}
+                if hasattr(so, "model_dump"):
+                    so = so.model_dump(exclude_none=True)
+                kwargs["stream_options"] = {**dict(so), "include_usage": True}
+
             # Step 3: Stream from provider
             stream = self._call_provider_stream(
                 provider_used, provider_model_id, messages, **kwargs
@@ -1604,6 +1862,7 @@ class ChatInferenceHandler:
                         logger.warning(
                             f"[ChatHandler] Client disconnected during stream (request_id={self.request_id})"
                         )
+                        last_finish_reason = "cancelled"
                         break
 
                     # FREEZE FIX: Wall-clock deadline — abort if provider stream exceeds limit.
@@ -1614,9 +1873,30 @@ class ChatInferenceHandler:
                             f"{_MAX_STREAM_DURATION}s ({_elapsed:.1f}s elapsed) for "
                             f"provider={provider_used}, model={provider_model_id}. Terminating."
                         )
+                        last_finish_reason = "timeout"
                         break
 
                     chunk_count += 1
+
+                    # Usage first, whatever else the chunk carries: OpenAI's
+                    # include_usage chunk has `choices: []`, and reading usage only
+                    # inside the choices branch dropped it, billing the stream on
+                    # the len/4 estimate instead.
+                    chunk_usage = _rfield(provider_chunk, "usage")
+                    if chunk_usage:
+                        prompt_tokens = _rfield(chunk_usage, "prompt_tokens", 0) or 0
+                        completion_tokens = billed_completion_tokens(
+                            chunk_usage,
+                            prompt_tokens,
+                            _rfield(chunk_usage, "completion_tokens", 0) or 0,
+                        )
+                        # Hidden reasoning inside the billed count (job usage lines).
+                        _, reasoning_tokens = job_usage_v2.split_completion_tokens(
+                            chunk_usage, prompt_tokens, completion_tokens
+                        )
+                        from src.services.pricing.cache_pricing import extract_cache_tokens
+
+                        cache_read_tokens, cache_write_tokens = extract_cache_tokens(chunk_usage)
 
                     # Extract delta content
                     # (_rfield handles both OpenAI-SDK objects and dict-shaped chunks, e.g. Vertex.)
@@ -1635,19 +1915,8 @@ class ChatInferenceHandler:
 
                             if content:
                                 accumulated_content += content
-
-                            # Extract usage from final chunk if available
-                            chunk_usage = _rfield(provider_chunk, "usage")
-                            if chunk_usage:
-                                prompt_tokens = _rfield(chunk_usage, "prompt_tokens", 0) or 0
-                                completion_tokens = (
-                                    _rfield(chunk_usage, "completion_tokens", 0) or 0
-                                )
-                                from src.services.pricing.cache_pricing import extract_cache_tokens
-
-                                cache_read_tokens, cache_write_tokens = extract_cache_tokens(
-                                    chunk_usage
-                                )
+                            if chunk_finish_reason is not None:
+                                last_finish_reason = chunk_finish_reason
 
                             # Yield internal chunk
                             internal_chunk = InternalStreamChunk(
@@ -1658,35 +1927,29 @@ class ChatInferenceHandler:
                                 role=role,
                                 finish_reason=chunk_finish_reason,
                                 tool_calls=tool_calls,
-                                usage=(
-                                    InternalUsage(
-                                        prompt_tokens=prompt_tokens,
-                                        completion_tokens=completion_tokens,
-                                        total_tokens=prompt_tokens + completion_tokens,
-                                        # Cache counts are already extracted above
-                                        # for BILLING; carry them onto the chunk so
-                                        # the caller can see them too. Without this
-                                        # a streaming client is charged the cache
-                                        # rate but shown no cache tokens, and has no
-                                        # way to verify the saving it just got.
-                                        **(
-                                            {
-                                                "cache_read_input_tokens": cache_read_tokens,
-                                                "cache_creation_input_tokens": cache_write_tokens,
-                                                "prompt_tokens_details": {
-                                                    "cached_tokens": cache_read_tokens
-                                                },
-                                            }
-                                            if (cache_read_tokens or cache_write_tokens)
-                                            else {}
-                                        ),
-                                    )
-                                    if prompt_tokens > 0 or completion_tokens > 0
-                                    else None
+                                usage=_internal_usage(
+                                    prompt_tokens,
+                                    completion_tokens,
+                                    cache_read_tokens,
+                                    cache_write_tokens,
                                 ),
                             )
 
                             yield internal_chunk
+
+                    elif chunk_usage and wants_usage:
+                        # A usage-only chunk the client asked for (include_usage).
+                        yield InternalStreamChunk(
+                            id=self.request_id,
+                            model=request.model,
+                            created=int(time.time()),
+                            usage=_internal_usage(
+                                prompt_tokens,
+                                completion_tokens,
+                                cache_read_tokens,
+                                cache_write_tokens,
+                            ),
+                        )
 
             finally:
                 # FREEZE FIX: Always release the underlying provider connection back to the pool.
@@ -1716,6 +1979,8 @@ class ChatInferenceHandler:
                 cache_read_tokens=cache_read_tokens,
                 cache_write_tokens=cache_write_tokens,
                 cancelled=False,
+                tokens_reasoning=reasoning_tokens,
+                finish_reason=last_finish_reason,
             )
 
         except (asyncio.CancelledError, GeneratorExit):
@@ -1737,6 +2002,7 @@ class ChatInferenceHandler:
                         cache_read_tokens=cache_read_tokens,
                         cache_write_tokens=cache_write_tokens,
                         cancelled=True,
+                        tokens_reasoning=reasoning_tokens,
                     )
                 )
             raise

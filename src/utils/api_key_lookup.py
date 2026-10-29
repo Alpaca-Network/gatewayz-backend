@@ -5,8 +5,14 @@ Provides robust API key lookup with retry logic and error handling.
 
 import asyncio
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+
+# api key -> (api key id, monotonic time cached). See get_api_key_id_with_retry.
+_key_id_cache: dict[str, tuple[int, float]] = {}
+_KEY_ID_TTL = 300.0
 
 
 async def get_api_key_id_with_retry(
@@ -35,6 +41,13 @@ async def get_api_key_id_with_retry(
     if api_key in {"local-dev-bypass-key", "anonymous"}:
         logger.debug(f"Skipping lookup for special key: {api_key}")
         return None
+
+    # A key's id never changes, and whether the key is still valid is decided
+    # by validate_api_key_security on every request (uncached, fail-closed), so
+    # the id can be remembered. This was a second api_keys_new query per request.
+    cached = _key_id_cache.get(api_key)
+    if cached is not None and time.monotonic() - cached[1] < _KEY_ID_TTL:
+        return cached[0]
 
     from src.db import api_keys as api_keys_module
 
@@ -66,6 +79,7 @@ async def get_api_key_id_with_retry(
                             api_key_lookup_attempts.labels(status="retry").inc()
                     if metrics_available:
                         api_key_lookup_attempts.labels(status="success").inc()
+                    _key_id_cache[api_key] = (api_key_id, time.monotonic())
                     return api_key_id
                 else:
                     logger.warning(f"API key record found but missing 'id' field: {api_key_record}")

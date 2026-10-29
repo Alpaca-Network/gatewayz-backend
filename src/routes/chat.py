@@ -29,6 +29,7 @@ from src.services.anonymous_rate_limiter import (
     validate_anonymous_request,
 )
 from src.services.auth_rate_limiting import get_client_ip
+from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.key_purpose import enforce_no_routing_alias, is_validator_key
 from src.services.passive_health_monitor import capture_model_health
 from src.services.prometheus_metrics import record_free_model_usage
@@ -359,6 +360,58 @@ async def _enforce_daily_limit_preflight(user: dict) -> None:
         ) from e
 
 
+async def _log_post_usage_plan_check(user_id: int, total_tokens: int, environment_tag: str) -> None:
+    """Post-response plan check: log an overage, never fail the (paid) request."""
+    try:
+        result = await asyncio.to_thread(
+            enforce_plan_limits, user_id, total_tokens, environment_tag
+        )
+        if not result.get("allowed", False):
+            logger.warning(
+                "Plan limit exceeded after usage (user=%s, tokens=%s): %s",
+                user_id,
+                total_tokens,
+                result.get("reason", "unknown"),
+            )
+    except Exception as e:  # noqa: BLE001 - background bookkeeping
+        logger.warning("Post-usage plan check failed for user %s: %s", user_id, e)
+
+
+async def _log_activity_safely(**kwargs) -> None:
+    """Activity logging after the response; failures are logged, never raised."""
+    try:
+        await asyncio.to_thread(log_activity, **kwargs)
+    except Exception as e:  # noqa: BLE001 - background bookkeeping
+        logger.error("Failed to log activity for user %s: %s", kwargs.get("user_id"), e)
+
+
+# Per-step timing for the Server-Timing header and slow-request log
+# (src/utils/request_timing.py). Rebinding the module globals the endpoint
+# calls times each step without touching the request logic.
+from src.utils import request_timing as _request_timing  # noqa: E402
+
+_to_thread = _request_timing.timed_to_thread(_to_thread)
+for _timed_name in (
+    "resolve_auto_routed_model",
+    "enforce_model_pricing_gate",
+    "_ensure_plan_capacity",
+    "discount_aware_credits_async",
+    "_enforce_daily_limit_preflight",
+    "get_model_pricing_async",
+    "inject_conversation_history",
+    "resolve_model_routing",
+    "prepare_upstream_request",
+    "dispatch_streaming",
+    "dispatch_non_streaming",
+    "_handle_credits_and_usage",
+    "calculate_cost_async",
+    "_record_inference_metrics_and_health",
+    "persist_conversation_turn",
+):
+    if _timed_name in globals():
+        globals()[_timed_name] = _request_timing.timed(globals()[_timed_name])
+
+
 @router.post("/chat/completions", tags=["chat"])
 @traced(name="chat_completions", type="llm")
 async def chat_completions(
@@ -619,11 +672,9 @@ async def chat_completions(
         rate_limit_mgr = get_rate_limit_manager()
         should_release_concurrency = not trial.get("is_trial", False) and not is_anonymous
 
-        # Pre-check plan limits before making any upstream calls (only for authenticated users)
-        if not is_anonymous:
-            pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-            if not pre_plan.get("allowed", False):
-                raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get("reason", "unknown"))
+        # (The same zero-token plan check used to run twice more here and before
+        # streaming; _ensure_plan_capacity above already made it, and step 2.2
+        # re-checks with the estimated tokens before any upstream call.)
 
         # Allow disabling rate limiting for testing (DEV ONLY) or internal live-test calls.
         # is_live_test is set by security_middleware after validating X-Internal-Source + ADMIN_API_KEY.
@@ -674,11 +725,28 @@ async def chat_completions(
             )
             if _user_credits <= 0:
                 raise APIExceptions.payment_required(credits=_user_credits)
+            from src.services.delegation.discount import (
+                discount_aware_credits_async,
+                discount_enabled,
+            )
+
             _msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+            # List-price capacity incl. this request's held inference discount
+            # (identity, no DB call, while disabled).
+            _credit_capacity = _user_credits
+            if discount_enabled():
+                from src.services.billing.credit_precheck import calculate_maximum_cost
+
+                _max_cost, _, _ = calculate_maximum_cost(
+                    req.model, _msgs, getattr(req, "max_tokens", None)
+                )
+                _credit_capacity = await discount_aware_credits_async(
+                    user.get("id"), _user_credits, _max_cost, request_id
+                )
             _precheck = estimate_and_check_credits(
                 model_id=req.model,
                 messages=_msgs,
-                user_credits=_user_credits,
+                user_credits=_credit_capacity,
                 max_tokens=getattr(req, "max_tokens", None),
             )
             if not _precheck["allowed"] and _precheck.get("capped_max_tokens") is None:
@@ -720,12 +788,6 @@ async def chat_completions(
                     )
                 # Unknown ValueError — let it propagate as 500
                 raise
-
-        # Pre-check plan limits before streaming (fail fast) - only for authenticated users
-        if not is_anonymous:
-            pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
-            if not pre_plan.get("allowed", False):
-                raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get("reason", "unknown"))
 
         # === 2) Build upstream request ===
         with tracker.stage("request_parsing"):
@@ -964,14 +1026,13 @@ async def chat_completions(
 
         # Plan limits and usage tracking (only for authenticated users)
         if not is_anonymous:
-            post_plan = await _to_thread(
-                enforce_plan_limits, user["id"], total_tokens, environment_tag
+            # The pre-request check already admitted this request and the unified
+            # handler has charged for it, so refusing the response now would bill
+            # the user for an error. Record the post-usage check after the
+            # response instead of making the caller wait for it (100-450 ms).
+            background_tasks.add_task(
+                _log_post_usage_plan_check, user["id"], total_tokens, environment_tag
             )
-            if not post_plan.get("allowed", False):
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
-                )
 
             if trial.get("is_trial") and not trial.get("is_expired"):
                 try:
@@ -1042,7 +1103,19 @@ async def chat_completions(
         # ledger) and does NOT deduct a second time — the prior behaviour billed
         # paid users twice per request.
         if not is_anonymous:
-            cost = await _handle_credits_and_usage(
+            # What the unified handler actually charged (loss-proof, cache-aware,
+            # BYOK fee applied). Recomputing it here could disagree with the bill,
+            # and calculate_cost raises on missing/anomalous pricing, which would
+            # turn an already-charged request into a 500.
+            cost = float((processed.get("gateway_usage") or {}).get("cost_usd") or 0.0)
+        else:
+            cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
+        if not is_anonymous:
+            # With already_charged=True this is bookkeeping only (rate-limit usage
+            # and the shadow ledger; the handler already deducted credits), so it
+            # runs after the response is sent rather than adding 0.5-0.7 s to it.
+            background_tasks.add_task(
+                _handle_credits_and_usage,
                 api_key=api_key,
                 user=user,
                 model=model,
@@ -1055,9 +1128,7 @@ async def chat_completions(
                 request_id=request_id,
                 already_charged=True,
             )
-            await _to_thread(increment_api_key_usage, api_key)
-        else:
-            cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
+            background_tasks.add_task(_to_thread, increment_api_key_usage, api_key)
 
         # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
         await _record_inference_metrics_and_health(
@@ -1076,8 +1147,8 @@ async def chat_completions(
             try:
                 provider_name = get_provider_from_model(model)
                 speed = total_tokens / elapsed if elapsed > 0 else 0
-                await _to_thread(
-                    log_activity,
+                background_tasks.add_task(
+                    _log_activity_safely,
                     user_id=user["id"],
                     model=model,
                     provider=provider_name,
@@ -1133,46 +1204,55 @@ async def chat_completions(
             },
         )
 
-        # Save chat completion request metadata to database with cost tracking - run as background task
-        # Calculate cost breakdown for analytics
-        from src.services.pricing import get_model_pricing
+        # Authenticated requests are saved by the unified handler (chat_handler),
+        # which runs inside dispatch_non_streaming; saving here too inserted every
+        # row twice (the second insert failed on the request_id unique key).
+        if is_anonymous:
+            # Save chat completion request metadata to database with cost tracking - run as background task
+            # Calculate cost breakdown for analytics
+            from src.services.pricing import get_model_pricing
 
-        try:
-            pricing_info = get_model_pricing(model)
-            input_cost = prompt_tokens * pricing_info.get("prompt", 0)
-            output_cost = completion_tokens * pricing_info.get("completion", 0)
-        except ValueError:
-            logger.warning(
-                f"[ANALYTICS] Pricing unavailable for high-value model {model}, "
-                f"using zero cost for analytics record"
+            try:
+                pricing_info = get_model_pricing(model)
+                input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+                output_cost = completion_tokens * pricing_info.get("completion", 0)
+            except ValueError:
+                logger.warning(
+                    f"[ANALYTICS] Pricing unavailable for high-value model {model}, "
+                    f"using zero cost for analytics record"
+                )
+                input_cost = 0.0
+                output_cost = 0.0
+
+            background_tasks.add_task(
+                save_chat_completion_request_with_cost,
+                request_id=request_id,
+                model_name=model,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                processing_time_ms=int(elapsed * 1000),
+                cost_usd=cost,
+                input_cost_usd=input_cost,
+                output_cost_usd=output_cost,
+                pricing_source="calculated",
+                status="completed",
+                error_message=None,
+                user_id=user["id"] if not is_anonymous else None,
+                provider_name=provider,
+                model_id=None,
+                api_key_id=api_key_id,
+                is_anonymous=is_anonymous,
             )
-            input_cost = 0.0
-            output_cost = 0.0
-
-        background_tasks.add_task(
-            save_chat_completion_request_with_cost,
-            request_id=request_id,
-            model_name=model,
-            input_tokens=prompt_tokens,
-            output_tokens=completion_tokens,
-            processing_time_ms=int(elapsed * 1000),
-            cost_usd=cost,
-            input_cost_usd=input_cost,
-            output_cost_usd=output_cost,
-            pricing_source="calculated",
-            status="completed",
-            error_message=None,
-            user_id=user["id"] if not is_anonymous else None,
-            provider_name=provider,
-            model_id=None,
-            api_key_id=api_key_id,
-            is_anonymous=is_anonymous,
-        )
 
         # Prepare headers including rate limit information
         headers = {}
         if rl_final is not None:
             headers.update(get_rate_limit_headers(rl_final))
+        # Job keys only: the content fingerprint on this request's usage line, so
+        # the client knows which (messages, output) bundle to keep for a dispute.
+        content_hash = getattr(getattr(request, "state", None), "gatewayz_content_hash", None)
+        if content_hash:
+            headers[CONTENT_HASH_HEADER] = content_hash
 
         return JSONResponse(content=processed, headers=headers)
 

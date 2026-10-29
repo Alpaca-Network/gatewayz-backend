@@ -13,6 +13,7 @@ from src.services.scheduled_sync import (
     holdings_snapshot_cron_hours,
     run_scheduled_holdings_rewards,
     run_scheduled_holdings_snapshots,
+    run_scheduled_holdings_sweep_watchdog,
     start_holdings_rewards_scheduler,
     start_holdings_snapshots_scheduler,
     stop_holdings_rewards_scheduler,
@@ -71,6 +72,70 @@ class TestSnapshotJobRun:
             patch("src.services.scheduled_sync.record_job_run") as mock_record,
         ):
             await run_scheduled_holdings_snapshots()  # must not raise
+        assert mock_record.call_args.kwargs["ok"] is False
+
+    async def test_a_completed_sweep_is_checked_for_recording_nothing(self):
+        result = {"wallets_considered": 3, "sweeps_recorded": 0, "failed_chains": {"137": 3}}
+        with (
+            patch(
+                "src.services.holdings.snapshots.run_holdings_snapshots_once", return_value=result
+            ),
+            patch("src.services.scheduled_sync.record_job_run"),
+            patch("src.services.holdings.alerts.alert_if_sweep_recorded_nothing") as mock_alert,
+        ):
+            await run_scheduled_holdings_snapshots()
+        mock_alert.assert_called_once_with(result)
+
+    async def test_a_skipped_sweep_is_not_alerted_on(self):
+        with (
+            patch(
+                "src.services.holdings.snapshots.run_holdings_snapshots_once",
+                return_value={"skipped": "disabled"},
+            ),
+            patch("src.services.scheduled_sync.record_job_run"),
+            patch("src.services.holdings.alerts.alert_if_sweep_recorded_nothing") as mock_alert,
+        ):
+            await run_scheduled_holdings_snapshots()
+        mock_alert.assert_not_called()
+
+    async def test_an_alerting_failure_does_not_lose_the_job_record(self):
+        result = {"wallets_considered": 3, "sweeps_recorded": 0}
+        with (
+            patch(
+                "src.services.holdings.snapshots.run_holdings_snapshots_once", return_value=result
+            ),
+            patch("src.services.scheduled_sync.record_job_run") as mock_record,
+            patch(
+                "src.services.holdings.alerts.alert_if_sweep_recorded_nothing",
+                side_effect=RuntimeError("smtp"),
+            ),
+        ):
+            await run_scheduled_holdings_snapshots()  # must not raise
+        assert mock_record.call_args_list[0].kwargs["ok"] is True
+
+
+@pytest.mark.asyncio
+class TestSweepWatchdogJobRun:
+    async def test_records_the_staleness_status(self):
+        status = {"enabled": True, "stale": True, "alerted": True}
+        with (
+            patch("src.services.holdings.alerts.check_sweep_staleness", return_value=status),
+            patch("src.services.scheduled_sync.record_job_run") as mock_record,
+        ):
+            await run_scheduled_holdings_sweep_watchdog()
+        assert mock_record.call_args.args[0] == "holdings_sweep_watchdog"
+        assert mock_record.call_args.kwargs["ok"] is True
+        assert mock_record.call_args.kwargs["summary"] == status
+
+    async def test_never_raises(self):
+        with (
+            patch(
+                "src.services.holdings.alerts.check_sweep_staleness",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch("src.services.scheduled_sync.record_job_run") as mock_record,
+        ):
+            await run_scheduled_holdings_sweep_watchdog()  # must not raise
         assert mock_record.call_args.kwargs["ok"] is False
 
 
@@ -132,6 +197,10 @@ class TestSchedulerLifecycle:
             assert scheduled_sync._holdings_snapshots_scheduler is not None
             job = scheduled_sync._holdings_snapshots_scheduler.get_job("holdings_snapshots")
             assert job is not None
+            watchdog = scheduled_sync._holdings_snapshots_scheduler.get_job(
+                "holdings_sweep_watchdog"
+            )
+            assert watchdog is not None
         finally:
             stop_holdings_snapshots_scheduler()
         assert scheduled_sync._holdings_snapshots_scheduler is None

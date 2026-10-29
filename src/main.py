@@ -90,9 +90,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Create v1 router for OpenAI-compatible endpoints
-    # This allows users to use base_url="https://api.gatewayz.ai" (SDK appends /v1)
-    # or base_url="https://api.gatewayz.ai/v1" directly
+    # Create v1 router for OpenAI-compatible endpoints.
+    # OpenAI SDK clients should use base_url="https://api.gatewayz.ai/v1" (the
+    # SDK appends only "/chat/completions"). A bare base_url still works for
+    # chat/completions/embeddings via OpenAIPathAliasMiddleware, and for /models
+    # via the root mount below. The Anthropic SDK appends "/v1/messages" itself.
     v1_router = APIRouter(prefix="/v1")
 
     # Add CORS middleware
@@ -129,6 +131,15 @@ def create_app() -> FastAPI:
         ] + base_origins
 
     # Explicitly allow modern tracing/debug headers to prevent CORS failures on mobile
+    # Non-production only: extra exact origins (comma-separated), e.g. a Vercel
+    # preview pointed at a demo backend. Production ignores it.
+    if not Config.IS_PRODUCTION:
+        allowed_origins += [
+            o.strip().rstrip("/")
+            for o in os.environ.get("CORS_EXTRA_ORIGINS", "").split(",")
+            if o.strip()
+        ]
+
     allowed_headers = [
         "Content-Type",
         "Authorization",
@@ -215,6 +226,11 @@ def create_app() -> FastAPI:
             "  🎯 [6] Auto-Sentry middleware enabled (automatic error capture for all routes)"
         )
 
+    # [4b] JobLease — frees a job key's in-flight slot when its response finishes
+    from src.middleware.job_lease_middleware import JobLeaseMiddleware
+
+    app.add_middleware(JobLeaseMiddleware)
+
     # [4] RequestID — assigns a unique X-Request-ID to every request
     from src.middleware.request_id_middleware import RequestIDMiddleware
 
@@ -260,6 +276,20 @@ def create_app() -> FastAPI:
         logger.warning(
             f"  🛡️  [1] Security middleware enabled with LOCAL fallback (Redis error: {e})"
         )
+
+    # Outermost: per-step timing for inference routes (Server-Timing header and a
+    # WARNING line for slow requests). Pure ASGI, so streaming is untouched.
+    from src.utils.request_timing import RequestTimingMiddleware
+
+    app.add_middleware(RequestTimingMiddleware)
+
+    # [0] Path alias — rewrites root /chat/completions, /completions and
+    #     /embeddings to their /v1 form before any other layer runs, so every
+    #     middleware above sees the canonical path.
+    from src.middleware.openai_path_alias_middleware import OpenAIPathAliasMiddleware
+
+    app.add_middleware(OpenAIPathAliasMiddleware)
+    logger.info("  🔀 [0] OpenAI root-path alias middleware enabled")
 
     # Security
     HTTPBearer()
@@ -467,6 +497,12 @@ def create_app() -> FastAPI:
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
         ("status_page", "Public Status Page"),  # Public status page (no auth required)
+        # Inference escrow: job-scoped keys + sealed usage records (GenLayer cohort).
+        ("jobs", "Inference Jobs"),
+        # Content-addressed rate sheets that job usage lines are charged against.
+        ("price_sheets", "Price Sheets"),
+        # Opt-in, encrypted, 72 h dispute content vault for job usage lines.
+        ("dispute_content", "Dispute Content Vault"),
     ]
 
     # Define non-v1 routes (loaded directly on app without prefix)
@@ -558,6 +594,14 @@ def create_app() -> FastAPI:
             "Wallet Auth",
         ),  # SIWE wallet sign-in/sign-up + linking (gatewayz-backend#2249-#2252)
         (
+            "wallet_auth_cardano",
+            "Cardano Wallet Link",
+        ),  # CIP-30 signData stake-address linking (delegated staking)
+        (
+            "delegation",
+            "Delegated Staking",
+        ),  # Inference allowance for stake delegated to the Gatewayz vault / pool
+        (
             "gpu",
             "GPU Marketplace",
         ),  # Provider/node registry, node auth, heartbeats (gatewayz-backend#2262)
@@ -573,6 +617,10 @@ def create_app() -> FastAPI:
             "admin_emission",
             "Admin Emission Rewards",
         ),  # Chutes-style WAYZ emission rewards admin API (gatewayz-backend tokenomics)
+        (
+            "usage_anchors",
+            "Usage Anchoring",
+        ),  # Daily usage Merkle roots on Avalanche C-Chain (docs/usage-anchor/README.md)
     ]
 
     loaded_count = 0

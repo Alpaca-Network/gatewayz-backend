@@ -38,7 +38,10 @@ VALID_EFFORTS = ("low", "medium", "high")
 
 # OpenAI families that take reasoning_effort. These are exactly the families
 # that also reject `max_tokens`, so one predicate drives both decisions.
-_OPENAI_REASONING_PATTERN = re.compile(r"^(o\d|gpt-5)", re.IGNORECASE)
+# o-series and GPT-5 onwards. Matching only "gpt-5" sent max_tokens to gpt-6-*,
+# which OpenAI rejects ("Unsupported parameter: 'max_tokens'"): all four GPT-6
+# models failed through Gatewayz on 2026-10-27.
+_OPENAI_REASONING_PATTERN = re.compile(r"^(o\d|gpt-([5-9]|[1-9]\d))", re.IGNORECASE)
 
 # Anthropic generations that want thinking.adaptive + output_config.effort
 # instead of a raw token budget.

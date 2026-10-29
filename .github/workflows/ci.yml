@@ -26,7 +26,7 @@ jobs:
   # Job 1: Linting and Code Quality
   lint:
     name: Code Quality Checks
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout code
@@ -99,7 +99,7 @@ jobs:
   # Job 2: Security Checks
   security:
     name: Security Scan
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout code
@@ -129,7 +129,7 @@ jobs:
   # Each category runs as a separate job for clear visual pass/fail per area
   test:
     name: "Tests (${{ matrix.category }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     needs: lint
 
     strategy:
@@ -292,7 +292,7 @@ jobs:
   # Job 3B: Merge coverage reports
   coverage:
     name: Coverage Report
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     needs: test
     if: always()
     outputs:
@@ -454,7 +454,7 @@ jobs:
   # Job 4: Build Check
   build:
     name: Build Verification
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     needs: [lint, test, coverage]  # Build blocked by lint and test failures; coverage always runs
 
     steps:
@@ -502,7 +502,7 @@ jobs:
   # Job 5: Deployment Ready Check
   deployment-check:
     name: Deployment Ready
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     needs: [lint, security, coverage, build]
     if: github.event_name == 'push'
 
@@ -537,7 +537,7 @@ jobs:
   # (Automatically triggers via workflow_run, but can also be manually dispatched)
   trigger-cursor-auto-fix:
     name: Notify Cursor Auto-Fix
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     # Depends on critical jobs and runs if any failed
     needs: [lint, security, test, coverage, build]
     if: failure()
@@ -558,7 +558,7 @@ jobs:
   # Job 6: Railway Deployment Notification
   notify-deployment:
     name: Notify Deployment
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     needs: [deployment-check]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
 

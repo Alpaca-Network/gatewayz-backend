@@ -10,11 +10,36 @@ failed requests by 40-50%.
 """
 
 import logging
+import time
 from typing import Any
 
 from src.services.simple_health_cache import simple_health_cache
 
 logger = logging.getLogger(__name__)
+
+# Every inference request read (and JSON-parsed) the whole models-health blob
+# from Redis, synchronously on the event loop, plus the system blob. The
+# monitor refreshes them every few minutes, so a 15 s local copy loses nothing.
+_HEALTH_MEMO_TTL = 15.0
+_health_memo: dict[str, tuple[Any, float]] = {}
+
+
+def _memo(name: str, fetch) -> Any:
+    now = time.monotonic()
+    hit = _health_memo.get(name)
+    if hit is not None and now - hit[1] < _HEALTH_MEMO_TTL:
+        return hit[0]
+    value = fetch()
+    _health_memo[name] = (value, now)
+    return value
+
+
+def _models_health() -> list | None:
+    return _memo("models", simple_health_cache.get_models_health)
+
+
+def _system_health() -> dict | None:
+    return _memo("system", simple_health_cache.get_system_health)
 
 
 def is_model_healthy(
@@ -40,7 +65,7 @@ def is_model_healthy(
             # Try alternative provider
     """
     try:
-        models_health = simple_health_cache.get_models_health()
+        models_health = _models_health()
 
         if not models_health:
             # No health data available - assume healthy to avoid blocking requests
@@ -118,7 +143,7 @@ def get_healthy_alternative_provider(
             logger.info(f"Failing over from openrouter to {alt_provider}")
     """
     try:
-        models_health = simple_health_cache.get_models_health()
+        models_health = _models_health()
 
         if not models_health:
             logger.debug("No health data available for alternative provider search")
@@ -183,7 +208,7 @@ def get_model_health_summary(model_id: str, provider: str) -> dict[str, Any] | N
             print(f"Status: {summary['status']}, Uptime: {summary['uptime']}%")
     """
     try:
-        models_health = simple_health_cache.get_models_health()
+        models_health = _models_health()
 
         if not models_health:
             return None
@@ -225,7 +250,7 @@ def should_use_health_based_routing() -> bool:
         True if health data is available and routing should be used
     """
     try:
-        system_health = simple_health_cache.get_system_health()
+        system_health = _system_health()
         return system_health is not None and system_health.get("total_models", 0) > 0
     except Exception as e:
         logger.error(f"Error checking health routing availability: {e}")

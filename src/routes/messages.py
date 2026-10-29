@@ -31,19 +31,24 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from src.schemas.proxy import ProxyRequest
 from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
 from src.security.security import ApiKeyLookupUnavailable, validate_api_key_security
+from src.services.job_usage import JOB_BUSY, job_lease_of
+from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.providers.anthropic_transformer import (
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
 )
 
 logger = logging.getLogger(__name__)
+
+# Job keys: the usage line's content hash, emitted by chat_dispatch before [DONE].
+_CONTENT_HASH_COMMENT = f": {CONTENT_HASH_HEADER.lower()}: "
 
 router = APIRouter(tags=["messages"])
 
@@ -265,6 +270,9 @@ async def _stream_anthropic_events_impl(
     try:
         async for raw in openai_stream:
             # The OpenAI adapter yields fully-formed SSE lines.
+            if raw and raw.startswith(_CONTENT_HASH_COMMENT):
+                yield raw  # job keys: the usage line's content hash, as an SSE comment
+                continue
             if not raw or not raw.startswith("data: "):
                 continue
             payload = raw[len("data: ") :].strip()
@@ -461,18 +469,28 @@ async def create_message(
     if resolved_key and not api_key:
         # x-api-key bypassed the Bearer dependency; apply the same key security
         # checks (IP allowlist, referrer domains, max_requests).
+        lease_sink = [] if request is not None and not job_lease_of(request) else None
         try:
             validate_api_key_security(
                 resolved_key,
                 client_ip=request.client.host if request and request.client else None,
                 referer=request.headers.get("referer") if request else None,
+                method=request.method if request else None,
+                path=request.url.path if request else None,
+                lease_sink=lease_sink,
             )
         except ApiKeyLookupUnavailable as e:
             raise _anthropic_error(
                 503, "api_error", "Authentication temporarily unavailable"
             ) from e
         except ValueError as e:
+            if JOB_BUSY in str(e):
+                raise _anthropic_error(429, "rate_limit_error", str(e)) from e
             raise _anthropic_error(401, "authentication_error", str(e)) from e
+        finally:
+            # Released by JobLeaseMiddleware when the response finishes.
+            if lease_sink:
+                request.state.job_lease = lease_sink[0]
 
     if not req.messages:
         raise _anthropic_error(400, "invalid_request_error", "messages must not be empty")
@@ -552,6 +570,10 @@ async def create_message(
         stop_sequences=req.stop_sequences,
     )
     anthropic_response["id"] = message_id
+    # Job keys only: the content fingerprint of this request's usage line.
+    content_hash = getattr(getattr(request, "state", None), "gatewayz_content_hash", None)
+    if content_hash:
+        return JSONResponse(content=anthropic_response, headers={CONTENT_HASH_HEADER: content_hash})
     return anthropic_response
 
 

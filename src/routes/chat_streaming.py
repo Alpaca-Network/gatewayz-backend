@@ -21,6 +21,7 @@ from src.db.chat_completion_requests import (  # noqa: F401
 from src.db.plans import enforce_plan_limits  # noqa: F401
 from src.handlers.post_processing import _process_stream_completion_background  # noqa: F401
 from src.routes.chat_helpers import _to_thread  # noqa: F401
+from src.services.job_usage import is_job_key_name
 from src.services.prometheus_metrics import track_time_to_first_chunk  # noqa: F401
 from src.services.stream_normalizer import (  # noqa: F401
     StreamNormalizer,
@@ -87,6 +88,7 @@ async def stream_generator(
     credit_deduction_success = False  # Track whether credits were actually deducted
     billing_scheduled = False  # Set once post-stream billing has been handed to a task
     client_cancelled = False  # CancelledError/GeneratorExit: client went away mid-stream
+    last_finish_reason = None  # the provider's real finish_reason, recorded at billing
     inner_stream = None
 
     # Initialize normalizer
@@ -160,6 +162,7 @@ async def stream_generator(
             # CRITICAL: Check for client disconnect to prevent zombie requests (499)
             if request and await request.is_disconnected():
                 logger.warning(f"[StreamGenerator] Client disconnected (request_id={request_id})")
+                last_finish_reason = "cancelled"
                 break
 
             # FREEZE FIX: Wall-clock deadline — abort if stream exceeds MAX_STREAM_DURATION.
@@ -235,6 +238,9 @@ async def stream_generator(
                 total_tokens = chunk.usage.total_tokens
 
             if normalized_chunk:
+                for _choice in normalized_chunk.choices or []:
+                    if isinstance(_choice, dict) and _choice.get("finish_reason"):
+                        last_finish_reason = _choice["finish_reason"]
                 yield normalized_chunk.to_sse()
             else:
                 # Only count as a real drop if it's not an Anthropic control event
@@ -411,12 +417,17 @@ async def stream_generator(
                 return
 
         # OPTIMIZATION: Send [DONE] immediately, process credits/logging in background!
-        # This makes the stream complete 100-200ms faster for the client
-        yield create_done_sse()
+        # This makes the stream complete 100-200ms faster for the client.
+        # Job keys (inference escrow) are the exception: their usage line must be
+        # stored before the client sees the end of the stream, or a client that
+        # closes the job straight away seals a record missing it.
+        job_key = is_job_key_name(user.get("key_name") if user else None)
+        if not job_key:
+            yield create_done_sse()
 
         # Schedule background processing (non-blocking)
         billing_scheduled = True
-        asyncio.create_task(
+        billing_task = asyncio.create_task(
             _process_stream_completion_background(
                 user=user,
                 api_key=api_key,
@@ -435,8 +446,14 @@ async def stream_generator(
                 request_id=request_id,
                 client_ip=client_ip,
                 api_key_id=api_key_id,
+                finish_reason=last_finish_reason,
             )
         )
+        if job_key:
+            # Shielded: a disconnect here must not drop the billing (billing_scheduled
+            # is already set, so the finally block will not bill it a second time).
+            await asyncio.shield(billing_task)
+            yield create_done_sse()
 
     except (asyncio.CancelledError, GeneratorExit):
         # Client disconnected / task cancelled. Not an Exception, so nothing below

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from src.routes.chat_helpers import validate_and_adjust_max_tokens
 from src.services.health_routing import (
@@ -24,9 +25,62 @@ from src.services.provider_failover import (
     enforce_model_failover_rules,
     filter_by_circuit_breaker,
 )
+from src.utils.request_timing import phase, record
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
+
+
+def catalog_gateway_for(model_id: str | None) -> str | None:
+    """The enabled provider our catalog lists `model_id` under, if any.
+
+    /v1/models is what we advertise, so a model it lists must route to the
+    provider it lists it under. Prefix guessing got this wrong for every
+    DeepInfra model (production 2026-10-27): bare ids like 'Qwen/Qwen3-...'
+    fell through to OpenRouter (dead key, not enabled) and
+    'openai/gpt-oss-120b' was sent to OpenAI, which does not serve it.
+    Matching is case-insensitive; a model listed under several providers keeps
+    the existing detection.
+    """
+    if not model_id:
+        return None
+    from src.services.models import get_cached_models
+    from src.utils.provider_filter import is_provider_enabled
+
+    want = model_id.split(":", 1)[0].lower()
+    found = {
+        g for g in _catalog_gateway_index(get_cached_models).get(want, ()) if is_provider_enabled(g)
+    }
+    return found.pop() if len(found) == 1 else None
+
+
+_CATALOG_INDEX_TTL_SECONDS = 60.0
+_catalog_index: tuple[float, dict[str, frozenset[str]]] | None = None
+
+
+def _catalog_gateway_index(get_cached_models) -> dict[str, frozenset[str]]:
+    """lower-cased model id -> gateways listing it, rebuilt at most once a minute.
+
+    Scanning the full catalog on every request cost ~100 ms (production
+    Server-Timing, 2026-10-27); the catalog itself only changes on sync.
+    """
+    import time
+
+    global _catalog_index
+    now = time.monotonic()
+    if _catalog_index is not None and now - _catalog_index[0] < _CATALOG_INDEX_TTL_SECONDS:
+        return _catalog_index[1]
+    index: dict[str, set[str]] = {}
+    for row in get_cached_models("all") or []:
+        if isinstance(row, dict):
+            gateway = str(row.get("source_gateway") or "").lower()
+            mid = str(row.get("id") or "").lower()
+            if gateway and mid:
+                index.setdefault(mid, set()).add(gateway)
+    frozen = {k: frozenset(v) for k, v in index.items()}
+    if frozen:  # never cache an empty (cold) catalog
+        _catalog_index = (now, frozen)
+    return frozen
 
 
 async def prepare_upstream_request(
@@ -108,7 +162,13 @@ async def prepare_upstream_request(
 
         # Use routed model for provider detection when code routing is active
         model_for_provider_detection = req.model if is_code_route and req.model else original_model
-        override_provider = detect_provider_from_model_id(model_for_provider_detection)
+        with phase("prep_catalog_route"):
+            catalog_provider = await asyncio.to_thread(
+                catalog_gateway_for, model_for_provider_detection
+            )
+        override_provider = catalog_provider or detect_provider_from_model_id(
+            model_for_provider_detection
+        )
         if override_provider:
             override_provider = override_provider.lower()
             if override_provider == "hug":
@@ -174,9 +234,21 @@ async def prepare_upstream_request(
         # This ensures that routing decisions are actually applied downstream
         effective_model = req.model if req.model else original_model
 
+        _t0 = time.perf_counter()
         provider_chain = build_provider_failover_chain(provider)
-        provider_chain = enforce_model_failover_rules(effective_model, provider_chain)
-        provider_chain = filter_by_circuit_breaker(effective_model, provider_chain)
+        if catalog_provider and provider == catalog_provider:
+            # The catalog chose the provider. The name-prefix rules (openai/* ->
+            # OpenAI or OpenRouter only) would drop it: 'openai/gpt-oss-120b' is a
+            # DeepInfra listing and failed as "No providers available" (2026-10-27).
+            # Keep the allowlist, which still has the last say.
+            from src.utils.provider_filter import filter_chain_by_model_allowlist
+
+            provider_chain = filter_chain_by_model_allowlist(effective_model, provider_chain)
+        else:
+            provider_chain = enforce_model_failover_rules(effective_model, provider_chain)
+        record("prep_chain", (time.perf_counter() - _t0) * 1000)
+        with phase("prep_circuit_breaker"):
+            provider_chain = filter_by_circuit_breaker(effective_model, provider_chain)
 
         # Gatewayz One Phase 2 — smart-router reordering (flag-gated, off by default).
         # Reorders the chain by the policy-based router using the Phase 1 offers
@@ -194,6 +266,7 @@ async def prepare_upstream_request(
 
         # HEALTH FIX #1094: Check model health and reorder provider chain to prioritize healthy providers
         # This proactively routes requests away from unhealthy models BEFORE they fail
+        _t0 = time.perf_counter()
         if should_use_health_based_routing() and provider_chain:
             primary_provider = provider_chain[0]
             is_healthy, health_error = is_model_healthy(effective_model, primary_provider)
@@ -232,6 +305,13 @@ async def prepare_upstream_request(
                 logger.debug(
                     f"✓ Health check passed for model '{effective_model}' on '{primary_provider}'"
                 )
+
+        record("prep_health", (time.perf_counter() - _t0) * 1000)
+        # Health routing above can add a provider after the allowlist was applied
+        # in enforce_model_failover_rules; apply it once more so it has the last say.
+        from src.utils.provider_filter import filter_chain_by_model_allowlist
+
+        provider_chain = filter_chain_by_model_allowlist(effective_model, provider_chain)
 
         model = effective_model
 

@@ -8,6 +8,7 @@ from src.db.api_keys import increment_api_key_usage
 from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.db.chat_history import get_chat_session, save_chat_message
 from src.db.plans import enforce_plan_limits
+from src.services.job_usage import record_job_usage
 from src.services.key_purpose import suppress_request_logging
 from src.services.passive_health_monitor import capture_model_health
 from src.services.pricing import calculate_cost_async
@@ -240,6 +241,7 @@ async def _process_stream_completion_background(
     client_ip=None,
     api_key_id=None,
     cancelled=False,
+    finish_reason=None,
 ):
     """
     Background task for post-stream processing (100-200ms faster [DONE] event!)
@@ -248,7 +250,14 @@ async def _process_stream_completion_background(
     event to be sent immediately without waiting for database operations.
 
     For anonymous users, only metrics recording is performed (no credits, usage tracking, or history).
+
+    ``finish_reason`` is the stream's last one (``"cancelled"`` when the client
+    aborted). Recorded as given: a reply cut off by max_tokens is ``length``,
+    which a cost dispute must be able to tell apart from a provider failure.
     """
+    if cancelled:
+        finish_reason = "cancelled"
+    finish_reason = finish_reason or "unknown"
     try:
         # Add distributed tracing for streaming completion
         async with AITracer.trace_inference(
@@ -271,7 +280,7 @@ async def _process_stream_completion_background(
             # Set response model (for streaming, use requested model as we don't capture response model)
             trace_ctx.set_response_model(
                 response_model=model,
-                finish_reason="stop",  # Streaming completed successfully
+                finish_reason=finish_reason,
             )
 
             # Set user info if authenticated
@@ -352,6 +361,20 @@ async def _process_stream_completion_background(
                 # NOTE: Credit deduction failed, so no credits were taken.
                 # No refund needed here - the reconciliation log handles this case.
 
+            # Inference-escrow usage line; a no-op unless this is a job-scoped key.
+            await _to_thread(
+                record_job_usage,
+                user,
+                model,
+                provider,
+                prompt_tokens,
+                completion_tokens,
+                cost,
+                request_id or "",
+                request_id=request_id,
+                finish_reason=finish_reason,
+            )
+
             # Increment API key usage counter
             await _to_thread(increment_api_key_usage, api_key)
 
@@ -379,7 +402,7 @@ async def _process_stream_completion_background(
                     tokens=total_tokens,
                     cost=cost,
                     speed=speed,
-                    finish_reason="stop",
+                    finish_reason=finish_reason,
                     app="API",
                     metadata={
                         "prompt_tokens": prompt_tokens,

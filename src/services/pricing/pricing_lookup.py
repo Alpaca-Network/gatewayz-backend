@@ -197,6 +197,14 @@ def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
             raw_pricing = gateway_pricing[model_id]
 
         if raw_pricing is None:
+            # Catalog ids can carry the upstream namespace inside the provider
+            # prefix ("groq/openai/gpt-oss-120b") while the JSON is keyed without
+            # it ("groq/gpt-oss-120b"). Exact match stays first.
+            parts = model_id_lower.split("/")
+            if len(parts) == 3:
+                raw_pricing = gateway_pricing.get(f"{parts[0]}/{parts[2]}")
+
+        if raw_pricing is None:
             return None
 
         # Normalize pricing based on provider format
@@ -563,6 +571,26 @@ def _get_cross_reference_pricing(
         return None
 
 
+def _is_all_zero_price(prompt: Any, completion: Any) -> bool:
+    """True when both prices are missing or zero.
+
+    The sync writes a 0/0 row for providers whose API publishes no prices (Groq,
+    for one). Treating that row as a real price stops the lookup before the
+    manual JSON and cross-reference tiers, so the model shows $0 and fails the
+    servability gate. Genuinely free models are the ``:free`` ones, which
+    callers exempt before asking.
+    """
+    for value in (prompt, completion):
+        if value is None or value == "":
+            continue
+        try:
+            if float(value) != 0.0:
+                return False
+        except (ValueError, TypeError):
+            return False
+    return True
+
+
 def _resolve_pricing_from_db(
     model_id: str,
     candidate_ids: set[str] | None = None,
@@ -627,7 +655,14 @@ def _resolve_pricing_from_db(
                         prompt_price = pricing_data.get("price_per_input_token")
                         completion_price = pricing_data.get("price_per_output_token")
 
-                        if prompt_price is not None and completion_price is not None:
+                        if (
+                            prompt_price is not None
+                            and completion_price is not None
+                            and (
+                                not _is_all_zero_price(prompt_price, completion_price)
+                                or candidate.endswith(":free")
+                            )
+                        ):
                             logger.debug(
                                 "[DB] Pricing for %s via %s=%s (model_pricing table)",
                                 model_id,
@@ -652,7 +687,14 @@ def _resolve_pricing_from_db(
                         prompt_price = pricing_raw.get("prompt")
                         completion_price = pricing_raw.get("completion")
 
-                        if prompt_price is not None and completion_price is not None:
+                        if (
+                            prompt_price is not None
+                            and completion_price is not None
+                            and (
+                                not _is_all_zero_price(prompt_price, completion_price)
+                                or candidate.endswith(":free")
+                            )
+                        ):
                             logger.debug(
                                 "[DB] Pricing for %s via %s=%s (metadata.pricing_raw)",
                                 model_id,
@@ -743,7 +785,12 @@ def get_all_pricing_batch() -> dict[str, dict]:
             if (
                 mp
                 and isinstance(mp, dict)
-                and (mp.get("price_per_input_token") or mp.get("price_per_output_token"))
+                and (
+                    not _is_all_zero_price(
+                        mp.get("price_per_input_token"), mp.get("price_per_output_token")
+                    )
+                    or key.endswith(":free")
+                )
             ):
                 pricing_map[key] = {
                     "prompt": validate_pricing_value(
@@ -762,9 +809,18 @@ def get_all_pricing_batch() -> dict[str, dict]:
             metadata = row.get("metadata") or {}
             if isinstance(metadata, dict):
                 pricing_raw = metadata.get("pricing_raw") or metadata.get("pricing") or {}
-                if isinstance(pricing_raw, dict) and (
-                    pricing_raw.get("prompt") is not None
-                    or pricing_raw.get("completion") is not None
+                if (
+                    isinstance(pricing_raw, dict)
+                    and (
+                        pricing_raw.get("prompt") is not None
+                        or pricing_raw.get("completion") is not None
+                    )
+                    and (
+                        not _is_all_zero_price(
+                            pricing_raw.get("prompt"), pricing_raw.get("completion")
+                        )
+                        or key.endswith(":free")
+                    )
                 ):
                     pricing_map[key] = {
                         "prompt": validate_pricing_value(

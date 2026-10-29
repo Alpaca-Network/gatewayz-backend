@@ -52,7 +52,7 @@ from typing import Any
 
 from src.config.config import Config
 from src.db.holdings import list_enabled_tokens, record_snapshot, record_sweep
-from src.db.user_wallets import list_all_wallets
+from src.db.user_wallets import is_evm_wallet, list_all_wallets
 from src.services.holdings.chains import BalanceReading, TokenRef, read_balances
 from src.services.holdings.prices import get_usd_prices
 
@@ -163,6 +163,9 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
         "sweep_write_failed": 0,
         "error": 0,
     }
+    # chain id -> wallets whose read failed on it. Chain ids only, never
+    # addresses: this summary feeds the ops page and the ops alert.
+    failed_chains: dict[int, int] = {}
     considered = 0
     sweeps_recorded = 0
     wallets_recorded = 0
@@ -173,6 +176,10 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
     for wallet_row in list_all_wallets():
         address = str(wallet_row.get("wallet_address") or "")
         if not address:
+            continue
+        # EVM balances only. A Cardano stake address (delegated staking) is
+        # not readable here and must not be counted as a failed read.
+        if not is_evm_wallet(wallet_row):
             continue
 
         age_ok = _wallet_age_ok(wallet_row.get("created_at"), started, min_age_days)
@@ -199,6 +206,8 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
 
         if not result.is_complete:
             skipped["incomplete_read"] += 1
+            for chain_id in result.failed_chain_ids:
+                failed_chains[chain_id] = failed_chains.get(chain_id, 0) + 1
             logger.warning(
                 "holdings_snapshots: skipping %s -- chains %s could not be read, "
                 "a partial total would underpay",
@@ -291,5 +300,6 @@ def run_holdings_snapshots_once(now: datetime | None = None) -> dict[str, Any]:
         "rows_recorded": rows_recorded,
         "rows_failed": rows_failed,
         "skipped": skipped,
+        "failed_chains": {str(chain_id): n for chain_id, n in sorted(failed_chains.items())},
         "duration": duration_seconds,
     }

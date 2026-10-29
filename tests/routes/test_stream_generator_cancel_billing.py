@@ -90,3 +90,45 @@ async def test_normal_completion_schedules_billing_exactly_once():
 
     assert len(calls) == 1
     assert not calls[0].get("cancelled")
+
+
+@pytest.mark.asyncio
+async def test_job_key_stream_is_billed_before_done():
+    """A job key's usage line must be stored before [DONE] reaches the client, or a
+    client that closes the job straight away seals a record missing it (Codex P1
+    on gatewayz-backend#2382). Ordinary keys keep [DONE]-first."""
+    events = []
+
+    async def fake_bg(**kwargs):
+        await asyncio.sleep(0.01)
+        events.append("billed")
+
+    async def run(user):
+        events.clear()
+        with (
+            patch.object(chat_streaming, "_process_stream_completion_background", fake_bg),
+            patch.object(chat_streaming, "enforce_plan_limits", lambda *a, **k: {"allowed": True}),
+        ):
+            agen = chat_streaming.stream_generator(
+                stream=_provider(),
+                user=user,
+                api_key="gw_key",
+                model="gpt-4o",
+                trial={"is_trial": False},
+                environment_tag="live",
+                session_id=None,
+                messages=[{"role": "user", "content": "hello there"}],
+                provider="openai",
+                is_async_stream=True,
+                request_id="req-1",
+                api_key_id=3,
+            )
+            async for chunk in agen:
+                if "[DONE]" in str(chunk):
+                    events.append("done")
+            await asyncio.sleep(0.05)
+            await _drain()
+        return list(events)
+
+    assert await run({"id": 7, "key_name": "job:0x" + "cd" * 32}) == ["billed", "done"]
+    assert await run({"id": 7, "key_name": "prod"}) == ["done", "billed"]

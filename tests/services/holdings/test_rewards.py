@@ -16,6 +16,7 @@ from decimal import Decimal
 import pytest
 
 import src.services.holdings.rewards as rewards
+from src.db.credit_transactions import reward_request_uuid
 from src.services.holdings.rewards import HoldingsSnapshotsMissingError
 
 DAY = date(2026, 9, 14)
@@ -407,7 +408,7 @@ class TestPayoutAndIdempotency:
         db.link(W1, 7)
         rewards.run_holdings_rewards_once(DAY)
         call = db.credit_calls[0]
-        assert call["request_id"] == f"holdings_reward:{W1}:{DAY_STR}"
+        assert call["request_id"] == reward_request_uuid(f"holdings_reward:{W1}:{DAY_STR}")
         assert call["transaction_type"] == "holdings_reward"
         assert db.accruals[(W1, DAY_STR)]["ledger_request_id"] == call["request_id"]
 

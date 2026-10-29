@@ -8,11 +8,17 @@ to bypass rate limiting (even during velocity mode).
 
 import ipaddress
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from src.config.supabase_config import get_supabase_client
+
+# Global (user_id IS NULL) active entries, as fetched: {"entries": (rows, monotonic_ts)}.
+# Cleared by create/update/delete; expires_at is re-checked at match time.
+_global_entries_cache: dict[str, tuple[list[dict[str, Any]], float]] = {}
+_GLOBAL_ENTRIES_TTL = 60.0
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +45,7 @@ def create_whitelist_entry(
     Returns:
         Created whitelist entry or None if failed
     """
+    _global_entries_cache.clear()
     try:
         # Validate IP address or CIDR range
         try:
@@ -91,6 +98,7 @@ def delete_whitelist_entry(entry_id: str | UUID) -> bool:
     Returns:
         True if deleted successfully, False otherwise
     """
+    _global_entries_cache.clear()
     try:
         supabase = get_supabase_client()
 
@@ -130,6 +138,7 @@ def update_whitelist_entry(
     Returns:
         Updated entry or None if failed
     """
+    _global_entries_cache.clear()
     try:
         supabase = get_supabase_client()
 
@@ -186,6 +195,13 @@ def is_ip_whitelisted(ip_address: str, user_id: str | UUID | None = None) -> boo
             logger.error(f"Invalid IP address '{ip_address}': {e}")
             return False
 
+        # The security middleware asks for the global list on every request;
+        # serve it from a short in-process cache instead of a query each time.
+        if not user_id:
+            cached = _global_entries_cache.get("entries")
+            if cached is not None and time.monotonic() - cached[1] < _GLOBAL_ENTRIES_TTL:
+                return _matches_any(ip_obj, ip_address, cached[0])
+
         # Get all active whitelist entries (both global and user-specific)
         now = datetime.now(UTC).isoformat()
 
@@ -204,29 +220,36 @@ def is_ip_whitelisted(ip_address: str, user_id: str | UUID | None = None) -> boo
             query = query.is_("user_id", "null")
 
         result = query.execute()
+        entries = result.data or []
+        if not user_id:
+            _global_entries_cache["entries"] = (entries, time.monotonic())
 
-        if not result.data:
-            return False
-
-        # Check if IP matches any whitelist entry (exact match or CIDR range)
-        for entry in result.data:
-            try:
-                entry_network = ipaddress.ip_network(entry["ip_address"], strict=False)
-                if ip_obj in entry_network:
-                    logger.info(
-                        f"IP {ip_address} matches whitelist entry: "
-                        f"{entry['ip_address']} (reason: {entry['reason']})"
-                    )
-                    return True
-            except ValueError:
-                logger.warning(f"Invalid IP network in whitelist: {entry['ip_address']}")
-                continue
-
-        return False
+        return _matches_any(ip_obj, ip_address, entries)
 
     except Exception as e:
         logger.error(f"Error checking IP whitelist for {ip_address}: {e}")
         return False
+
+
+def _matches_any(ip_obj, ip_address: str, entries: list[dict[str, Any]]) -> bool:
+    """True if the IP matches any whitelist entry (exact match or CIDR range)."""
+    now = datetime.now(UTC)
+    for entry in entries:
+        try:
+            expires_at = entry.get("expires_at")
+            if expires_at and datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")) < now:
+                continue
+            entry_network = ipaddress.ip_network(entry["ip_address"], strict=False)
+            if ip_obj in entry_network:
+                logger.info(
+                    f"IP {ip_address} matches whitelist entry: "
+                    f"{entry['ip_address']} (reason: {entry.get('reason')})"
+                )
+                return True
+        except ValueError:
+            logger.warning(f"Invalid IP network in whitelist: {entry['ip_address']}")
+            continue
+    return False
 
 
 def get_whitelist_entries(

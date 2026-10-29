@@ -559,6 +559,16 @@ cache_misses = get_or_create_metric(
 )
 
 # ==================== Stream Normalization Metrics ====================
+# Where a billed request's token counts came from: the provider's usage block, or
+# the len/4 fallback estimate. The estimate share is the number to watch: before
+# the stream-usage fix (#2417) most authenticated streams billed on it.
+billing_usage_source = get_or_create_metric(
+    Counter,
+    "billing_usage_source_total",
+    "Billed requests by where their token counts came from",
+    ["provider", "path", "source"],
+)
+
 stream_chunks_dropped = get_or_create_metric(
     Counter,
     "stream_chunks_dropped_total",

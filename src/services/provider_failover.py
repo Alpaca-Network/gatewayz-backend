@@ -169,6 +169,22 @@ def enforce_model_failover_rules(
     provider_chain: list[str],
     allow_payment_failover: bool = False,
 ) -> list[str]:
+    """Apply the per-model provider rules below, then PROVIDER_MODEL_ALLOWLIST.
+
+    A provider whose allowlist does not name the model is dropped, so it can
+    neither be the primary nor be entered on failover.
+    """
+    from src.utils.provider_filter import filter_chain_by_model_allowlist
+
+    chain = _apply_model_failover_rules(model_id, provider_chain, allow_payment_failover)
+    return filter_chain_by_model_allowlist(model_id, chain)
+
+
+def _apply_model_failover_rules(
+    model_id: str | None,
+    provider_chain: list[str],
+    allow_payment_failover: bool = False,
+) -> list[str]:
     """
     Restrict the provider chain when a model is provider-specific.
 
