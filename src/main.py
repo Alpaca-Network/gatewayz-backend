@@ -503,6 +503,8 @@ def create_app() -> FastAPI:
         ("price_sheets", "Price Sheets"),
         # Opt-in, encrypted, 72 h dispute content vault for job usage lines.
         ("dispute_content", "Dispute Content Vault"),
+        ("verify", "Gatewayz Verify (GenLayer)"),
+        ("webhooks", "Outbound Webhooks"),
     ]
 
     # Define non-v1 routes (loaded directly on app without prefix)
