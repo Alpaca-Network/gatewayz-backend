@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "gatewayz-backend"
 version = "2.0.3"
 description = "Gatewayz Universal Inference API"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     # Core web framework
     "fastapi==0.104.1",
