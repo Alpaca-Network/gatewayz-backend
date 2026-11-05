@@ -38,7 +38,7 @@ class UpdateHoldingsRatesRequest(BaseModel):
 
 class CreateHoldingsTokenRequest(BaseModel):
     """Register one asset. `contract_address` is omitted (or null) for a
-    chain's native coin -- ETH, BNB, POL, AVAX."""
+    chain's native coin -- ETH, BNB, POL."""
 
     chain_id: int = Field(..., ge=1)
     contract_address: str | None = None

@@ -4,12 +4,16 @@ inclusion proofs, and the superadmin manual run."""
 from unittest.mock import patch
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.main import app
+from src.routes.usage_anchors import router
 from src.security.deps import get_current_user, require_superadmin
 from src.services.chain.usage_anchor import ProofNotAvailableError, ProofNotFoundError
 
+# The routes are not mounted in src.main, so test them on their own app.
+app = FastAPI()
+app.include_router(router)
 client = TestClient(app)
 
 CONTRACT = "0x00000000000000000000000000000000000000aa"
