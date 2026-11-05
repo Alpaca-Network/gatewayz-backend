@@ -147,7 +147,7 @@ class TokenRef:
     Attributes:
         chain_id: EVM chain id the token lives on.
         contract_address: ERC-20 contract address, or ``None`` for the chain's
-            native coin (ETH, BNB, POL, AVAX, ...).
+            native coin (ETH, BNB, POL, ...).
         decimals: Token decimals, used by the caller to scale ``raw_amount``.
             This module never scales -- integers only, no float drift.
         symbol: Display symbol, for logs and the user-facing breakdown.
