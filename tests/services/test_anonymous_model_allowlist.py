@@ -81,12 +81,15 @@ def test_allowed_models_sample_never_advertises_the_hardcoded_fallback():
 def test_restricted_message_without_free_models_points_to_signup():
     from src.services.anonymous_rate_limiter import SIGNUP_URL, validate_anonymous_request
 
-    with patch(
-        "src.services.model_capabilities_cache.get_servable_free_models",
-        return_value=set(),
-    ), patch(
-        "src.services.anonymous_rate_limiter.is_model_allowed_for_anonymous",
-        return_value=False,
+    with (
+        patch(
+            "src.services.model_capabilities_cache.get_servable_free_models",
+            return_value=set(),
+        ),
+        patch(
+            "src.services.anonymous_rate_limiter.is_model_allowed_for_anonymous",
+            return_value=False,
+        ),
     ):
         result = validate_anonymous_request("1.2.3.4", "openai/gpt-5")
     assert result["allowed"] is False
@@ -98,13 +101,27 @@ def test_loader_drops_free_rows_of_a_disabled_provider():
     import src.services.cache.model_capabilities_cache as cache
 
     rows = [
-        {"provider_model_id": "unsloth/gemma-2-9b-it", "is_free": True, "providers": {"slug": "chutes"}},
-        {"provider_model_id": "groq/openai/gpt-oss-20b", "is_free": True, "providers": {"slug": "groq"}},
-        {"provider_model_id": "openai/gpt-5", "is_free": False, "providers": {"slug": "openai"}},
+        {
+            "provider_model_id": "unsloth/gemma-2-9b-it",
+            "is_free": True,
+            "providers": {"slug": "chutes"},
+        },
+        {
+            "provider_model_id": "groq/openai/gpt-oss-20b",
+            "is_free": True,
+            "providers": {"slug": "groq"},
+        },
+        {
+            "provider_model_id": "openai/gpt-5",
+            "is_free": False,
+            "providers": {"slug": "openai"},
+        },
     ]
-    with patch("src.db.model_capabilities_db.get_all_model_capability_flags", return_value=rows), patch(
-        "src.db.model_capabilities_db.get_all_quality_scores", return_value=[]
-    ), patch("src.utils.provider_filter.is_provider_enabled", side_effect=lambda s: s != "chutes"):
+    with (
+        patch("src.db.model_capabilities_db.get_all_model_capability_flags", return_value=rows),
+        patch("src.db.model_capabilities_db.get_all_quality_scores", return_value=[]),
+        patch("src.utils.provider_filter.is_provider_enabled", side_effect=lambda s: s != "chutes"),
+    ):
         cache.load_model_capabilities_cache(force=True)
         assert cache.get_servable_free_models() == {"groq/openai/gpt-oss-20b"}
         assert cache.is_free_model("unsloth/gemma-2-9b-it") is False
