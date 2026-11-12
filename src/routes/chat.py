@@ -23,10 +23,12 @@ from src.security.identity import (
 )
 from src.services.anonymous_rate_limiter import (
     ANONYMOUS_DAILY_LIMIT,
-    clamp_anonymous_max_tokens,
+    ANONYMOUS_MAX_INPUT_TOKENS,
     drop_null_message_fields,
     get_anonymous_allowed_models_sample,
     get_anonymous_rate_limit_headers,
+    harden_anonymous_request,
+    log_client_ip_headers,
     reserve_anonymous_request,
     validate_anonymous_request,
 )
@@ -119,9 +121,11 @@ def resolve_anonymous_client_ip(request: Request | None) -> str:
     if request is None:
         return "unknown"
     try:
-        return get_client_ip(request) or "unknown"
+        ip = get_client_ip(request) or "unknown"
     except Exception:
         return "unknown"
+    log_client_ip_headers(request, ip)
+    return ip
 
 
 # Backwards compatibility wrappers for test patches
@@ -575,8 +579,9 @@ async def chat_completions(
                         ),
                     )
 
-                # Keyless trial: bound what one anonymous request can cost.
-                req.max_tokens = clamp_anonymous_max_tokens(req.max_tokens)
+                # Keyless trial: bound what one anonymous request can cost and
+                # strip options a keyless caller may not use.
+                harden_anonymous_request(req)
 
                 user = None
                 api_key_id = None
@@ -801,6 +806,21 @@ async def chat_completions(
                 # Keyed requests are normalized by OpenAIChatAdapter; keyless ones
                 # are not, and providers such as Groq reject null fields.
                 messages = drop_null_message_fields(messages)
+                if estimate_message_tokens(messages, None) > ANONYMOUS_MAX_INPUT_TOKENS:
+                    raise HTTPException(
+                        status_code=413,
+                        detail={
+                            "error": {
+                                "message": (
+                                    "Keyless trial prompts are limited to about "
+                                    f"{ANONYMOUS_MAX_INPUT_TOKENS} tokens. Create a key at "
+                                    "https://www.gatewayz.ai/start for larger requests."
+                                ),
+                                "type": "request_too_large",
+                                "code": "anonymous_input_too_large",
+                            }
+                        },
+                    )
 
         # === 2.1) Inject conversation history if session_id provided ===
         messages, session_id = await inject_conversation_history(
@@ -814,7 +834,7 @@ async def chat_completions(
         auto_web_search = getattr(req, "auto_web_search", "auto")
         # Validator keys: auto web search would rewrite the prompt (injected
         # system message) and send it to a search vendor. Never for them.
-        if is_validator_key(user):
+        if is_validator_key(user) or is_anonymous:
             auto_web_search = False
         web_search_threshold = getattr(req, "web_search_threshold", None)
         if web_search_threshold is None:

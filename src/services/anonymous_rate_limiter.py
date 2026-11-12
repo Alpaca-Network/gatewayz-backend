@@ -19,6 +19,7 @@ Security Design:
 """
 
 import hashlib
+import ipaddress
 import logging
 import os
 import time
@@ -45,6 +46,12 @@ ANONYMOUS_TRIAL_MODELS: tuple[str, ...] = tuple(
 )
 # gpt-oss spends part of the output budget on reasoning; 1024 leaves room for an answer.
 ANONYMOUS_MAX_OUTPUT_TOKENS = 1024
+# Keyless prompts are a trial, not a free bulk API: reject large inputs.
+ANONYMOUS_MAX_INPUT_TOKENS = 4000
+# Ceiling on ALL keyless requests per day, whatever the IP: rotating IPs or an
+# IPv6 block must not turn the trial into unlimited free inference.
+ANONYMOUS_GLOBAL_DAILY_LIMIT = int(os.environ.get("ANONYMOUS_GLOBAL_DAILY_LIMIT", "2000"))
+_GLOBAL_BUCKET = "__all_anonymous__"
 ANONYMOUS_DAILY_LIMIT = 3  # Maximum requests per day per IP
 # Hardcoded fallback free model list — used only when DB cache is unavailable.
 # The authoritative source is the models table (is_free=true column).
@@ -78,9 +85,26 @@ def _get_redis_client():
         return None
 
 
+def _bucket_ip(ip_address: str) -> str:
+    """One bucket per IPv4 address, one per IPv6 /64.
+
+    A single IPv6 customer usually holds a whole /64 (2^64 addresses), so keying
+    on the exact address let one machine rotate through unlimited buckets.
+    """
+    try:
+        addr = ipaddress.ip_address(ip_address.strip())
+    except (ValueError, AttributeError):
+        return ip_address
+    if addr.version == 6:
+        if addr.ipv4_mapped is not None:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False).network_address) + "/64"
+    return str(addr)
+
+
 def _hash_ip(ip_address: str) -> str:
     """Hash IP address for privacy-preserving storage."""
-    return hashlib.sha256(f"anon_rate:{ip_address}".encode()).hexdigest()[:32]
+    return hashlib.sha256(f"anon_rate:{_bucket_ip(ip_address)}".encode()).hexdigest()[:32]
 
 
 def _get_today_key() -> str:
@@ -147,6 +171,53 @@ def drop_null_message_fields(messages: list[dict[str, Any]]) -> list[dict[str, A
             m = {k: v for k, v in m.items() if v is not None or k == "content"}
         cleaned.append(m)
     return cleaned
+
+
+def harden_anonymous_request(req: Any) -> None:
+    """Strip request options a keyless caller may not use (mutates ``req``).
+
+    Output is capped; one completion only; no tools (Groq's built-in tools such
+    as browser_search are billed separately); no provider override (it builds a
+    failover chain to other vendors); no web search (a paid vendor call that
+    would also forward the visitor's prompt).
+    """
+    req.max_tokens = clamp_anonymous_max_tokens(getattr(req, "max_tokens", None))
+    for field, value in (
+        ("n", 1),
+        ("tools", None),
+        ("tool_choice", None),
+        ("provider", None),
+        ("auto_web_search", False),
+    ):
+        if hasattr(req, field):
+            setattr(req, field, value)
+
+
+_ip_diag_logged = 0
+
+
+def log_client_ip_headers(request: Any, resolved_ip: str) -> None:
+    """Log the forwarding headers of the first few anonymous requests per process.
+
+    Diagnostic for choosing TRUSTED_CLIENT_IP_HEADER: on 2026-11-12 the
+    rightmost X-Forwarded-For entry turned out to be a Railway edge address
+    (152.233.47.x), so every keyless visitor on that edge shared one quota.
+    """
+    global _ip_diag_logged
+    if _ip_diag_logged >= 20 or request is None:
+        return
+    _ip_diag_logged += 1
+    try:
+        headers = request.headers
+        logger.info(
+            "anon-ip-diag resolved=%s x-real-ip=%s x-forwarded-for=%s peer=%s",
+            resolved_ip,
+            headers.get("x-real-ip"),
+            headers.get("x-forwarded-for"),
+            request.client.host if getattr(request, "client", None) else None,
+        )
+    except Exception:
+        pass
 
 
 def clamp_anonymous_max_tokens(requested: int | None) -> int:
@@ -363,6 +434,19 @@ def reserve_anonymous_request(ip_address: str, model_id: str = "") -> dict[str, 
 
     Returns dict with ``allowed``, ``remaining``, ``limit``, ``count``, ``reason``.
     """
+    global_count = increment_anonymous_usage(_GLOBAL_BUCKET)
+    if global_count > ANONYMOUS_GLOBAL_DAILY_LIMIT:
+        logger.warning("Anonymous global daily cap reached (%d)", ANONYMOUS_GLOBAL_DAILY_LIMIT)
+        return {
+            "allowed": False,
+            "remaining": 0,
+            "limit": ANONYMOUS_DAILY_LIMIT,
+            "count": global_count,
+            "reason": (
+                "The keyless trial is at capacity for today. Create a key at "
+                f"{SIGNUP_URL} to keep going."
+            ),
+        }
     new_count = increment_anonymous_usage(ip_address)
     if new_count > ANONYMOUS_DAILY_LIMIT:
         return {

@@ -185,3 +185,48 @@ def test_null_message_fields_are_dropped_but_content_kept():
     out = drop_null_message_fields(msgs)
     assert out[0] == {"role": "user", "content": "hi"}
     assert out[1] == {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]}
+
+
+def test_harden_strips_keyless_only_options():
+    from types import SimpleNamespace
+
+    from src.services.anonymous_rate_limiter import (
+        ANONYMOUS_MAX_OUTPUT_TOKENS,
+        harden_anonymous_request,
+    )
+
+    req = SimpleNamespace(
+        max_tokens=100_000,
+        n=128,
+        tools=[{"type": "browser_search"}],
+        tool_choice="auto",
+        provider="openai",
+        auto_web_search=True,
+    )
+    harden_anonymous_request(req)
+    assert req.max_tokens == ANONYMOUS_MAX_OUTPUT_TOKENS
+    assert req.n == 1
+    assert req.tools is None and req.tool_choice is None
+    assert req.provider is None
+    assert req.auto_web_search is False
+
+
+def test_ipv6_addresses_in_one_slash64_share_a_bucket():
+    from src.services.anonymous_rate_limiter import _hash_ip
+
+    assert _hash_ip("2001:db8:1:2::1") == _hash_ip("2001:db8:1:2:ffff:ffff:ffff:ffff")
+    assert _hash_ip("2001:db8:1:2::1") != _hash_ip("2001:db8:1:3::1")
+    assert _hash_ip("203.0.113.1") != _hash_ip("203.0.113.2")
+
+
+def test_global_daily_cap_stops_ip_rotation():
+    import src.services.anonymous_rate_limiter as rl
+
+    rl._anonymous_usage_cache.clear()
+    with (
+        patch.object(rl, "_get_redis_client", return_value=None),
+        patch.object(rl, "ANONYMOUS_GLOBAL_DAILY_LIMIT", 5),
+    ):
+        results = [rl.reserve_anonymous_request(f"198.51.100.{i}") for i in range(7)]
+    rl._anonymous_usage_cache.clear()
+    assert [r["allowed"] for r in results] == [True] * 5 + [False] * 2
