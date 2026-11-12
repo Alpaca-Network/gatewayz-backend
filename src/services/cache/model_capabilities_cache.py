@@ -113,6 +113,12 @@ _is_reasoning: set[str] = set()
 # provider_model_id (lowercase) → True for free models
 _free_models: set[str] = set()
 
+# Free models read from the DB whose provider is enabled — never the hardcoded
+# fallback. Empty when the DB has none (or could not be read). This is what we
+# may ADVERTISE to anonymous callers: the fallback names OpenRouter ``:free``
+# models that are not routable when OpenRouter is not an enabled provider.
+_servable_free_models: set[str] = set()
+
 # provider_model_id (lowercase) → latency tier (1-4)
 _latency_tier: dict[str, int] = {}
 
@@ -123,6 +129,26 @@ _cache_loaded: bool = False
 _cache_loaded_at: float = 0.0
 _CACHE_TTL: float = 900.0  # 15 minutes
 _refresh_in_progress: bool = False
+
+
+def _provider_enabled_for_row(row: dict) -> bool:
+    """True unless the row's provider is known and disabled by ENABLED_PROVIDERS.
+
+    A free row from a provider we no longer route to (e.g. stale ``chutes`` rows,
+    last seen 2026-04) must not count as free: a caller who picks it ends up on
+    the aggregator fallback and gets an upstream credential error instead of an
+    answer. Rows without provider info keep the old behaviour.
+    """
+    provider = row.get("providers")
+    slug = provider.get("slug") if isinstance(provider, dict) else None
+    if not slug:
+        return True
+    try:
+        from src.utils.provider_filter import is_provider_enabled
+
+        return is_provider_enabled(slug)
+    except Exception:
+        return True
 
 
 # ── Public loaders ────────────────────────────────────────────────────────────
@@ -138,7 +164,7 @@ def load_model_capabilities_cache(force: bool = False) -> None:
     When the DB is unavailable, hardcoded fallbacks are used so the service
     remains functional.
     """
-    global _max_tokens, _has_json_mode, _is_reasoning, _free_models
+    global _max_tokens, _has_json_mode, _is_reasoning, _free_models, _servable_free_models
     global _latency_tier, _quality_priors, _cache_loaded, _cache_loaded_at
 
     now = time.monotonic()
@@ -177,7 +203,7 @@ def load_model_capabilities_cache(force: bool = False) -> None:
                 new_has_json_mode.add(model_id)
             if row.get("is_reasoning"):
                 new_is_reasoning.add(model_id)
-            if row.get("is_free"):
+            if row.get("is_free") and _provider_enabled_for_row(row):
                 new_free_models.add(model_id)
             if row.get("latency_tier") is not None:
                 new_latency_tier[model_id] = int(row["latency_tier"])
@@ -201,6 +227,7 @@ def load_model_capabilities_cache(force: bool = False) -> None:
             _has_json_mode = new_has_json_mode
             _is_reasoning = new_is_reasoning
             _free_models = new_free_models if new_free_models else _FREE_MODELS_FALLBACK.copy()
+            _servable_free_models = new_free_models
             _latency_tier = new_latency_tier
             _quality_priors = new_quality_priors
             _cache_loaded = True
@@ -333,6 +360,16 @@ def get_free_models() -> set[str]:
     """Return a snapshot copy of model IDs that are free (is_free=true)."""
     _ensure_loaded()
     return _free_models.copy() if _free_models else _FREE_MODELS_FALLBACK.copy()
+
+
+def get_servable_free_models() -> set[str]:
+    """Free models from the DB on an enabled provider — never the hardcoded fallback.
+
+    Use this to TELL a caller which models are free (error messages, docs);
+    ``get_free_models()``/``is_free_model()`` stay the permissive gate.
+    """
+    _ensure_loaded()
+    return _servable_free_models.copy()
 
 
 def is_free_model(model_id: str) -> bool:
