@@ -27,6 +27,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Configuration
+SIGNUP_URL = "https://www.gatewayz.ai/start"
 ANONYMOUS_DAILY_LIMIT = 3  # Maximum requests per day per IP
 # Hardcoded fallback free model list — used only when DB cache is unavailable.
 # The authoritative source is the models table (is_free=true column).
@@ -92,21 +93,19 @@ def _cleanup_memory_cache():
 
 
 def get_anonymous_allowed_models_sample(n: int = 5) -> list[str]:
-    """A sample of models currently usable by anonymous users, for error messages.
+    """A sample of models anonymous users can actually call, for error messages.
 
-    Prefers the real, DB-verified free catalog over ANONYMOUS_ALLOWED_MODELS,
-    which is a last-resort fallback that can drift out of sync with the DB
-    (see its own comment) and name models that don't exist in the catalog.
+    Only DB-verified free models on an enabled provider. Never the hardcoded
+    ANONYMOUS_ALLOWED_MODELS fallback: those are OpenRouter ``:free`` ids, and
+    naming them sent every keyless first try into an upstream credential error.
+    Returns [] when nothing free is servable — the caller then says so.
     """
     try:
-        from src.services.model_capabilities_cache import get_free_models
+        from src.services.model_capabilities_cache import get_servable_free_models
 
-        live_free = sorted(get_free_models())
-        if live_free:
-            return live_free[:n]
+        return sorted(get_servable_free_models())[:n]
     except Exception:
-        pass
-    return ANONYMOUS_ALLOWED_MODELS[:n]
+        return []
 
 
 def is_model_allowed_for_anonymous(model_id: str) -> bool:
@@ -263,10 +262,22 @@ def validate_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]
     # Check model whitelist first (fast fail)
     model_allowed = is_model_allowed_for_anonymous(model_id)
     if not model_allowed:
-        allowed_models_str = ", ".join(get_anonymous_allowed_models_sample(3)) + "..."
+        sample = get_anonymous_allowed_models_sample(3)
+        if sample:
+            reason = (
+                f"Model '{model_id}' is not available for anonymous users. Anonymous access is "
+                f"limited to free models: {', '.join(sample)}. Create an API key at "
+                f"{SIGNUP_URL} to use any model in the catalog."
+            )
+        else:
+            reason = (
+                f"Model '{model_id}' needs an API key. No models are open to anonymous use "
+                f"right now. Create a key at {SIGNUP_URL}; the catalog is at "
+                f"https://api.gatewayz.ai/v1/models."
+            )
         return {
             "allowed": False,
-            "reason": f"Model '{model_id}' is not available for anonymous users. Anonymous access is limited to free models: {allowed_models_str}. Please sign up for an account to access this model.",
+            "reason": reason,
             "model_allowed": False,
             "rate_limit_allowed": True,  # Didn't check, but irrelevant
             "remaining_requests": ANONYMOUS_DAILY_LIMIT,

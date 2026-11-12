@@ -32,7 +32,9 @@ def get_all_model_capability_flags() -> list[dict[str, Any]]:
     Returns:
         List of dicts with keys:
             provider_model_id, model_name, max_output_tokens,
-            has_json_mode, is_reasoning, is_free, latency_tier
+            has_json_mode, is_reasoning, is_free, latency_tier,
+            providers ({"slug": ...} — the serving provider, used to keep
+            models of a disabled provider out of the free set)
     """
     try:
         client = get_supabase_client()
@@ -53,7 +55,8 @@ def get_all_model_capability_flags() -> list[dict[str, Any]]:
                 client.table("models")
                 .select(
                     "provider_model_id, model_name, max_output_tokens, "
-                    "has_json_mode, is_reasoning, is_free, latency_tier"
+                    "has_json_mode, is_reasoning, is_free, latency_tier, "
+                    "providers(slug)"
                 )
                 .eq("is_active", True)
                 .range(offset, offset + SUPABASE_PAGE_SIZE - 1)
