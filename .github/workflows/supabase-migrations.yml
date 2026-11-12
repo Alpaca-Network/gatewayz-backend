@@ -80,7 +80,10 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned: CLI v3.0.0 (2026-11-02) makes `migration list` / `db push`
+          # target the local DB by default and ignore --password, so every run
+          # since then failed. Move to v3 only together with --linked/--remote.
+          version: 2.122.1
 
       - name: Link Supabase project
         env:
