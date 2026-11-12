@@ -60,9 +60,12 @@ def test_falls_back_to_hardcoded_whitelist_when_cache_import_fails():
 
 
 def test_allowed_models_sample_prefers_live_free_catalog():
-    with patch(
-        "src.services.model_capabilities_cache.get_servable_free_models",
-        return_value={"unsloth/gemma-2-9b-it", "unsloth/llama-3.2-3b-instruct"},
+    with (
+        patch(
+            "src.services.model_capabilities_cache.get_servable_free_models",
+            return_value={"unsloth/gemma-2-9b-it", "unsloth/llama-3.2-3b-instruct"},
+        ),
+        patch("src.services.anonymous_rate_limiter.ANONYMOUS_TRIAL_MODELS", ()),
     ):
         sample = get_anonymous_allowed_models_sample(5)
         assert set(sample) == {"unsloth/gemma-2-9b-it", "unsloth/llama-3.2-3b-instruct"}
@@ -71,11 +74,54 @@ def test_allowed_models_sample_prefers_live_free_catalog():
 def test_allowed_models_sample_never_advertises_the_hardcoded_fallback():
     # The fallback ids are OpenRouter ``:free`` models; advertising them sent
     # keyless callers into an upstream credential error (2026-11-12).
-    with patch(
-        "src.services.model_capabilities_cache.get_servable_free_models",
-        return_value=set(),
+    with (
+        patch(
+            "src.services.model_capabilities_cache.get_servable_free_models",
+            return_value=set(),
+        ),
+        patch("src.services.anonymous_rate_limiter.ANONYMOUS_TRIAL_MODELS", ()),
     ):
         assert get_anonymous_allowed_models_sample(3) == []
+
+
+def test_trial_model_is_allowed_and_advertised_without_being_free():
+    with (
+        patch(
+            "src.services.model_capabilities_cache.get_servable_free_models",
+            return_value=set(),
+        ),
+        patch(
+            "src.services.anonymous_rate_limiter.ANONYMOUS_TRIAL_MODELS",
+            ("groq/openai/gpt-oss-20b",),
+        ),
+        patch(
+            "src.services.model_capabilities_cache.is_free_model",
+            return_value=False,
+        ),
+    ):
+        assert is_model_allowed_for_anonymous("groq/openai/gpt-oss-20b") is True
+        assert is_model_allowed_for_anonymous("GROQ/openai/gpt-oss-20b") is True
+        assert is_model_allowed_for_anonymous("openai/gpt-5") is False
+        assert get_anonymous_allowed_models_sample(5) == ["groq/openai/gpt-oss-20b"]
+
+
+def test_trial_model_stays_billable_for_keyed_users():
+    # The trial list must never feed the credit-exemption gate.
+    from src.services.model_capabilities_cache import is_free_model
+
+    assert is_free_model("groq/openai/gpt-oss-20b") is False
+
+
+def test_anonymous_output_budget_is_capped():
+    from src.services.anonymous_rate_limiter import (
+        ANONYMOUS_MAX_OUTPUT_TOKENS,
+        clamp_anonymous_max_tokens,
+    )
+
+    assert clamp_anonymous_max_tokens(None) == ANONYMOUS_MAX_OUTPUT_TOKENS
+    assert clamp_anonymous_max_tokens(0) == ANONYMOUS_MAX_OUTPUT_TOKENS
+    assert clamp_anonymous_max_tokens(100_000) == ANONYMOUS_MAX_OUTPUT_TOKENS
+    assert clamp_anonymous_max_tokens(64) == 64
 
 
 def test_restricted_message_without_free_models_points_to_signup():
@@ -86,6 +132,7 @@ def test_restricted_message_without_free_models_points_to_signup():
             "src.services.model_capabilities_cache.get_servable_free_models",
             return_value=set(),
         ),
+        patch("src.services.anonymous_rate_limiter.ANONYMOUS_TRIAL_MODELS", ()),
         patch(
             "src.services.anonymous_rate_limiter.is_model_allowed_for_anonymous",
             return_value=False,

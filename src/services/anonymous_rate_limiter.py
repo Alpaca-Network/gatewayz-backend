@@ -20,6 +20,7 @@ Security Design:
 
 import hashlib
 import logging
+import os
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -28,6 +29,22 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 SIGNUP_URL = "https://www.gatewayz.ai/start"
+
+# Keyless trial: models a visitor may call WITHOUT a key so they can try the API.
+# Deliberately separate from the DB ``is_free`` flag — that flag also waives the
+# credit charge for keyed users (routes/chat.py), so marking a paid model free
+# there would make it free and uncapped for every customer. These models stay
+# billable for keyed users; only anonymous callers get them, at
+# ANONYMOUS_DAILY_LIMIT requests/day/IP and ANONYMOUS_MAX_OUTPUT_TOKENS each.
+# Override with ANONYMOUS_TRIAL_MODELS="id1,id2" (empty string disables).
+_DEFAULT_TRIAL_MODELS = "groq/openai/gpt-oss-20b"
+ANONYMOUS_TRIAL_MODELS: tuple[str, ...] = tuple(
+    m.strip()
+    for m in os.environ.get("ANONYMOUS_TRIAL_MODELS", _DEFAULT_TRIAL_MODELS).split(",")
+    if m.strip()
+)
+# gpt-oss spends part of the output budget on reasoning; 1024 leaves room for an answer.
+ANONYMOUS_MAX_OUTPUT_TOKENS = 1024
 ANONYMOUS_DAILY_LIMIT = 3  # Maximum requests per day per IP
 # Hardcoded fallback free model list — used only when DB cache is unavailable.
 # The authoritative source is the models table (is_free=true column).
@@ -103,9 +120,23 @@ def get_anonymous_allowed_models_sample(n: int = 5) -> list[str]:
     try:
         from src.services.model_capabilities_cache import get_servable_free_models
 
-        return sorted(get_servable_free_models())[:n]
+        free = sorted(get_servable_free_models())
     except Exception:
-        return []
+        free = []
+    trial = [m for m in ANONYMOUS_TRIAL_MODELS if m.lower() not in {f.lower() for f in free}]
+    return (trial + free)[:n]
+
+
+def is_anonymous_trial_model(model_id: str) -> bool:
+    """True if model_id is on the keyless trial list (case-insensitive)."""
+    return bool(model_id) and model_id.lower() in {m.lower() for m in ANONYMOUS_TRIAL_MODELS}
+
+
+def clamp_anonymous_max_tokens(requested: int | None) -> int:
+    """Cap an anonymous request's output budget at ANONYMOUS_MAX_OUTPUT_TOKENS."""
+    if requested is None or requested <= 0:
+        return ANONYMOUS_MAX_OUTPUT_TOKENS
+    return min(requested, ANONYMOUS_MAX_OUTPUT_TOKENS)
 
 
 def is_model_allowed_for_anonymous(model_id: str) -> bool:
@@ -131,6 +162,9 @@ def is_model_allowed_for_anonymous(model_id: str) -> bool:
     """
     if not model_id:
         return False
+
+    if is_anonymous_trial_model(model_id):
+        return True
 
     # Check DB-backed free model list first, then fall back to hardcoded whitelist
     try:
@@ -265,8 +299,8 @@ def validate_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]
         sample = get_anonymous_allowed_models_sample(3)
         if sample:
             reason = (
-                f"Model '{model_id}' is not available for anonymous users. Anonymous access is "
-                f"limited to free models: {', '.join(sample)}. Create an API key at "
+                f"Model '{model_id}' needs an API key. Without a key you can try "
+                f"{', '.join(sample)} ({ANONYMOUS_DAILY_LIMIT} requests/day). Create a key at "
                 f"{SIGNUP_URL} to use any model in the catalog."
             )
         else:
