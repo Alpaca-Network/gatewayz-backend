@@ -173,3 +173,15 @@ def test_loader_drops_free_rows_of_a_disabled_provider():
         assert cache.get_servable_free_models() == {"groq/openai/gpt-oss-20b"}
         assert cache.is_free_model("unsloth/gemma-2-9b-it") is False
     cache.invalidate_model_capabilities_cache()
+
+
+def test_null_message_fields_are_dropped_but_content_kept():
+    from src.services.anonymous_rate_limiter import drop_null_message_fields
+
+    msgs = [
+        {"role": "user", "content": "hi", "name": None},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}], "name": None},
+    ]
+    out = drop_null_message_fields(msgs)
+    assert out[0] == {"role": "user", "content": "hi"}
+    assert out[1] == {"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]}

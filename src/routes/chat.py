@@ -24,6 +24,7 @@ from src.security.identity import (
 from src.services.anonymous_rate_limiter import (
     ANONYMOUS_DAILY_LIMIT,
     clamp_anonymous_max_tokens,
+    drop_null_message_fields,
     get_anonymous_allowed_models_sample,
     get_anonymous_rate_limit_headers,
     reserve_anonymous_request,
@@ -796,6 +797,10 @@ async def chat_completions(
         # === 2) Build upstream request ===
         with tracker.stage("request_parsing"):
             messages = [m.model_dump() for m in req.messages]
+            if is_anonymous:
+                # Keyed requests are normalized by OpenAIChatAdapter; keyless ones
+                # are not, and providers such as Groq reject null fields.
+                messages = drop_null_message_fields(messages)
 
         # === 2.1) Inject conversation history if session_id provided ===
         messages, session_id = await inject_conversation_history(

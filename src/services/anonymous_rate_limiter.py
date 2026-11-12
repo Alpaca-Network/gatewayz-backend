@@ -132,6 +132,23 @@ def is_anonymous_trial_model(model_id: str) -> bool:
     return bool(model_id) and model_id.lower() in {m.lower() for m in ANONYMOUS_TRIAL_MODELS}
 
 
+def drop_null_message_fields(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove null-valued optional fields from serialized chat messages.
+
+    Anonymous requests skip the OpenAIChatAdapter that normalizes messages for
+    keyed requests, so ``model_dump()`` output reached the provider with
+    ``"name": None``; Groq rejects that ("messages.0.name: Value is not
+    nullable"), which broke every keyless trial call. ``content`` is kept even
+    when null: an assistant tool-call message legitimately carries it.
+    """
+    cleaned: list[dict[str, Any]] = []
+    for m in messages:
+        if isinstance(m, dict):
+            m = {k: v for k, v in m.items() if v is not None or k == "content"}
+        cleaned.append(m)
+    return cleaned
+
+
 def clamp_anonymous_max_tokens(requested: int | None) -> int:
     """Cap an anonymous request's output budget at ANONYMOUS_MAX_OUTPUT_TOKENS."""
     if requested is None or requested <= 0:
