@@ -23,6 +23,7 @@ from src.security.identity import (
 )
 from src.services.anonymous_rate_limiter import (
     ANONYMOUS_DAILY_LIMIT,
+    clamp_anonymous_max_tokens,
     get_anonymous_allowed_models_sample,
     get_anonymous_rate_limit_headers,
     reserve_anonymous_request,
@@ -572,6 +573,9 @@ async def chat_completions(
                             limit=ANONYMOUS_DAILY_LIMIT, remaining=0
                         ),
                     )
+
+                # Keyless trial: bound what one anonymous request can cost.
+                req.max_tokens = clamp_anonymous_max_tokens(req.max_tokens)
 
                 user = None
                 api_key_id = None
