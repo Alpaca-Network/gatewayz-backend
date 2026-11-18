@@ -102,6 +102,23 @@ def normalize_token_limit(payload: dict, gateway: str, model: str) -> dict:
     return payload
 
 
+def normalize_sampling_params(payload: dict, gateway: str, model: str) -> dict:
+    """Drop sampling values the provider would reject outright, in place.
+
+    Moonshot's Kimi models only accept ``temperature=1`` and answer anything
+    else with 400 "invalid temperature: only 1 is allowed for this model"
+    (seen live on kimi-k2.6, kimi-k2.7-code, kimi-k3 and kimi-k3.1-pro in the
+    2026-11-18 health sweep). Omitting the field lets Moonshot apply its own
+    default, so the request succeeds instead of failing.
+    """
+    if (gateway or "").lower() == "moonshot" and is_reasoning_model(gateway, model):
+        temperature = payload.get("temperature")
+        if temperature is not None and temperature != 1:
+            logger.debug("Dropping temperature=%r for %s (Kimi only allows 1)", temperature, model)
+            payload.pop("temperature")
+    return payload
+
+
 def apply_reasoning_effort(payload: dict, gateway: str, model: str, effort: str | None) -> dict:
     """Translate *effort* into the dialect *gateway* speaks, in place.
 

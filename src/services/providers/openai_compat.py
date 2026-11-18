@@ -103,6 +103,7 @@ class OpenAICompatAdapter:
     def _create(self, messages: list[dict[str, Any]], model: str, *, stream: bool, **kwargs: Any):
         from src.services.providers.reasoning_effort import (
             apply_reasoning_effort,
+            normalize_sampling_params,
             normalize_token_limit,
         )
 
@@ -112,6 +113,7 @@ class OpenAICompatAdapter:
         # adapter layer, never in routing code (North Star §5).
         effort = kwargs.pop("reasoning_effort", None)
         kwargs = normalize_token_limit(dict(kwargs), self.cfg.slug, resolved)
+        kwargs = normalize_sampling_params(kwargs, self.cfg.slug, resolved)
         kwargs = apply_reasoning_effort(kwargs, self.cfg.slug, resolved, effort)
         if stream:
             kwargs = {**kwargs, "stream": True}
