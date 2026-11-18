@@ -5,7 +5,7 @@ Tests for Authentication Rate Limiting Module
 Tests IP-based rate limiting for authentication endpoints.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -267,8 +267,9 @@ class TestAuthRateLimiter:
 class TestGetClientIP:
     """Tests for get_client_ip helper function"""
 
-    def test_default_ignores_spoofable_x_real_ip(self):
-        """Default mode (x-forwarded-for-rightmost) must not honor a client-set X-Real-IP."""
+    @patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-forwarded-for-rightmost")
+    def test_rightmost_mode_ignores_spoofable_x_real_ip(self):
+        """x-forwarded-for-rightmost mode must not honor a client-set X-Real-IP."""
         request = MagicMock()
         request.headers = {
             "X-Real-IP": "6.6.6.6",
@@ -278,6 +279,14 @@ class TestGetClientIP:
         request.client.host = "10.0.0.1"
 
         assert get_client_ip(request) == "70.41.3.18"
+
+    def test_default_is_x_real_ip_and_ignores_forged_xff(self):
+        """Default: Railway's edge overwrites X-Real-IP; the XFF hops are not consulted."""
+        request = MagicMock()
+        request.headers = {"X-Real-IP": "203.0.113.7", "X-Forwarded-For": "1.2.3.4, 152.233.47.66"}
+        request.client = MagicMock()
+        request.client.host = "1.2.3.4"
+        assert get_client_ip(request) == "203.0.113.7"
 
     def test_x_real_ip_mode(self):
         from unittest.mock import patch
@@ -313,11 +322,12 @@ class TestGetClientIP:
         from unittest.mock import patch
 
         request = MagicMock()
-        request.headers = {"X-Forwarded-For": "1.1.1.1, 2.2.2.2"}
+        request.headers = {"X-Real-IP": "2.2.2.2", "X-Forwarded-For": "1.1.1.1, 3.3.3.3"}
         request.client = None
         with patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "bogus"):
             assert get_client_ip(request) == "2.2.2.2"
 
+    @patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-forwarded-for-rightmost")
     def test_get_ip_from_x_forwarded_for_rightmost(self):
         """Test extracting rightmost IP from X-Forwarded-For header (proxy-added)"""
         request = MagicMock()
@@ -330,6 +340,7 @@ class TestGetClientIP:
         # Should return rightmost IP (added by Railway proxy, harder to spoof)
         assert ip == "150.172.238.178"
 
+    @patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-forwarded-for-rightmost")
     def test_get_ip_from_x_forwarded_for_single(self):
         """Test extracting IP from X-Forwarded-For header with single IP"""
         request = MagicMock()
@@ -359,6 +370,7 @@ class TestGetClientIP:
         ip = get_client_ip(request)
         assert ip == "unknown"
 
+    @patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-forwarded-for-rightmost")
     def test_spoofed_x_forwarded_for_uses_proxy_added_ip(self):
         """Test that spoofed X-Forwarded-For headers don't bypass rate limiting"""
         request = MagicMock()
