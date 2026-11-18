@@ -38,6 +38,7 @@ from src.schemas.proxy import ProxyRequest
 from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
 from src.security.security import ApiKeyLookupUnavailable, validate_api_key_security
+from src.services.auth_rate_limiting import get_client_ip
 from src.services.job_usage import JOB_BUSY, job_lease_of
 from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.providers.anthropic_transformer import (
@@ -46,6 +47,14 @@ from src.services.providers.anthropic_transformer import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _trusted_ip(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    ip = get_client_ip(request)
+    return None if not ip or ip == "unknown" else ip
+
 
 # Job keys: the usage line's content hash, emitted by chat_dispatch before [DONE].
 _CONTENT_HASH_COMMENT = f": {CONTENT_HASH_HEADER.lower()}: "
@@ -473,7 +482,9 @@ async def create_message(
         try:
             validate_api_key_security(
                 resolved_key,
-                client_ip=request.client.host if request and request.client else None,
+                # Not request.client.host: that is the caller-written first
+                # X-Forwarded-For hop and would let a forged header pass the allowlist.
+                client_ip=_trusted_ip(request),
                 referer=request.headers.get("referer") if request else None,
                 method=request.method if request else None,
                 path=request.url.path if request else None,

@@ -49,6 +49,7 @@ from src.db.audit import record_audit
 from src.db.coupon_redemptions import RedemptionUnavailable, redeem_coupon
 from src.schemas.coupons import CouponValidationError, normalize_code
 from src.security.deps import get_current_user
+from src.services.auth_rate_limiting import get_client_ip
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -112,16 +113,13 @@ def _error(status: int, message: str, code: str, error_type: str) -> HTTPExcepti
 
 
 def _client_ip(request: Request) -> str | None:
-    """First hop of X-Forwarded-For, else the direct peer.
+    """The client IP from the one trusted header (auth_rate_limiting.get_client_ip).
 
-    Same convention as src/db/audit.py and the security middleware: Railway
-    sits in front of this service, so request.client.host alone is the proxy.
+    Not the first X-Forwarded-For hop, which the caller can forge.
     """
     try:
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip() or None
-        return request.client.host if request.client else None
+        ip = get_client_ip(request)
+        return None if not ip or ip == "unknown" else ip
     except Exception:
         return None
 

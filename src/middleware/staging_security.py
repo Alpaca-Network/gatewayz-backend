@@ -147,26 +147,12 @@ class StagingSecurityMiddleware:
         await self.app(scope, receive, send)
 
     def _get_client_ip(self, scope: Scope) -> str:
-        """
-        Get the real client IP address.
+        """The client IP from the one trusted header (see get_client_ip)."""
+        from starlette.requests import Request
 
-        Checks X-Forwarded-For header first (for proxied requests),
-        then falls back to direct connection IP.
-        """
-        headers = dict(scope.get("headers", []))
+        from src.services.auth_rate_limiting import get_client_ip
 
-        # Check X-Forwarded-For header (Railway/proxy sets this)
-        forwarded_for = headers.get(b"x-forwarded-for", b"").decode()
-        if forwarded_for:
-            # X-Forwarded-For can be comma-separated, take the first IP
-            # Defensive bounds checking to prevent potential issues
-            parts = forwarded_for.split(",")
-            if parts:  # Defensive check (split always returns at least [''])
-                return parts[0].strip()
-
-        # Fall back to direct connection IP
-        client = scope.get("client")
-        return client[0] if client else "unknown"
+        return get_client_ip(Request(scope))
 
     async def _send_access_denied(self, send: Send, reason: str, scope: Scope) -> None:
         """Send access denied response."""

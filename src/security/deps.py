@@ -25,6 +25,11 @@ from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 logger = logging.getLogger(__name__)
 
 
+def _known_ip(ip: str | None) -> str | None:
+    """get_client_ip returns "unknown" when it has nothing; callers expect None."""
+    return None if not ip or ip == "unknown" else ip
+
+
 # Key-validation failures, mapped to a status AND a machine-readable code.
 #
 # The two spend ceilings are the reason this exists. A rate limit is transient
@@ -225,7 +230,12 @@ async def get_api_key(
     user_agent = None
 
     if request:
-        client_ip = request.client.host if request.client else None
+        # request.client.host is the leftmost X-Forwarded-For entry (uvicorn
+        # --proxy-headers), which the caller controls; an IP allowlist keyed on
+        # it can be bypassed with a forged header.
+        from src.services.auth_rate_limiting import get_client_ip
+
+        client_ip = _known_ip(get_client_ip(request))
         referer = request.headers.get("referer")
         user_agent = request.headers.get("user-agent")
 

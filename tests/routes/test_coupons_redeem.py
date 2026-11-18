@@ -197,8 +197,18 @@ class TestSuccess:
     def test_records_the_client_fingerprint_for_fraud_review(self, as_user):
         """coupon_redemptions has ip_address/user_agent columns for exactly
         this; leaving them NULL wastes the only abuse signal the table has."""
-        with patch("src.routes.coupons.redeem_coupon", return_value=verdict()) as rpc:
-            post(headers={"X-Forwarded-For": "203.0.113.9, 10.0.0.1", "User-Agent": "curl/8"})
+        with (
+            patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-real-ip"),
+            patch("src.routes.coupons.redeem_coupon", return_value=verdict()) as rpc,
+        ):
+            post(
+                headers={
+                    "X-Real-IP": "203.0.113.9",
+                    "X-Forwarded-For": "198.51.100.66, 10.0.0.1",
+                    "User-Agent": "curl/8",
+                }
+            )
+        # The trusted header wins; the caller-written first XFF hop is ignored.
         assert rpc.call_args.kwargs["ip_address"] == "203.0.113.9"
         assert rpc.call_args.kwargs["user_agent"] == "curl/8"
 

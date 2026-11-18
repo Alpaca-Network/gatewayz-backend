@@ -43,16 +43,18 @@ def _actor_auth(actor: dict[str, Any] | None) -> str:
 
 
 def _client_ip(request: Any) -> str | None:
-    """First hop of X-Forwarded-For, falling back to the direct connection --
-    matches src/middleware/security_middleware.py's convention. A
-    downstream proxy (Railway) prepends the real client IP."""
+    """The client IP from the one trusted header (auth_rate_limiting.get_client_ip).
+
+    Not the first X-Forwarded-For hop: the caller writes that, so an audit row
+    keyed on it records whatever address the caller chose.
+    """
     if request is None:
         return None
     try:
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip() or None
-        return request.client.host if request.client else None
+        from src.services.auth_rate_limiting import get_client_ip
+
+        ip = get_client_ip(request)
+        return None if not ip or ip == "unknown" else ip
     except Exception:
         return None
 

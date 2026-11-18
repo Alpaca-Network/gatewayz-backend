@@ -59,19 +59,25 @@ class TestRecordAudit:
             # Must not raise.
             record_audit({"id": 1}, action="anything")
 
-    def test_extracts_ip_from_x_forwarded_for(self):
+    def test_records_trusted_header_ip_not_forged_first_xff_hop(self):
+        """The first X-Forwarded-For hop is caller-written; the audit row must
+        carry the edge-written address from the trusted header instead."""
         client = MagicMock()
         request = MagicMock()
         request.headers.get.side_effect = lambda k, default=None: {
-            "X-Forwarded-For": "1.2.3.4, 5.6.7.8",
+            "X-Real-IP": "5.6.7.8",
+            "X-Forwarded-For": "1.2.3.4, 10.0.0.1",
             "user-agent": "pytest-agent",
         }.get(k, default)
 
-        with patch("src.db.audit.get_supabase_client", return_value=client):
+        with (
+            patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-real-ip"),
+            patch("src.db.audit.get_supabase_client", return_value=client),
+        ):
             record_audit({"id": 1}, action="a", request=request)
 
         inserted = client.table.return_value.insert.call_args[0][0]
-        assert inserted["ip"] == "1.2.3.4"
+        assert inserted["ip"] == "5.6.7.8"
         assert inserted["user_agent"] == "pytest-agent"
 
     def test_falls_back_to_direct_client_ip(self):
