@@ -18,6 +18,7 @@ import pytest
 from src.services.providers.reasoning_effort import (
     apply_reasoning_effort,
     apply_reasoning_effort_anthropic_native,
+    claude_rejects_sampling,
     is_reasoning_model,
     normalize_sampling_params,
     normalize_token_limit,
@@ -190,3 +191,43 @@ class TestSamplingParams:
     def test_other_models_keep_temperature(self, gateway, model):
         payload = normalize_sampling_params({"temperature": 0.2}, gateway, model)
         assert payload == {"temperature": 0.2}
+
+
+class TestClaudeSampling:
+    """Newer Claude models accept temperature only at 1 and reject top_p/top_k
+    (live 2026-11-18: opus-4-7, fable-5-2, haiku-5-5 400 below 1; opus-5-5 top_p 400)."""
+
+    @pytest.mark.parametrize(
+        "model,expected",
+        [
+            ("claude-opus-4-7", True),
+            ("anthropic/claude-opus-4-8", True),
+            ("claude-opus-5", True),
+            ("claude-sonnet-5-5", True),
+            ("claude-haiku-5-5", True),
+            ("claude-fable-5", True),
+            ("claude-fable-5-2", True),
+            ("claude-opus-4-6", False),
+            ("claude-sonnet-4-6", False),
+            ("claude-haiku-4-5-20251001", False),
+            ("claude-opus-4-5-20251101", False),
+            ("claude-sonnet-4-5-20250929", False),
+            ("claude-3-5-sonnet-20241022", False),
+        ],
+    )
+    def test_detection(self, model, expected):
+        assert claude_rejects_sampling(model) is expected
+
+    def test_new_claude_drops_rejected_values(self):
+        payload = {"temperature": 0, "top_p": 0.5, "top_k": 40, "max_tokens": 5}
+        out = normalize_sampling_params(payload, "anthropic", "claude-opus-5-5")
+        assert out == {"max_tokens": 5}
+
+    def test_new_claude_keeps_temperature_one(self):
+        out = normalize_sampling_params({"temperature": 1}, "anthropic", "claude-sonnet-5-5")
+        assert out == {"temperature": 1}
+
+    def test_older_claude_untouched(self):
+        payload = {"temperature": 0, "top_p": 0.5}
+        out = normalize_sampling_params(dict(payload), "anthropic", "claude-sonnet-4-6")
+        assert out == payload

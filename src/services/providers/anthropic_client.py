@@ -65,9 +65,12 @@ def _prepare_anthropic_kwargs(model: str, kwargs: dict) -> dict:
     OpenAI — the thinking/output_config translation belongs to the native
     Messages transport, which handles reasoning_effort itself.
     """
-    from src.services.providers.reasoning_effort import apply_reasoning_effort
+    from src.services.providers.reasoning_effort import (
+        apply_reasoning_effort,
+        normalize_sampling_params,
+    )
 
-    prepared = dict(kwargs)
+    prepared = normalize_sampling_params(dict(kwargs), "anthropic", model)
     effort = prepared.pop("reasoning_effort", None)
     return apply_reasoning_effort(prepared, "anthropic", model, effort)
 

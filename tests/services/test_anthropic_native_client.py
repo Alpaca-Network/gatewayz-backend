@@ -230,6 +230,26 @@ class TestRequestConversion:
         assert blocks[0]["text"] == "keep me"
 
 
+class TestSamplingParams:
+    MESSAGES = [{"role": "user", "content": "Say OK"}]
+
+    def test_new_claude_omits_rejected_sampling_values(self):
+        payload = build_anthropic_payload(
+            self.MESSAGES, "claude-opus-5-5", max_tokens=5, temperature=0, top_p=0.5, top_k=40
+        )
+        assert "temperature" not in payload
+        assert "top_p" not in payload
+        assert "top_k" not in payload
+        assert payload["max_tokens"] == 5
+
+    def test_older_claude_keeps_sampling_values(self):
+        payload = build_anthropic_payload(
+            self.MESSAGES, "claude-sonnet-4-6", max_tokens=5, temperature=0, top_p=0.5
+        )
+        assert payload["temperature"] == 0
+        assert payload["top_p"] == 0.5
+
+
 class TestResponseConversion:
     def test_text_content_becomes_message_content(self):
         data = {

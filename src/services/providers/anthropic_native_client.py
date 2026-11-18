@@ -263,6 +263,11 @@ def build_anthropic_payload(
     if system_blocks:
         payload["system"] = system_blocks
 
+    # Newer Claude models reject caller-set sampling values; drop those first.
+    from src.services.providers.reasoning_effort import normalize_sampling_params
+
+    kwargs = normalize_sampling_params(dict(kwargs), "anthropic", model)
+
     if kwargs.get("temperature") is not None:
         payload["temperature"] = kwargs["temperature"]
     if kwargs.get("top_p") is not None:
