@@ -172,7 +172,8 @@ async def test_valid_key_is_authenticated():
 @pytest.mark.asyncio
 async def test_client_ip_uses_rightmost_hop_not_spoofed_leftmost():
     mw = _mw()
-    ip = await mw._get_client_ip(_req(xff="1.1.1.1, 5.5.5.5"))
+    with patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-forwarded-for-rightmost"):
+        ip = await mw._get_client_ip(_req(xff="1.1.1.1, 5.5.5.5"))
     assert ip == "5.5.5.5"
 
 

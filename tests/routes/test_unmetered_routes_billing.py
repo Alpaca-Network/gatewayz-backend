@@ -190,9 +190,9 @@ class TestAnonymousReservation:
         from src.routes.chat import resolve_anonymous_client_ip
 
         req = MagicMock()
-        req.headers = {"X-Forwarded-For": "1.1.1.1, 2.2.2.2, 3.3.3.3"}
-        req.client.host = "10.0.0.1"
-        assert resolve_anonymous_client_ip(req) == "3.3.3.3"
+        req.headers = {"X-Real-IP": "4.4.4.4", "X-Forwarded-For": "1.1.1.1, 2.2.2.2, 3.3.3.3"}
+        req.client.host = "1.1.1.1"  # uvicorn --proxy-headers sets the leftmost hop
+        assert resolve_anonymous_client_ip(req) == "4.4.4.4"
 
     def test_post_processing_no_longer_double_counts(self):
         import inspect

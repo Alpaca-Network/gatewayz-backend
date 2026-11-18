@@ -360,5 +360,8 @@ class TestEdgeCases:
         # Rightmost (proxy-appended) hop; leftmost is client-controlled
         import asyncio
 
-        ip = asyncio.run(security_middleware._get_client_ip(mock_request))
+        from unittest.mock import patch
+
+        with patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-forwarded-for-rightmost"):
+            ip = asyncio.run(security_middleware._get_client_ip(mock_request))
         assert ip == "5.6.7.8"
