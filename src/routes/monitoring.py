@@ -49,6 +49,14 @@ from src.services.redis_metrics import get_redis_metrics
 
 logger = logging.getLogger(__name__)
 
+
+def _sentry_client_ip(request: Request) -> str:
+    from src.services.auth_rate_limiting import get_client_ip
+
+    ip = get_client_ip(request)
+    return "" if ip == "unknown" else ip
+
+
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
 
 # --- chat_completion_requests query bounds ---------------------------------
@@ -204,7 +212,7 @@ async def sentry_tunnel(request: Request) -> Response:
                     content=body,
                     headers={
                         "Content-Type": "application/x-sentry-envelope",
-                        "X-Forwarded-For": request.client.host if request.client else "",
+                        "X-Forwarded-For": _sentry_client_ip(request),
                     },
                 )
 

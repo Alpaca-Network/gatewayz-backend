@@ -349,11 +349,14 @@ def get_client_ip(request) -> str:
     so there is no cascade: if the configured header is absent we fall back to the
     socket peer, never to another client-controllable header.
 
-    Default: x-forwarded-for-rightmost. Prod (api.gatewayz.ai) is served directly
-    by Railway's edge (server: railway-hikari, no Cloudflare headers), whose proxy
-    appends the connecting peer to X-Forwarded-For, so the rightmost entry is
-    edge-written and unspoofable. Railway staff have documented X-Real-IP being
-    set to the CDN edge IP when their CDN path is active, so it is not the default.
+    Default: x-forwarded-for-rightmost. On Railway that entry turned out to be an
+    edge address (152.233.47.x), so every client of one edge shared a bucket.
+    Prod (api.gatewayz.ai) therefore sets TRUSTED_CLIENT_IP_HEADER=x-real-ip:
+    verified 2026-11-18, plain and forged (X-Real-IP + X-Forwarded-For) requests
+    both resolved to the caller's real IP, because Railway's edge overwrites it.
+
+    Every client-IP read in the codebase goes through this function, never
+    request.client.host, which is the caller-written leftmost XFF hop.
     """
     from src.config.config import Config
 

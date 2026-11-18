@@ -176,6 +176,73 @@ async def test_client_ip_uses_rightmost_hop_not_spoofed_leftmost():
     assert ip == "5.5.5.5"
 
 
+def test_messages_x_api_key_allowlist_sees_trusted_ip_not_forged_xff():
+    """An IP-allowlisted key must be checked against the edge-written client IP.
+
+    request.client.host is the leftmost X-Forwarded-For hop (uvicorn
+    --proxy-headers), which the caller writes, so it would let a forged header
+    satisfy the allowlist.
+    """
+    from src.main import app
+
+    seen = {}
+
+    def fake_validate(
+        api_key, client_ip=None, referer=None, *, method=None, path=None, lease_sink=None
+    ):
+        seen["ip"] = client_ip
+        raise ValueError("IP address not allowed")
+
+    with (
+        patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-real-ip"),
+        patch("src.routes.messages.validate_api_key_security", new=fake_validate),
+        patch("src.routes.chat.chat_completions", new=AsyncMock(return_value={})),
+    ):
+        TestClient(app).post(
+            "/v1/messages",
+            json={"model": "m", "max_tokens": 5, "messages": [{"role": "user", "content": "hi"}]},
+            headers={
+                "x-api-key": "placeholder-not-a-real-key",
+                "anthropic-version": "2023-06-01",
+                "X-Real-IP": "203.0.113.5",
+                "X-Forwarded-For": "1.2.3.4",
+            },
+        )
+    assert seen["ip"] == "203.0.113.5"
+
+
+async def test_bearer_key_allowlist_sees_trusted_ip_not_forged_xff():
+    from fastapi.security import HTTPAuthorizationCredentials
+    from starlette.requests import Request
+
+    from src.security import deps
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": [(b"x-real-ip", b"203.0.113.5"), (b"x-forwarded-for", b"1.2.3.4")],
+        "client": ("1.2.3.4", 1234),  # what uvicorn --proxy-headers would set
+        "query_string": b"",
+    }
+    seen = {}
+
+    def fake_validate(api_key, client_ip=None, referer=None, **_):
+        seen["ip"] = client_ip
+        raise ValueError("IP address not allowed")
+
+    with (
+        patch("src.config.config.Config.TRUSTED_CLIENT_IP_HEADER", "x-real-ip"),
+        patch.object(deps, "validate_api_key_security", new=fake_validate),
+    ):
+        with pytest.raises(HTTPException):
+            await deps.get_api_key(
+                HTTPAuthorizationCredentials(scheme="Bearer", credentials="gw_placeholder_key"),
+                Request(scope),
+            )
+    assert seen["ip"] == "203.0.113.5"
+
+
 # ---- 5. security.py fails closed on DB errors -------------------------------------------
 
 
