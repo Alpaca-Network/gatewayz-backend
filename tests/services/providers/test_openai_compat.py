@@ -167,6 +167,20 @@ class TestRequestClientConstruction:
 
             assert create.call_args[1]["model"] == "llama-3-70b"
 
+    def test_moonshot_kimi_drops_rejected_temperature(self, fake_key):
+        # Kimi 400s on any temperature but 1; the adapter must not forward it.
+        adapter = make_adapter(_fake_cfg(slug="moonshot", model_prefix="moonshot/"))
+        with patch("src.services.providers.openai_compat.OpenAI") as mock_openai:
+            create = mock_openai.return_value.chat.completions.create
+            create.return_value = _mock_openai_response()
+
+            adapter.request(MESSAGES, "moonshot/kimi-k3", temperature=0.7, max_tokens=8)
+
+            sent = create.call_args[1]
+            assert sent["model"] == "kimi-k3"
+            assert "temperature" not in sent
+            assert sent["max_tokens"] == 8
+
     def test_forwards_messages_and_kwargs(self, fake_key):
         adapter = make_adapter(_fake_cfg())
         with patch("src.services.providers.openai_compat.OpenAI") as mock_openai:

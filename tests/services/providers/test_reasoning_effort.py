@@ -19,6 +19,7 @@ from src.services.providers.reasoning_effort import (
     apply_reasoning_effort,
     apply_reasoning_effort_anthropic_native,
     is_reasoning_model,
+    normalize_sampling_params,
     normalize_token_limit,
     uses_max_completion_tokens,
 )
@@ -163,3 +164,29 @@ class TestOtherGateways:
     def test_no_effort_is_a_no_op(self):
         payload = {"max_tokens": 10}
         assert apply_reasoning_effort(payload, "openai", "gpt-5.6-sol", None) == {"max_tokens": 10}
+
+
+class TestSamplingParams:
+    """Kimi rejects any temperature but 1 (live 400 on the 2026-11-18 sweep)."""
+
+    @pytest.mark.parametrize("model", ["kimi-k2.6", "moonshot/kimi-k3", "kimi-k3.1-pro"])
+    def test_kimi_drops_non_one_temperature(self, model):
+        payload = normalize_sampling_params({"temperature": 0.7, "top_p": 0.9}, "moonshot", model)
+        assert "temperature" not in payload
+        assert payload["top_p"] == 0.9
+
+    def test_kimi_keeps_temperature_one(self):
+        payload = normalize_sampling_params({"temperature": 1}, "moonshot", "kimi-k3")
+        assert payload == {"temperature": 1}
+
+    def test_kimi_without_temperature_untouched(self):
+        payload = normalize_sampling_params({"max_tokens": 5}, "moonshot", "kimi-k3")
+        assert payload == {"max_tokens": 5}
+
+    @pytest.mark.parametrize(
+        "gateway,model",
+        [("openai", "gpt-4o-mini"), ("deepinfra", "kimi-k2.6"), ("moonshot", "moonshot-v1-8k")],
+    )
+    def test_other_models_keep_temperature(self, gateway, model):
+        payload = normalize_sampling_params({"temperature": 0.2}, gateway, model)
+        assert payload == {"temperature": 0.2}
