@@ -154,7 +154,14 @@ class TestStatus:
         monkeypatch.setattr(routes.Config, "DELEGATION_DISCOUNT_ENABLED", True)
         assert client.get("/delegation/status").json()["data"]["discount_enabled"] is False
 
-    def test_bad_config_is_clamped(self, monkeypatch):
+    def test_rates_are_null_while_off(self, monkeypatch):
+        monkeypatch.setattr(routes.Config, "DELEGATED_STAKING_ENABLED", False)
+        data = client.get("/delegation/status").json()["data"]
+        assert data["reward_share"] is None
+        assert data["discount_percent"] is None
+        assert data["payout_model"] == "reward_share"
+
+    def test_bad_config_is_clamped(self, enabled, monkeypatch):
         monkeypatch.setattr(routes.Config, "DELEGATION_REWARD_SHARE", Decimal("1.7"))
         monkeypatch.setattr(routes.Config, "DELEGATION_DISCOUNT_PERCENT", Decimal("-2"))
         monkeypatch.setattr(routes.Config, "DELEGATION_PAYOUT_MODEL", "bogus")
