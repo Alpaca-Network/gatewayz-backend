@@ -94,8 +94,9 @@ class TestStatus:
                 "cardano": {"pool_id": None, "network": "mainnet"},
                 "allowance_rates": [],
                 "payout_model": "reward_share",
-                "reward_share": "0.95",
-                "discount_percent": "0.99",
+                # Off: no rates are published.
+                "reward_share": None,
+                "discount_percent": None,
                 "discount_enabled": False,
                 "disclaimer": delegation_routes.REWARD_SHARE_DISCLAIMER,
             },

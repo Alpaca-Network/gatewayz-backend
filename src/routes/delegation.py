@@ -261,11 +261,20 @@ def _fee_percent() -> str | None:
 @router.get("/delegation/status", tags=["delegation"])
 async def get_delegation_status() -> dict[str, Any]:
     """Public: is delegated staking on, where to stake, the current
-    allowance rates, and the disclaimer that goes with them."""
+    allowance rates, and the disclaimer that goes with them.
+
+    While the program is off, the reward share and discount percent are
+    null: the configured defaults are not an offer, and the public site
+    states no rates until the terms are announced."""
+    enabled = bool(Config.DELEGATED_STAKING_ENABLED)
+    discount = _discount_config()
+    if not enabled:
+        discount["reward_share"] = None
+        discount["discount_percent"] = None
     return {
         "success": True,
         "data": {
-            "enabled": bool(Config.DELEGATED_STAKING_ENABLED),
+            "enabled": enabled,
             "eth": {
                 "vault_address": stakewise.vault_address(),
                 "chain_id": int(Config.STAKEWISE_VAULT_CHAIN_ID),
@@ -273,7 +282,7 @@ async def get_delegation_status() -> dict[str, Any]:
             },
             "cardano": {"pool_id": cardano_pool_id(), "network": cardano_network()},
             "allowance_rates": _public_rates(),
-            **_discount_config(),
+            **discount,
             "disclaimer": _disclaimer(),
         },
     }
