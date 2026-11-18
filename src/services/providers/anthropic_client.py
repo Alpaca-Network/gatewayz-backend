@@ -75,6 +75,35 @@ def _prepare_anthropic_kwargs(model: str, kwargs: dict) -> dict:
     return apply_reasoning_effort(prepared, "anthropic", model, effort)
 
 
+def _is_client_error(exc: Exception) -> bool:
+    """True when Anthropic answered the native call with a 4xx."""
+    import httpx
+
+    return isinstance(exc, httpx.HTTPStatusError) and 400 <= exc.response.status_code < 500
+
+
+def _compat_after_native_failure(native_exc: Exception, compat_call, *args, **kwargs):
+    """Run the compat fallback; if it also fails, surface the native error.
+
+    When Anthropic rejects the native request with a 4xx (bad parameter,
+    rate limit, auth), the compat endpoint usually fails too, and for models
+    it does not know it answers 404. Raising that 404 told callers "Model not
+    found" for a model that exists (seen 2026-11-18 on every Claude 4.7+/5.x
+    model). The native 4xx carries the real reason, so it wins. Non-4xx native
+    failures (5xx, network) keep raising the compat error as before.
+    """
+    try:
+        return compat_call(*args, **kwargs)
+    except Exception as compat_exc:
+        if _is_client_error(native_exc):
+            logger.warning(
+                "Anthropic compat fallback also failed (%s); returning the native error",
+                type(compat_exc).__name__,
+            )
+            raise native_exc from compat_exc
+        raise
+
+
 def make_anthropic_request(messages, model, **kwargs):
     """Make request to Anthropic.
 
@@ -109,6 +138,9 @@ def make_anthropic_request(messages, model, **kwargs):
             logger.warning(
                 "Native Anthropic request failed, falling back to compatibility endpoint: %s",
                 sanitize_for_logging(str(e)),
+            )
+            return _compat_after_native_failure(
+                e, _make_anthropic_request_compat, messages, model, **kwargs
             )
 
     return _make_anthropic_request_compat(messages, model, **kwargs)
@@ -166,6 +198,9 @@ def make_anthropic_request_stream(messages, model, **kwargs):
             logger.warning(
                 "Native Anthropic stream failed, falling back to compatibility endpoint: %s",
                 sanitize_for_logging(str(e)),
+            )
+            return _compat_after_native_failure(
+                e, _make_anthropic_request_stream_compat, messages, model, **kwargs
             )
 
     return _make_anthropic_request_stream_compat(messages, model, **kwargs)
