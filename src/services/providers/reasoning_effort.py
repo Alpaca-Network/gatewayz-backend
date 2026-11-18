@@ -102,21 +102,59 @@ def normalize_token_limit(payload: dict, gateway: str, model: str) -> dict:
     return payload
 
 
+_CLAUDE_VERSION_PATTERN = re.compile(
+    r"^claude-(opus|sonnet|haiku|fable)-(\d{1,2})(?:-(\d{1,2}))?(?:-|$)"
+)
+
+
+def claude_rejects_sampling(model: str) -> bool:
+    """True for Claude models that refuse caller-set sampling values.
+
+    Opus 4.7 and later, every Claude 5.x model and the Fable line accept
+    ``temperature`` only at 1 and reject ``top_p``/``top_k``. Checked live
+    on 2026-11-18 through api.gatewayz.ai: opus-4-7, fable-5-2, haiku-5-5
+    -> 400 at temperature 0/0.5/0.99, 200 at 1; opus-5-5 top_p=0.5 -> 400.
+    Opus/Sonnet 4.6 and Haiku 4.5 still accept them.
+    """
+    name = _strip_gateway_prefix((model or "").lower(), "anthropic")
+    match = _CLAUDE_VERSION_PATTERN.match(name)
+    if not match:
+        return False
+    family, major, minor = match.group(1), int(match.group(2)), int(match.group(3) or 0)
+    if family == "fable":
+        return True
+    return (major, minor) >= (4, 7)
+
+
 def normalize_sampling_params(payload: dict, gateway: str, model: str) -> dict:
     """Drop sampling values the provider would reject outright, in place.
 
-    Moonshot's Kimi models only accept ``temperature=1`` and answer anything
-    else with 400 "invalid temperature: only 1 is allowed for this model"
-    (seen live on kimi-k2.6, kimi-k2.7-code, kimi-k3 and kimi-k3.1-pro in the
-    2026-11-18 health sweep). Omitting the field lets Moonshot apply its own
-    default, so the request succeeds instead of failing.
+    Omitting a rejected value lets the provider apply its own default, so the
+    request succeeds instead of failing.
+
+    - Moonshot's Kimi models only accept ``temperature=1`` and answer anything
+      else with 400 "invalid temperature: only 1 is allowed for this model"
+      (kimi-k2.6, kimi-k2.7-code, kimi-k3, kimi-k3.1-pro in the 2026-11-18
+      health sweep).
+    - Newer Claude models (see ``claude_rejects_sampling``) likewise accept
+      only ``temperature=1`` and reject ``top_p`` and ``top_k``.
     """
-    if (gateway or "").lower() == "moonshot" and is_reasoning_model(gateway, model):
-        temperature = payload.get("temperature")
-        if temperature is not None and temperature != 1:
-            logger.debug("Dropping temperature=%r for %s (Kimi only allows 1)", temperature, model)
-            payload.pop("temperature")
+    gw = (gateway or "").lower()
+    if gw == "moonshot" and is_reasoning_model(gateway, model):
+        _drop_temperature_unless_one(payload, model)
+    elif gw == "anthropic" and claude_rejects_sampling(model):
+        _drop_temperature_unless_one(payload, model)
+        for key in ("top_p", "top_k"):
+            if payload.pop(key, None) is not None:
+                logger.debug("Dropping %s for %s (not accepted by this model)", key, model)
     return payload
+
+
+def _drop_temperature_unless_one(payload: dict, model: str) -> None:
+    temperature = payload.get("temperature")
+    if temperature is not None and temperature != 1:
+        logger.debug("Dropping temperature=%r for %s (only 1 is allowed)", temperature, model)
+        payload.pop("temperature")
 
 
 def apply_reasoning_effort(payload: dict, gateway: str, model: str, effort: str | None) -> dict:
