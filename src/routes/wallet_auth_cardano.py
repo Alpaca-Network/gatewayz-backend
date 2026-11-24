@@ -30,12 +30,12 @@ from src.db.user_wallets import CARDANO_NAMESPACE, get_wallet, link_wallet
 from src.routes.wallet_auth import _wallet_view
 from src.security.deps import get_current_user, get_user_id
 from src.security.siwe import SIWE_MESSAGE_TTL_SECONDS
+from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.services.wallet.cip8 import (
     Cip8VerificationError,
     parse_stake_address,
     verify_stake_signature,
 )
-from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.services.wallet.eligibility import eligibility_view, require_eligible
 
 logger = logging.getLogger(__name__)
