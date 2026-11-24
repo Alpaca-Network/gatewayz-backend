@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 import src.routes.wallet_auth_cardano as cardano_routes
 from src.main import app
 from src.security.deps import get_user_id
-from src.services.delegation import cip8, eligibility
-from tests.services.delegation.test_cip8 import _cose_key_hex, _raw_public, _sign1_hex
+from src.services.wallet import cip8, eligibility
+from tests.services.wallet.test_cip8 import _cose_key_hex, _raw_public, _sign1_hex
 
 client = TestClient(app)
 USER_ID = 42
@@ -86,7 +86,7 @@ def test_nonce_rejects_testnet_and_payment_addresses():
             assert response.status_code == 422
 
 
-def test_valid_proof_links_as_cip34_and_pays_pending(wallet):
+def test_valid_proof_links_as_cip34(wallet):
     message = cardano_routes.build_cardano_link_message(
         USER_ID, wallet[2], "n1", cardano_routes.datetime.now(cardano_routes.UTC)
     )
@@ -95,7 +95,6 @@ def test_valid_proof_links_as_cip34_and_pays_pending(wallet):
         patch.object(cardano_routes, "get_redis_client", return_value=_redis(message)),
         patch.object(cardano_routes, "get_wallet", return_value=None),
         patch.object(cardano_routes, "link_wallet", return_value=row) as link,
-        patch.object(cardano_routes, "_pay_pending_delegation_rewards") as pay,
     ):
         response = client.post("/auth/wallet/cardano/link", json=_proof(wallet, message))
     assert response.status_code == 200
@@ -103,7 +102,6 @@ def test_valid_proof_links_as_cip34_and_pays_pending(wallet):
     args, kwargs = link.call_args
     assert args == (USER_ID, wallet[2])
     assert kwargs == {"source": "cip30", "make_primary": False, "chain_namespace": "cip34"}
-    pay.assert_called_once_with(wallet[2], USER_ID)
 
 
 def test_replayed_or_expired_nonce_is_rejected(wallet):
@@ -172,7 +170,7 @@ def test_unlink_accepts_a_stake_address(wallet):
     unlink.assert_called_once_with(USER_ID, wallet[2])
 
 
-# -- US / Canada block (src/services/delegation/eligibility.py) ------------------------
+# -- US / Canada block (src/services/wallet/eligibility.py) ----------------------------
 
 
 def test_not_attested_is_refused_before_anything_is_signed_or_linked(wallet):
@@ -205,11 +203,11 @@ def test_attestation_in_the_request_is_recorded_and_passes(wallet):
         )
     assert response.status_code == 200
     record.assert_called_once_with(USER_ID, eligibility.ATTESTATION_VERSION, None)
-    assert audit.call_args.kwargs["action"] == "delegation.eligibility.attested"
+    assert audit.call_args.kwargs["action"] == "wallet.eligibility.attested"
 
 
 def test_restricted_country_is_refused_even_with_attestation(wallet, monkeypatch):
-    monkeypatch.setattr(eligibility.Config, "DELEGATION_COUNTRY_HEADER", "cf-ipcountry")
+    monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "cf-ipcountry")
     with (
         patch.object(eligibility, "mark_restricted", return_value=True) as restrict,
         patch.object(eligibility, "record_audit"),

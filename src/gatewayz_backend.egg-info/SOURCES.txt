@@ -334,11 +334,6 @@ src/services/gpu/payout_views.py
 src/services/gpu/rollup.py
 src/services/gpu/settlement.py
 src/services/gpu/spot_check.py
-src/services/holdings/__init__.py
-src/services/holdings/chains.py
-src/services/holdings/prices.py
-src/services/holdings/rewards.py
-src/services/holdings/snapshots.py
 src/services/metrics/__init__.py
 src/services/metrics/metrics_aggregator.py
 src/services/metrics/metrics_instrumentation.py

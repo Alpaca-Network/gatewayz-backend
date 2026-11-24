@@ -149,7 +149,6 @@ class TransactionType:
     # Staker credits. The rate-table staking rewards program is retired; the
     # emission epoch job's staker leg still writes this type.
     STAKING_REWARD = "staking_reward"
-    DELEGATION_REWARD = "delegation_reward"  # Daily inference allowance for delegated stake
 
 
 # Fixed namespace for deterministic ledger keys of reward grants. Never change

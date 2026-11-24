@@ -814,16 +814,6 @@ async def lifespan(app):
         logger.warning(f"Failed to start usage anchor scheduler: {e}")
         # Don't fail startup if usage anchoring fails to start
 
-    # Delegated staking jobs (measurement sweep, reconciliation, accrual) --
-    # always start; no-op while DELEGATED_STAKING_ENABLED is off.
-    try:
-        from src.services.scheduled_sync import start_delegation_scheduler
-
-        start_delegation_scheduler()
-        logger.info("Delegated staking service initialized")
-    except Exception as e:
-        logger.warning(f"Failed to start delegation scheduler: {e}")
-
     # Start the daily emission_epoch job (Chutes-style WAYZ emission
     # rewards, gatewayz-backend tokenomics) -- always starts; no-ops
     # (records a 'skipped' job run) until REWARDS_MODE=='emission'.
@@ -1093,15 +1083,6 @@ async def lifespan(app):
         logger.info("Usage anchor service stopped")
     except Exception as e:
         logger.warning(f"Usage anchor shutdown warning: {e}")
-
-    # Stop the delegated staking jobs
-    try:
-        from src.services.scheduled_sync import stop_delegation_scheduler
-
-        stop_delegation_scheduler()
-        logger.info("Delegated staking service stopped")
-    except Exception as e:
-        logger.warning(f"Delegated staking shutdown warning: {e}")
 
     # Stop the emission epoch job
     try:

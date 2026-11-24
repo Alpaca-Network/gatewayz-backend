@@ -1,22 +1,21 @@
-"""Who may take part in delegated staking: the US / Canada block.
+"""Who may link a Cardano wallet: the US / Canada block.
 
 Counsel cleared the program everywhere except the US and Canada (2026-10-14;
-Config.DELEGATION_RESTRICTED_COUNTRIES). Two checks:
+Config.WALLET_LINK_RESTRICTED_COUNTRIES); the Gatewayz vault has the same
+restriction. Two checks:
 
-* **Self-attestation.** Before an account starts delegating (links a Cardano
-  stake address, or records it through POST /delegation/eligibility before
-  staking ETH into the vault) it must send ``not_us_ca_person: true``: "I am
-  not a resident or citizen of the United States or Canada". The attestation
-  is stored (delegation_eligibility) and audited with the request's IP.
-* **Request country**, only when Config.DELEGATION_COUNTRY_HEADER names a
+* **Self-attestation.** Before an account links a Cardano stake address (or
+  through POST /wallet/eligibility) it must send ``not_us_ca_person: true``:
+  "I am not a resident or citizen of the United States or Canada". The
+  attestation is stored (table delegation_eligibility -- historical name) and
+  audited with the request's IP.
+* **Request country**, only when Config.WALLET_LINK_COUNTRY_HEADER names a
   header a trusted edge always sets. api.gatewayz.ai has no such edge today
   (Railway sets no country header), so by default this check is off. A
   restricted country marks the account restricted for good.
 
-Rewards (v2 accruals and v3 discount attributions) are granted only to an
-eligible account -- rewards._payee_verified calls account_eligible -- and
-whatever is not granted stays pending. Nothing here ever blocks an exit, a
-read of an existing position, or spending a discount balance already granted.
+Nothing here ever blocks a read, removing a link, or spending discount
+credits already granted.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ from fastapi import HTTPException
 
 from src.config.config import Config
 from src.db.audit import record_audit
-from src.db.delegation import get_eligibility, mark_restricted, record_attestation
+from src.db.wallet_eligibility import get_eligibility, mark_restricted, record_attestation
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,7 @@ REGION_RESTRICTED = "region_restricted"
 ATTESTATION_REQUIRED = "attestation_required"
 
 _MESSAGES = {
-    REGION_RESTRICTED: "Delegated staking is not available in your region.",
+    REGION_RESTRICTED: "This feature is not available in your region.",
     ATTESTATION_REQUIRED: "Confirm you are not a resident or citizen of the United States or "
     "Canada to continue.",
 }
@@ -68,7 +67,7 @@ def _refuse(code: str) -> HTTPException:
 def request_country(request: Any) -> str | None:
     """ISO alpha-2 country from the configured trusted header, or None (no
     header configured, header missing, or not a 2-letter code)."""
-    header = Config.DELEGATION_COUNTRY_HEADER
+    header = Config.WALLET_LINK_COUNTRY_HEADER
     if not header or request is None:
         return None
     try:
@@ -79,7 +78,7 @@ def request_country(request: Any) -> str | None:
 
 
 def is_restricted_country(country: str | None) -> bool:
-    return bool(country) and country in Config.DELEGATION_RESTRICTED_COUNTRIES
+    return bool(country) and country in Config.WALLET_LINK_RESTRICTED_COUNTRIES
 
 
 def account_eligible(user_id: int) -> bool:
@@ -90,7 +89,7 @@ def account_eligible(user_id: int) -> bool:
 
 
 def eligibility_view(user_id: int) -> dict[str, Any]:
-    """For GET /delegation/rewards: status is eligible | restricted | none
+    """For POST /wallet/eligibility: status is eligible | restricted | none
     (none also when the lookup failed)."""
     row = get_eligibility(user_id) or {}
     status = row.get("status")
@@ -102,7 +101,7 @@ def eligibility_view(user_id: int) -> dict[str, Any]:
 
 
 def require_eligible(user_id: int, request: Any, attested: bool) -> None:
-    """Gate for STARTING to delegate. Raises 451 region_restricted when the
+    """Gate for linking a Cardano wallet. Raises 451 region_restricted when the
     request comes from (or the account was marked in) a restricted country,
     451 attestation_required when the account has not attested and this
     request does not either, 503 when eligibility cannot be read or stored.
@@ -112,7 +111,7 @@ def require_eligible(user_id: int, request: Any, attested: bool) -> None:
         mark_restricted(user_id, country, "request_country")
         record_audit(
             {"id": user_id},
-            action="delegation.eligibility.restricted",
+            action="wallet.eligibility.restricted",
             target_type="user",
             target_id=user_id,
             request=request,
@@ -139,7 +138,7 @@ def require_eligible(user_id: int, request: Any, attested: bool) -> None:
             raise _refuse(REGION_RESTRICTED)
         record_audit(
             {"id": user_id},
-            action="delegation.eligibility.attested",
+            action="wallet.eligibility.attested",
             target_type="user",
             target_id=user_id,
             request=request,

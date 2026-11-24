@@ -1,4 +1,4 @@
-"""Tests for src.services.delegation.cip8 -- the CIP-30 signData / CIP-8
+"""Tests for src.services.wallet.cip8 -- the CIP-30 signData / CIP-8
 COSE_Sign1 proof that a user controls a Cardano stake address.
 
 Every proof here is produced with a real Ed25519 keypair, the way a wallet
@@ -15,8 +15,8 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from src.services.delegation import cip8
-from src.services.delegation.cip8 import Cip8VerificationError, verify_stake_signature
+from src.services.wallet import cip8
+from src.services.wallet.cip8 import Cip8VerificationError, verify_stake_signature
 
 MESSAGE = "Link this Cardano stake address to Gatewayz account 42.\nNonce: abc123"
 

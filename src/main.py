@@ -586,11 +586,11 @@ def create_app() -> FastAPI:
         (
             "wallet_auth_cardano",
             "Cardano Wallet Link",
-        ),  # CIP-30 signData stake-address linking (delegated staking)
+        ),  # CIP-30 signData stake-address linking + POST /wallet/eligibility
         (
-            "delegation",
-            "Delegated Staking",
-        ),  # Inference allowance for stake delegated to the Gatewayz vault / pool
+            "discount_credits",
+            "Discount Credits",
+        ),  # GET /discount-credits: the caller's discount credits balance
         (
             "gpu",
             "GPU Marketplace",

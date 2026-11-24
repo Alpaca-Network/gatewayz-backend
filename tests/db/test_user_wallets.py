@@ -139,7 +139,7 @@ def test_unlink_wallet_returns_false_on_error(sb):
 
 
 def test_list_all_wallets_returns_rows_oldest_first(sb):
-    """The delegated-staking measurement sweep walks every linked wallet;
+    """A job that sweeps every linked wallet relies on this order;
     a stable created_at order keeps the sweep reproducible across runs."""
     rows = [{"wallet_address": "0xabc", "created_at": "2026-09-01T00:00:00Z"}]
     client = _mock_table_client({"user_wallets": rows})

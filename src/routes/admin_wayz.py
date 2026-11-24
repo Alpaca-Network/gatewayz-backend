@@ -61,12 +61,6 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics) --
     # once a day, after gpu_spot_check.
     "emission_epoch": 1440,
-    # Delegated staking (src/services/delegation/): the measurement sweep runs
-    # DELEGATION_MEASUREMENTS_PER_DAY times a day; accrual and reconciliation daily.
-    "delegation_measurements": 1440 // max(1, min(Config.DELEGATION_MEASUREMENTS_PER_DAY, 24)),
-    "delegation_accruals": 1440,
-    "delegation_reconciliation": 1440,
-    "delegation_attribution": 1440,
     # Usage anchoring on Avalanche C-Chain (src/services/chain/usage_anchor.py):
     # the anchor once a day, the confirmation sweep every few minutes.
     "usage_anchor": 1440,

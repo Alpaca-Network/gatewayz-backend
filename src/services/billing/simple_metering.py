@@ -31,16 +31,16 @@ async def precheck_credits(
     """Return the user, or raise 401 (unknown key) / 402 (cannot afford).
 
     Requires a strictly positive balance that covers ``estimated_cost``. With
-    the delegated-staking discount on and a ``billing_ref`` (the key the
+    discount credits billing on and a ``billing_ref`` (the key the
     charge settles on), this request's discount is held and counted too.
     """
     user = await asyncio.to_thread(users_module.get_user, api_key)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API key")
     balance = user_balance(user)
-    from src.services.delegation.discount import discount_aware_credits_async
+    from src.services.discount_credits.billing import discount_aware_credits_async
 
-    # List-price capacity incl. this request's held inference discount
+    # List-price capacity incl. this request's held discount credits
     # (identity while disabled).
     capacity = await discount_aware_credits_async(
         user.get("id"), balance, estimated_cost, billing_ref

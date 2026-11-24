@@ -59,14 +59,46 @@ class TestConfigEnvironmentDetection:
 
         from src.config import config
 
-        monkeypatch.setenv("DELEGATION_ALLOW_CARDANO_TESTNET", "true")
+        monkeypatch.setenv("WALLET_LINK_ALLOW_CARDANO_TESTNET", "true")
         monkeypatch.setenv("APP_ENV", "production")
         importlib.reload(config)
-        assert config.Config.DELEGATION_ALLOW_CARDANO_TESTNET is False
+        assert config.Config.WALLET_LINK_ALLOW_CARDANO_TESTNET is False
 
         monkeypatch.setenv("APP_ENV", "staging")
         importlib.reload(config)
-        assert config.Config.DELEGATION_ALLOW_CARDANO_TESTNET is True
+        assert config.Config.WALLET_LINK_ALLOW_CARDANO_TESTNET is True
+
+    def test_discount_credits_billing_is_off_by_default(self, monkeypatch):
+        """Billing must not draw on discount credits unless explicitly enabled,
+        and the retired flag names switch nothing on."""
+        import importlib
+
+        from src.config import config
+
+        for name in (
+            "VAULT_DISCOUNT_BILLING_ENABLED",
+            "VAULT_DISCOUNT_PERCENT",
+            "VAULT_DISCOUNT_HOLD_TTL_SECONDS",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("DELEGATED_STAKING_ENABLED", "true")
+        monkeypatch.setenv("DELEGATION_DISCOUNT_ENABLED", "true")
+        importlib.reload(config)
+        assert config.Config.VAULT_DISCOUNT_BILLING_ENABLED is False
+        assert str(config.Config.VAULT_DISCOUNT_PERCENT) == "0.99"
+        assert config.Config.VAULT_DISCOUNT_HOLD_TTL_SECONDS == 900
+        assert not hasattr(config.Config, "DELEGATED_STAKING_ENABLED")
+        assert not hasattr(config.Config, "DELEGATION_DISCOUNT_ENABLED")
+
+        monkeypatch.setenv("VAULT_DISCOUNT_BILLING_ENABLED", "true")
+        try:
+            importlib.reload(config)
+            assert config.Config.VAULT_DISCOUNT_BILLING_ENABLED is True
+        finally:
+            # Never leave a reloaded Config with billing switched on behind.
+            monkeypatch.delenv("VAULT_DISCOUNT_BILLING_ENABLED", raising=False)
+            importlib.reload(config)
+        assert config.Config.VAULT_DISCOUNT_BILLING_ENABLED is False
 
     def test_is_testing_detection_with_testing_env(self, monkeypatch):
         """Test testing environment detection with APP_ENV=testing"""

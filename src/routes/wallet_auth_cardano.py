@@ -5,12 +5,13 @@ src/routes/wallet_auth.py, and built the same way: the server authors the
 exact message, stores it in Redis for 5 minutes, and consumes it exactly once
 (``GETDEL``) before checking the signature, so a signature obtained anywhere
 else -- or replayed -- never links anything. The proof itself is checked in
-src/services/delegation/cip8.py: a valid Ed25519 COSE_Sign1 over our message
+src/services/wallet/cip8.py: a valid Ed25519 COSE_Sign1 over our message
 by the key whose blake2b-224 hash IS the stake credential in the address.
 
-Linking only -- a stake address is never a way to sign in. It exists so
-delegated staking (src/services/delegation/) can match pool delegators to
-accounts.
+Linking only -- a stake address is never a way to sign in. It exists so the
+Gatewayz vault's depositors can be matched to accounts. Linking is refused for
+a US / Canadian person (src/services/wallet/eligibility.py); POST
+/wallet/eligibility records the same attestation on its own.
 """
 
 from __future__ import annotations
@@ -26,16 +27,16 @@ from pydantic import BaseModel, Field, field_validator
 from src.config.config import Config
 from src.config.redis_config import get_redis_client
 from src.db.user_wallets import CARDANO_NAMESPACE, get_wallet, link_wallet
-from src.routes.wallet_auth import _pay_pending_delegation_rewards, _wallet_view
-from src.security.deps import get_user_id
+from src.routes.wallet_auth import _wallet_view
+from src.security.deps import get_current_user, get_user_id
 from src.security.siwe import SIWE_MESSAGE_TTL_SECONDS
-from src.services.delegation.cip8 import (
+from src.services.wallet.cip8 import (
     Cip8VerificationError,
     parse_stake_address,
     verify_stake_signature,
 )
-from src.services.delegation.eligibility import require_eligible
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
+from src.services.wallet.eligibility import eligibility_view, require_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ def _validated_stake_address(value: str) -> str:
         raise ValueError("stake_address must be a string")
     lowered = value.strip().lower()
     try:
-        parse_stake_address(lowered, allow_testnet=Config.DELEGATION_ALLOW_CARDANO_TESTNET)
+        parse_stake_address(lowered, allow_testnet=Config.WALLET_LINK_ALLOW_CARDANO_TESTNET)
     except Cip8VerificationError as e:
         raise ValueError(f"stake_address rejected: {e.code}") from e
     return lowered
@@ -77,6 +78,12 @@ class CardanoNonceRequest(BaseModel):
     @classmethod
     def _valid(cls, v: str) -> str:
         return _validated_stake_address(v)
+
+
+class WalletEligibilityRequest(BaseModel):
+    # "I am not a resident or citizen of the United States or Canada." Must be
+    # true; anything else is refused with 451 attestation_required.
+    not_us_ca_person: bool = False
 
 
 class CardanoLinkRequest(BaseModel):
@@ -163,8 +170,8 @@ async def cardano_link(
     _rl: None = Depends(cardano_link_rl),
 ) -> dict[str, Any]:
     """Verify the CIP-30 proof over the issued message and link the stake
-    address to the caller's account. A stake address exists only for
-    delegated staking, so the US / Canada gate applies here too."""
+    address to the caller's account. The US / Canada gate applies here
+    too."""
     require_eligible(user_id, request, body.not_us_ca_person)
     redis_client = _require_redis()
     try:
@@ -181,7 +188,7 @@ async def cardano_link(
             body.signature,
             body.key,
             stored,
-            allow_testnet=Config.DELEGATION_ALLOW_CARDANO_TESTNET,
+            allow_testnet=Config.WALLET_LINK_ALLOW_CARDANO_TESTNET,
         )
     except Cip8VerificationError as e:
         logger.info("cardano link rejected for user %s: %s", user_id, e.code)
@@ -210,5 +217,17 @@ async def cardano_link(
             raise HTTPException(status_code=409, detail="wallet_linked_to_other_account")
         raise HTTPException(status_code=500, detail="wallet_link_failed")
 
-    _pay_pending_delegation_rewards(body.stake_address, user_id)
     return {"success": True, "data": {"wallet": _wallet_view(wallet_row)}}
+
+
+@router.post("/wallet/eligibility", tags=["wallet_auth"])
+async def attest_wallet_eligibility(
+    body: WalletEligibilityRequest,
+    request: Request,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Record the caller's attestation that they are not a US or Canadian
+    person, without linking a wallet in the same call. 451 region_restricted /
+    attestation_required otherwise."""
+    require_eligible(user["id"], request, body.not_us_ca_person)
+    return {"success": True, "data": {"eligibility": eligibility_view(user["id"])}}

@@ -1,12 +1,12 @@
-"""DB access for the inference discount -- inference_discount_balances and
-inference_discount_ledger (supabase/migrations/
-20261011120000_delegation_reward_share_discount.sql).
+"""DB access for the discount credits balance -- inference_discount_balances,
+inference_discount_ledger and inference_discount_holds (supabase/migrations/
+20261011120000_delegation_reward_share_discount.sql; the tables and SQL
+functions keep their historical names).
 
-Every balance change goes through one of the SQL functions (discount_apply,
-discount_reverse, discount_adjust; discount_grant via
-delegation_grant_attribution), each of which takes the account's balance row
-lock and is idempotent on a UUID request_id. Nothing here reads a balance and
-writes it back.
+Every balance change goes through one of the SQL functions (discount_grant,
+discount_hold, discount_apply, discount_reverse), each of which takes the
+account's balance row lock and is idempotent on a UUID request_id. Nothing
+here reads a balance and writes it back.
 
 Two conventions, chosen per caller:
 
@@ -16,8 +16,8 @@ Two conventions, chosen per caller:
   call failed so it charges full price (fail open to full price); a silent 0
   would be indistinguishable from "no balance", which is fine, but a silent
   0 from a call that DID apply would double-charge.
-* the reads return a safe default (None / empty) and log, like
-  src/db/delegation.py.
+* the reads and :func:`grant_discount` return a safe default (None / empty)
+  and log.
 """
 
 from __future__ import annotations
@@ -27,12 +27,20 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
-from src.db.delegation import _rpc_payload, _select_all
 
 logger = logging.getLogger(__name__)
 
 _BALANCES_TABLE = "inference_discount_balances"
 _LEDGER_TABLE = "inference_discount_ledger"
+
+
+def _rpc_payload(data: Any) -> dict[str, Any] | None:
+    if isinstance(data, list):
+        data = data[0] if data else None
+    if isinstance(data, dict) and len(data) == 1 and not data.get("status"):
+        # Some PostgREST versions wrap a scalar jsonb return as {fn_name: value}.
+        data = next(iter(data.values()))
+    return data if isinstance(data, dict) else None
 
 
 class DiscountUnavailableError(Exception):
@@ -126,31 +134,38 @@ def reverse_discount(request_id: str) -> Decimal:
     return _scalar(result.data)
 
 
-def adjust_discount(
+def grant_discount(
     user_id: int,
-    amount: Decimal,
+    amount_usd: Decimal,
     request_id: str,
-    reason: str,
-    admin_user_id: int | None,
+    ref: str,
 ) -> dict[str, Any] | None:
-    """An admin correction (supabase function discount_adjust): signed,
-    never below zero, idempotent on `request_id`. Returns {status,
-    amount_usd?, balance_after?}; None on failure."""
+    """Add discount credits to an account (supabase function discount_grant).
+
+    In production, discount credits may only be granted by the vault mirror
+    job from on-chain mints. Tests and a developer-run script may call this
+    directly.
+
+    Idempotent on `request_id` (a UUID): a repeat adds nothing and returns
+    the first grant's amount with status 'exists'. `amount_usd` is in USD of
+    list price, truncated to 6 dp by the SQL; a non-positive amount returns
+    status 'invalid'. `ref` is a short label stored on the ledger row.
+    Returns {status, amount_usd?, balance_after?}; None on failure."""
     try:
         client = get_supabase_client()
         result = client.rpc(
-            "discount_adjust",
+            "discount_grant",
             {
                 "p_user_id": user_id,
-                "p_amount": str(amount),
+                "p_amount": str(amount_usd),
                 "p_request_id": request_id,
-                "p_reason": reason,
-                "p_admin_user_id": admin_user_id,
+                "p_ref": ref,
+                "p_metadata": {},
             },
         ).execute()
         return _rpc_payload(result.data)
     except Exception as e:
-        logger.warning(f"discount_adjust failed for user {user_id}: {type(e).__name__}")
+        logger.warning(f"discount_grant failed for user {user_id}: {type(e).__name__}")
         return None
 
 
@@ -162,16 +177,6 @@ def get_balance(user_id: int) -> dict[str, Any] | None:
         return (result.data or [None])[0]
     except Exception as e:
         logger.warning(f"inference_discount_balances lookup failed for user {user_id}: {e}")
-        return None
-
-
-def list_balances() -> list[dict[str, Any]] | None:
-    """Every balance row. None on a failed read, so a total can never be
-    reported from a partial listing."""
-    try:
-        return _select_all(lambda c: c.table(_BALANCES_TABLE).select("*").order("user_id"))
-    except Exception as e:
-        logger.warning(f"inference_discount_balances listing failed: {e}")
         return None
 
 

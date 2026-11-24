@@ -1,10 +1,11 @@
-"""The delegated-staking inference discount at billing time
-(src/services/delegation/discount.py, hooked into src/db/users.py::
+"""Discount credits at billing time
+(src/services/discount_credits/billing.py, hooked into src/db/users.py::
 deduct_credits and credit_handler.refund_credits).
 
 Invariants:
-* flags off -> deduct_credits is unchanged: same RPC call, same params, and
-  no discount RPC / balance read at all;
+* VAULT_DISCOUNT_BILLING_ENABLED off (the default) -> deduct_credits is
+  unchanged: same RPC call, same params, and no discount RPC / balance read
+  at all;
 * on -> d x cost comes out of the discount balance (discount_apply, keyed on
   the billing request_id) and only cost - applied is charged in credits;
 * any discount error -> full price, the request never fails because of it;
@@ -22,7 +23,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.services.delegation import discount
+from src.services.discount_credits import billing as discount
 
 REQ = "6f9b1f0e-3c2a-4d5e-9b8a-1c2d3e4f5a6b"
 
@@ -72,10 +73,9 @@ def _ok_deduct(name, params):
 
 @pytest.fixture
 def flags(monkeypatch):
-    def set_(enabled=True, staking=True, percent="0.99"):
-        monkeypatch.setattr(discount.Config, "DELEGATION_DISCOUNT_ENABLED", enabled)
-        monkeypatch.setattr(discount.Config, "DELEGATED_STAKING_ENABLED", staking)
-        monkeypatch.setattr(discount.Config, "DELEGATION_DISCOUNT_PERCENT", Decimal(percent))
+    def set_(enabled=True, percent="0.99"):
+        monkeypatch.setattr(discount.Config, "VAULT_DISCOUNT_BILLING_ENABLED", enabled)
+        monkeypatch.setattr(discount.Config, "VAULT_DISCOUNT_PERCENT", Decimal(percent))
 
     return set_
 
@@ -109,9 +109,29 @@ def _atomic(client):
 
 
 class TestFlagOff:
-    @pytest.mark.parametrize("enabled,staking", [(False, False), (False, True), (True, False)])
-    def test_unchanged_and_no_discount_db_call(self, flags, enabled, staking):
-        flags(enabled=enabled, staking=staking)
+    def test_the_flag_is_off_unless_configured(self):
+        """No fixture: the Config the test suite imports has the flag unset."""
+        assert discount.Config.VAULT_DISCOUNT_BILLING_ENABLED is False
+        assert discount.discount_enabled() is False
+
+    def test_default_config_bills_unchanged_with_no_discount_db_call(self):
+        """With nothing configured at all, billing is exactly as before."""
+        client = _client(_ok_deduct)
+        with (
+            patch("src.db.inference_discount.apply_discount") as apply,
+            patch("src.db.inference_discount.hold_discount") as hold,
+            patch("src.db.inference_discount.get_balance") as balance,
+        ):
+            _deduct(client)
+        apply.assert_not_called()
+        hold.assert_not_called()
+        balance.assert_not_called()
+        assert [n for n, _ in client.calls] == ["atomic_deduct_credits"]
+        assert _atomic(client)[0]["p_tokens_amount"] == 2.0
+        assert _atomic(client)[0]["p_metadata"] == {"model": "m", "request_id": REQ}
+
+    def test_unchanged_and_no_discount_db_call(self, flags):
+        flags(enabled=False)
         client = _client(_ok_deduct)
         with (
             patch("src.db.inference_discount.apply_discount") as apply,
@@ -172,7 +192,7 @@ class TestFlagOn:
             return _ok_deduct(name, params)
 
         client = _client(handler)
-        with patch("src.services.delegation.discount.logger") as log:
+        with patch("src.services.discount_credits.billing.logger") as log:
             _deduct(client, cost=2.0)
         assert _atomic(client)[0]["p_tokens_amount"] == 2.0
         logged = " ".join(str(a) for c in log.warning.call_args_list for a in c.args)
@@ -401,7 +421,7 @@ class TestRefund:
         from src.services.billing import credit_handler
 
         with (
-            patch("src.services.delegation.discount.reverse_or_none", return_value=restored),
+            patch("src.services.discount_credits.billing.reverse_or_none", return_value=restored),
             patch(
                 "src.db.credit_transactions.get_transaction_by_request_id",
                 return_value=charged_tx,
@@ -455,7 +475,7 @@ class TestRefund:
 
     def test_flag_off_refund_unchanged(self, flags):
         flags(enabled=False)
-        with patch("src.services.delegation.discount.reverse_or_none") as reverse:
+        with patch("src.services.discount_credits.billing.reverse_or_none") as reverse:
             from src.services.billing import credit_handler
 
             with patch("src.db.users.add_credits_to_user") as add:

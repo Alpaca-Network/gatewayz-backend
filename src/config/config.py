@@ -235,28 +235,6 @@ class Config:
     )
     STAKING_REWARDS_MIN_CREDITS = float(_get_env_var("STAKING_REWARDS_MIN_CREDITS", "0.0001"))
 
-    # Read-only EVM RPC access (delegated staking's vault reader, and
-    # BASE_RPC_URL for ETH payouts). One RPC URL per supported EVM chain.
-    # Defaults are public endpoints so a
-    # fresh environment works without configuration; production should point
-    # these at a paid provider, since public endpoints rate-limit and a
-    # rate-limited chain is reported as a *failed* read (never a zero balance).
-    #
-    # Precedence per chain (src/services/holdings/chains.py): an explicit
-    # <CHAIN>_RPC_URL that differs from the public default below, then an
-    # Alchemy URL derived from ALCHEMY_API_KEY, then the public default. A
-    # transport failure on the chosen endpoint is retried on the public
-    # endpoints before the chain is declared unread. The key is a secret: it
-    # is never logged, and RPC URLs are redacted from every error message.
-    ALCHEMY_API_KEY = _get_env_var("ALCHEMY_API_KEY")
-    ETHEREUM_RPC_URL = _get_env_var("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com")
-    BNB_CHAIN_RPC_URL = _get_env_var("BNB_CHAIN_RPC_URL", "https://bsc-dataseed.binance.org")
-    # Mainnet C-Chain -- distinct from AVALANCHE_FUJI_RPC_URL (testnet, WAYZ contracts).
-    AVALANCHE_RPC_URL = _get_env_var("AVALANCHE_RPC_URL", "https://api.avax.network/ext/bc/C/rpc")
-    BASE_RPC_URL = _get_env_var("BASE_RPC_URL", "https://mainnet.base.org")
-    # polygon-rpc.com started answering 401 (key required).
-    POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-bor-rpc.publicnode.com")
-    ARBITRUM_RPC_URL = _get_env_var("ARBITRUM_RPC_URL", "https://arb1.arbitrum.io/rpc")
     # v2 job usage lines for cost disputes (src/services/job_usage_v2.py). Ships
     # dark: migration 20261023000000 must be applied BEFORE this is turned on, or
     # the new append_job_usage arguments fail and job usage lines are lost.
@@ -280,53 +258,39 @@ class Config:
     }
     DISPUTE_VAULT_KEYS = _get_env_var("DISPUTE_VAULT_KEYS", "")
     DISPUTE_VAULT_PUBLIC_BASE = _get_env_var("DISPUTE_VAULT_PUBLIC_BASE", "https://api.gatewayz.ai")
-    # Shared price feed and ops-alert cooldown (src/services/holdings/prices.py
-    # and alerts.py), used by delegated staking. The names are historical:
-    # the holdings rewards program they were introduced for is retired.
-    # A USD price older than this is treated as unusable and the asset is
-    # skipped for that run (fail closed) rather than valued at a stale price.
-    HOLDINGS_PRICE_MAX_STALENESS_SECONDS = int(
-        _get_env_var("HOLDINGS_PRICE_MAX_STALENESS_SECONDS", "900")
-    )
-    # Each ops-alert condition is sent at most once per this many hours.
-    HOLDINGS_ALERT_COOLDOWN_HOURS = float(_get_env_var("HOLDINGS_ALERT_COOLDOWN_HOURS", "12"))
-    # Delegated staking (src/services/delegation/, docs/delegation/README.md):
-    # users stake ETH from their own wallet into a Gatewayz-run StakeWise V3
-    # vault, or delegate ADA to a Gatewayz Cardano pool. Non-custodial -- the
-    # stake never leaves the user's control -- and the staking rewards accrue
-    # to us through the vault fee / pool margin. We grant inference credits
-    # at an admin-set, changeable rate; never a fixed or guaranteed return.
+    # Discount credits (src/services/discount_credits/billing.py,
+    # docs/discount-credits/README.md): a per-account balance granted only
+    # from the Gatewayz vault, which pays part of each billed request.
     #
-    # Ships dark: off by default, and with the vault address and pool id unset
-    # every reader and job no-ops for that asset even if the flag is on.
-    DELEGATED_STAKING_ENABLED = _get_env_var("DELEGATED_STAKING_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    STAKEWISE_VAULT_ADDRESS = (_get_env_var("STAKEWISE_VAULT_ADDRESS", "") or "").strip() or None
-    STAKEWISE_VAULT_CHAIN_ID = _int_env("STAKEWISE_VAULT_CHAIN_ID", 1)
-    # bech32 pool id (pool1...).
-    CARDANO_POOL_ID = (_get_env_var("CARDANO_POOL_ID", "") or "").strip() or None
-    KOIOS_BASE_URL = _get_env_var("KOIOS_BASE_URL", "https://api.koios.rest/api/v1")
-    # Optional bearer token for Koios' paid tiers. A secret: never logged.
-    KOIOS_API_KEY = _get_env_var("KOIOS_API_KEY")
-    # Accept stake_test1... addresses when linking a Cardano wallet, and report
-    # cardano.network "preprod" on /delegation/status so the frontend switches
-    # to preprod (testnet demos; point KOIOS_BASE_URL at preprod Koios too).
-    # Never on in production: a testnet stake key proves nothing about mainnet
-    # ADA, so APP_ENV=production ignores the flag.
-    DELEGATION_ALLOW_CARDANO_TESTNET = not IS_PRODUCTION and _get_env_var(
-        "DELEGATION_ALLOW_CARDANO_TESTNET", "false"
+    # Billing draws on discount credits only when this is on. Off (default)
+    # -> deduct_credits is unchanged and makes no extra DB call.
+    VAULT_DISCOUNT_BILLING_ENABLED = _get_env_var(
+        "VAULT_DISCOUNT_BILLING_ENABLED", "false"
     ).lower() in {"1", "true", "yes"}
-    # Counsel cleared delegated staking everywhere except the US and Canada
-    # (2026-10-14). ISO 3166-1 alpha-2, comma-separated. An account seen in or
-    # attesting from one of these cannot start delegating (link a stake
-    # address, attest) and is granted nothing new; exits, reads and spending
-    # an existing discount balance are never blocked.
-    DELEGATION_RESTRICTED_COUNTRIES = frozenset(
+    # d: the part of a request's list price drawn from the discount credits
+    # balance (the user pays 1 - d from the paid balance), clamped 0..0.99 --
+    # never 1, so every request still writes a credit row and passes the
+    # daily usage limit.
+    VAULT_DISCOUNT_PERCENT = _decimal_env("VAULT_DISCOUNT_PERCENT", "0.99")
+    # How long a request's pre-check hold on the discount credits balance
+    # lives if the request is never billed (60..3600 s). Settled holds go at
+    # once.
+    VAULT_DISCOUNT_HOLD_TTL_SECONDS = _int_env("VAULT_DISCOUNT_HOLD_TTL_SECONDS", 900)
+    # Cardano wallet linking (src/routes/wallet_auth_cardano.py,
+    # src/services/wallet/). Accept stake_test1... addresses when linking
+    # (testnet demos). Never on in production: a testnet stake key proves
+    # nothing about mainnet ADA, so APP_ENV=production ignores the flag.
+    WALLET_LINK_ALLOW_CARDANO_TESTNET = not IS_PRODUCTION and _get_env_var(
+        "WALLET_LINK_ALLOW_CARDANO_TESTNET", "false"
+    ).lower() in {"1", "true", "yes"}
+    # Counsel cleared the program everywhere except the US and Canada
+    # (2026-10-14); the vault has the same restriction. ISO 3166-1 alpha-2,
+    # comma-separated. An account seen in or attesting from one of these
+    # cannot link a Cardano stake address or attest; reads, removing a link
+    # and spending discount credits already granted are never blocked.
+    WALLET_LINK_RESTRICTED_COUNTRIES = frozenset(
         c.strip().upper()
-        for c in (_get_env_var("DELEGATION_RESTRICTED_COUNTRIES", "US,CA") or "").split(",")
+        for c in (_get_env_var("WALLET_LINK_RESTRICTED_COUNTRIES", "US,CA") or "").split(",")
         if c.strip()
     )
     # Request header carrying the caller's country (e.g. cf-ipcountry). Unset
@@ -334,72 +298,7 @@ class Config:
     # sets no country header, and a header the edge does not overwrite is
     # whatever the client sent. Set it only behind an edge that always sets it.
     # Unset -> the self-attestation is the only check.
-    DELEGATION_COUNTRY_HEADER = (_get_env_var("DELEGATION_COUNTRY_HEADER", "") or "").lower()
-    # m in A = R / (1 - m): our gross margin on inference. A credit costs us
-    # (1 - m) dollars, which is what reconciliation charges against revenue.
-    DELEGATION_INFERENCE_MARGIN = _decimal_env("DELEGATION_INFERENCE_MARGIN", "0.20")
-    # R: expected staking revenue to us per USD staked per day, per asset.
-    # Only feeds the SUGGESTED rate shown to admins; the paid rate is always
-    # the one an admin set in delegation_allowance_rates. 0 = no suggestion.
-    DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ETH = _decimal_env(
-        "DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ETH", "0"
-    )
-    DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ADA = _decimal_env(
-        "DELEGATION_EXPECTED_DAILY_REVENUE_PER_USD_ADA", "0"
-    )
-    # Per-account daily ceiling (all wallets and assets together) and a global
-    # daily budget across every account. Conservative placeholders.
-    DELEGATION_DAILY_CAP_CREDITS = _decimal_env("DELEGATION_DAILY_CAP_CREDITS", "5")
-    DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS = _decimal_env(
-        "DELEGATION_GLOBAL_DAILY_BUDGET_CREDITS", "50"
-    )
-    # Measurement sweeps per UTC day, and how many a day needs before it can be
-    # paid (lowest-of-day only resists farming with several readings).
-    DELEGATION_MEASUREMENTS_PER_DAY = _int_env("DELEGATION_MEASUREMENTS_PER_DAY", 4)
-    DELEGATION_MIN_MEASUREMENTS_PER_DAY = _int_env("DELEGATION_MIN_MEASUREMENTS_PER_DAY", 2)
-    # Reconciliation fails closed when the cost of credits granted exceeds
-    # revenue x (1 + tolerance) + grace. Grace is an absolute USD allowance for
-    # the revenue lag at launch (Cardano rewards land ~2 epochs late); 0 means
-    # any unbacked grant pauses the asset.
-    DELEGATION_RECONCILIATION_TOLERANCE = _decimal_env(
-        "DELEGATION_RECONCILIATION_TOLERANCE", "0.05"
-    )
-    DELEGATION_RECONCILIATION_GRACE_USD = _decimal_env("DELEGATION_RECONCILIATION_GRACE_USD", "0")
-    DELEGATION_MEASUREMENT_CRON_MINUTE_UTC = _int_env("DELEGATION_MEASUREMENT_CRON_MINUTE_UTC", 10)
-    DELEGATION_ACCRUAL_CRON_HOUR_UTC = _int_env("DELEGATION_ACCRUAL_CRON_HOUR_UTC", 0)
-    DELEGATION_ACCRUAL_CRON_MINUTE_UTC = _int_env("DELEGATION_ACCRUAL_CRON_MINUTE_UTC", 50)
-    DELEGATION_RECONCILIATION_CRON_HOUR_UTC = _int_env("DELEGATION_RECONCILIATION_CRON_HOUR_UTC", 0)
-    DELEGATION_RECONCILIATION_CRON_MINUTE_UTC = _int_env(
-        "DELEGATION_RECONCILIATION_CRON_MINUTE_UTC", 30
-    )
-    # v3 (src/services/delegation/attribution.py, discount.py): how delegation
-    # pays out. "reward_share" (default) grants DELEGATION_REWARD_SHARE of the
-    # revenue each wallet's stake actually earned us as an inference DISCOUNT
-    # balance; "allowance" is the v2 admin-rate credit grant, kept for
-    # rollback. In reward_share mode the v2 accrual grants nothing.
-    DELEGATION_PAYOUT_MODEL = (
-        (_get_env_var("DELEGATION_PAYOUT_MODEL", "reward_share") or "reward_share").strip().lower()
-    )
-    # Share of attributed revenue returned as discount, clamped 0..1.
-    DELEGATION_REWARD_SHARE = _decimal_env("DELEGATION_REWARD_SHARE", "0.95")
-    # d: the part of a request's list price drawn from the discount balance
-    # (the user pays 1 - d in credits), clamped 0..0.99 -- never 1, so every
-    # request still writes a credit row and passes the daily usage limit.
-    DELEGATION_DISCOUNT_PERCENT = _decimal_env("DELEGATION_DISCOUNT_PERCENT", "0.99")
-    # Billing applies the discount only when this AND DELEGATED_STAKING_ENABLED
-    # are on. Off -> deduct_credits is unchanged and makes no extra DB call.
-    DELEGATION_DISCOUNT_ENABLED = _get_env_var("DELEGATION_DISCOUNT_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    # How long a request's pre-check hold on the discount balance lives if
-    # the request is never billed (60..3600 s). Settled holds go at once.
-    DELEGATION_DISCOUNT_HOLD_TTL_SECONDS = _int_env("DELEGATION_DISCOUNT_HOLD_TTL_SECONDS", 900)
-    # The daily attribution job: after reconciliation (00:30) has recorded
-    # the revenue it divides.
-    DELEGATION_ATTRIBUTION_CRON_HOUR_UTC = _int_env("DELEGATION_ATTRIBUTION_CRON_HOUR_UTC", 0)
-    DELEGATION_ATTRIBUTION_CRON_MINUTE_UTC = _int_env("DELEGATION_ATTRIBUTION_CRON_MINUTE_UTC", 40)
+    WALLET_LINK_COUNTRY_HEADER = (_get_env_var("WALLET_LINK_COUNTRY_HEADER", "") or "").lower()
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.

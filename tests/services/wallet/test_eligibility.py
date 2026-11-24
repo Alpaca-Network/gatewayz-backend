@@ -1,7 +1,7 @@
-"""Tests for src/services/delegation/eligibility.py -- the US / Canada block.
-Counsel cleared delegated staking everywhere except the US and Canada; an
-account must attest before it starts delegating or is granted anything, and a
-restricted country is sticky. The DB and the audit log are mocked."""
+"""Tests for src/services/wallet/eligibility.py -- the US / Canada block.
+Counsel cleared the program everywhere except the US and Canada; an account
+must attest before it links a Cardano wallet, and a restricted country is
+sticky. The DB and the audit log are mocked."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from src.services.delegation import eligibility, rewards
+from src.services.wallet import eligibility
 
 USER_ID = 42
 ATTESTED = {
@@ -58,9 +58,9 @@ def store(monkeypatch):
         monkeypatch.setattr(eligibility, name, getattr(fake, name))
     monkeypatch.setattr(eligibility, "record_audit", MagicMock())
     monkeypatch.setattr(
-        eligibility.Config, "DELEGATION_RESTRICTED_COUNTRIES", frozenset({"US", "CA"})
+        eligibility.Config, "WALLET_LINK_RESTRICTED_COUNTRIES", frozenset({"US", "CA"})
     )
-    monkeypatch.setattr(eligibility.Config, "DELEGATION_COUNTRY_HEADER", "")
+    monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "")
     return fake
 
 
@@ -94,7 +94,7 @@ class TestRequireEligible:
         assert store.attested == []
 
     def test_restricted_country_header_is_refused_and_sticks(self, store, monkeypatch):
-        monkeypatch.setattr(eligibility.Config, "DELEGATION_COUNTRY_HEADER", "cf-ipcountry")
+        monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "cf-ipcountry")
         for country in ("US", "ca"):
             store.row = {}
             assert _status(
@@ -114,7 +114,7 @@ class TestRequireEligible:
         assert store.restricted == []
 
     def test_other_countries_pass_with_attestation(self, store, monkeypatch):
-        monkeypatch.setattr(eligibility.Config, "DELEGATION_COUNTRY_HEADER", "cf-ipcountry")
+        monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "cf-ipcountry")
         eligibility.require_eligible(USER_ID, _request({"cf-ipcountry": "FR"}), True)
         assert store.row["country"] == "FR"
 
@@ -140,21 +140,3 @@ class TestAccountEligible:
         view = eligibility.eligibility_view(USER_ID)
         assert view["status"] == "eligible"
         assert view["attestation_text"] == eligibility.ATTESTATION_TEXT
-
-
-class TestPayoutGate:
-    """Rewards (v2 and v3 both go through _payee_verified) are granted only to
-    an eligible account."""
-
-    @pytest.fixture
-    def linked(self, monkeypatch):
-        monkeypatch.setattr(rewards, "get_wallet", lambda w: {"user_id": USER_ID})
-        monkeypatch.setattr(rewards, "get_user_by_id", lambda u: {"id": u, "is_active": True})
-
-    def test_not_attested_is_not_paid(self, linked, monkeypatch):
-        monkeypatch.setattr(rewards, "account_eligible", lambda u: False)
-        assert not rewards._payee_verified("0xabc", USER_ID)
-
-    def test_attested_is_paid(self, linked, monkeypatch):
-        monkeypatch.setattr(rewards, "account_eligible", lambda u: True)
-        assert rewards._payee_verified("0xabc", USER_ID)
