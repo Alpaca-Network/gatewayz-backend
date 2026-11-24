@@ -64,6 +64,42 @@ def _rfield(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
 
+def _tool_calls_as_dicts(tool_calls: Any) -> list[dict[str, Any]] | None:
+    """Tool calls as plain dicts, whichever shape the provider client returned.
+
+    Clients built on the OpenAI SDK return tool calls as SDK objects
+    (``ChatCompletionMessageFunctionToolCall`` / ``ChoiceDeltaToolCall``);
+    dict-returning clients (Anthropic native, Vertex) return dicts. The internal
+    response models declare ``tool_calls`` as ``list[dict]``, so SDK objects
+    failed validation and every tool-calling response from an SDK-backed
+    provider became an error instead of reaching the caller.
+    """
+    if not tool_calls:
+        return None
+    out: list[dict[str, Any]] = []
+    for call in tool_calls:
+        if isinstance(call, dict):
+            out.append(call)
+        elif hasattr(call, "model_dump"):
+            out.append(call.model_dump(exclude_none=True))
+        else:
+            # Unknown object shape: read the OpenAI fields by attribute.
+            fn = getattr(call, "function", None)
+            item: dict[str, Any] = {
+                "id": getattr(call, "id", None),
+                "type": getattr(call, "type", None) or "function",
+                "function": {
+                    "name": getattr(fn, "name", None),
+                    "arguments": getattr(fn, "arguments", None),
+                },
+            }
+            index = getattr(call, "index", None)
+            if index is not None:
+                item["index"] = index
+            out.append(item)
+    return out or None
+
+
 # FREEZE FIX: Hard ceiling for streaming responses — prevents hung provider connections
 # from monopolizing the event loop indefinitely. Configured via MAX_STREAM_DURATION_SECONDS env var.
 # Mirrors the same constant in src/routes/chat.py (anonymous user path).
@@ -1439,7 +1475,7 @@ class ChatInferenceHandler:
 
                 content = _rfield(message, "content", "")
                 finish_reason = _rfield(choice, "finish_reason", "stop")
-                tool_calls = _rfield(message, "tool_calls")
+                tool_calls = _tool_calls_as_dicts(_rfield(message, "tool_calls"))
             else:
                 raise ValueError("Provider response missing choices")
 
@@ -1911,7 +1947,7 @@ class ChatInferenceHandler:
                         if delta is not None or chunk_finish_reason is not None:
                             content = _rfield(delta, "content")
                             role = _rfield(delta, "role")
-                            tool_calls = _rfield(delta, "tool_calls")
+                            tool_calls = _tool_calls_as_dicts(_rfield(delta, "tool_calls"))
 
                             if content:
                                 accumulated_content += content
