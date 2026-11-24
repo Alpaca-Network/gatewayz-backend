@@ -23,6 +23,9 @@ DEFAULT_REQUEST_TIMEOUT = 55.0
 # Paths that are exempt from timeout enforcement (e.g., streaming endpoints, admin operations)
 TIMEOUT_EXEMPT_PATHS = [
     "/v1/chat/completions",  # OpenAI-compatible streaming
+    # Anthropic-compatible streaming. Agent turns routinely run past the default
+    # limit; without this the stream was cut at 55 s with no error event.
+    "/v1/messages",
     "/admin/",  # Admin operations (model sync, background jobs)
     "/api/catalog",  # Model catalog fetches (can be slow)
     "/v1/models",  # Model listing (can be slow with many providers)
