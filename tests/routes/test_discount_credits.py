@@ -173,3 +173,41 @@ def test_no_route_grants_or_adjusts_discount_credits():
         if "discount" in path:
             assert path == "/discount-credits" and methods == {"GET"}
         assert "delegation" not in path
+
+
+def test_an_account_outside_the_pilot_list_sees_the_disabled_shape_and_no_db_read():
+    """With a pilot list set, an account that is not on it gets exactly what
+    everyone gets while the switch is off."""
+    app.dependency_overrides[get_current_user] = lambda: USER
+    try:
+        with (
+            patch.object(billing.Config, "VAULT_DISCOUNT_BILLING_ENABLED", True),
+            patch.object(
+                billing.Config, "VAULT_DISCOUNT_PILOT_USER_IDS", frozenset({USER["id"] + 1})
+            ),
+            patch.object(routes, "get_balance") as get_balance,
+            patch.object(routes, "list_ledger") as list_ledger,
+        ):
+            body = client.get("/discount-credits").json()
+        assert body["data"]["discount"]["enabled"] is False
+        assert body["data"]["discount_history"] == []
+        get_balance.assert_not_called()
+        list_ledger.assert_not_called()
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_an_account_on_the_pilot_list_sees_its_balance():
+    app.dependency_overrides[get_current_user] = lambda: USER
+    try:
+        with (
+            patch.object(billing.Config, "VAULT_DISCOUNT_BILLING_ENABLED", True),
+            patch.object(billing.Config, "VAULT_DISCOUNT_PILOT_USER_IDS", frozenset({USER["id"]})),
+            patch.object(routes, "get_balance", return_value=BALANCE),
+            patch.object(routes, "list_ledger", return_value=[]),
+        ):
+            body = client.get("/discount-credits").json()
+        assert body["data"]["discount"]["enabled"] is True
+        assert body["data"]["discount"]["balance_usd"] == "12.500000"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
