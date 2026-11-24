@@ -579,7 +579,6 @@ def transform_openai_to_anthropic(
     finish_reason = choice.get("finish_reason", "stop")
 
     usage = openai_response.get("usage", {})
-    prompt_tokens = usage.get("prompt_tokens", 0)
     completion_tokens = usage.get("completion_tokens", 0)
 
     # Map OpenAI finish_reason to Anthropic stop_reason
