@@ -109,3 +109,15 @@ The tables and SQL functions keep the names they were created with:
 `discount_apply`, `discount_reverse`, and the eligibility table
 `delegation_eligibility`. They were introduced by an earlier, retired program;
 only the names are historical.
+
+## Pilot list
+
+`VAULT_DISCOUNT_PILOT_USER_IDS` is a comma-separated list of account ids. While it names at least one account, billing draws on discount credits for those accounts only. Every other account is billed exactly as with the switch off, with no extra database call, and `GET /discount-credits` shows them the disabled shape.
+
+Use it to try discount credits on a few accounts in production before opening them to everyone. Leave it empty to include every account (the switch must still be on).
+
+| `VAULT_DISCOUNT_BILLING_ENABLED` | `VAULT_DISCOUNT_PILOT_USER_IDS` | Who gets the discount |
+|---|---|---|
+| off | anything | Nobody |
+| on | `10,37` | Accounts 10 and 37 |
+| on | empty | Every account with a balance |

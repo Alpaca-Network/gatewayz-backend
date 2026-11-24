@@ -63,6 +63,21 @@ def discount_enabled() -> bool:
     return bool(Config.VAULT_DISCOUNT_BILLING_ENABLED)
 
 
+def account_in_pilot(user_id: Any) -> bool:
+    """True when billing may draw on this account's discount credits: either
+    no pilot list is set (VAULT_DISCOUNT_PILOT_USER_IDS empty, everyone), or
+    the account is on it. Config only -- never a DB call."""
+    pilot = Config.VAULT_DISCOUNT_PILOT_USER_IDS
+    if not pilot:
+        return True
+    return isinstance(user_id, int) and not isinstance(user_id, bool) and user_id in pilot
+
+
+def discount_enabled_for(user_id: Any) -> bool:
+    """The switch and the pilot list together, for one account."""
+    return discount_enabled() and account_in_pilot(user_id)
+
+
 def _uuid_or_none(value: Any) -> str | None:
     if not value:
         return None
@@ -76,10 +91,11 @@ def apply_for_request(
     user_id: int, cost: Decimal, request_id: Any, metadata: dict[str, Any] | None = None
 ) -> Decimal:
     """The discount drawn for one billed request -- 0 when disabled, when the
-    request has no UUID request_id, when there is no balance, and on ANY
-    error (full price). Never raises. Never more than trunc(cost x d, 6) with
+    account is outside the pilot list, when the request has no UUID
+    request_id, when there is no balance, and on ANY error (full price).
+    Never raises. Never more than trunc(cost x d, 6) with
     d <= MAX_DISCOUNT_PERCENT, so the paid-balance charge is always positive."""
-    if not discount_enabled() or cost <= 0:
+    if not discount_enabled_for(user_id) or cost <= 0:
         return Decimal(0)
     percent = discount_percent()
     key = _uuid_or_none(request_id)
@@ -174,9 +190,12 @@ def discount_aware_credits(user_id: Any, credits: float, estimate: float, reques
     in credits, exactly like a request without the discount.
 
     Returns `credits` unchanged -- and makes no DB call -- while the discount
-    is disabled or the request has no UUID request_id; on any error, too (the
-    check then behaves exactly as before)."""
-    if not discount_enabled() or not isinstance(user_id, int) or isinstance(user_id, bool):
+    is disabled, the account is outside the pilot list, or the request has no
+    UUID request_id; on any error, too (the check then behaves exactly as
+    before)."""
+    if not isinstance(user_id, int) or isinstance(user_id, bool):
+        return credits
+    if not discount_enabled_for(user_id):
         return credits
     percent = discount_percent()
     key = _uuid_or_none(request_id)
@@ -216,8 +235,9 @@ async def discount_aware_credits_async(
 ) -> float:
     """:func:`discount_aware_credits` for async request paths: returns
     `credits` immediately (no thread hop, no DB call) while the discount is
-    disabled, else places the hold off the event loop."""
-    if not discount_enabled():
+    disabled or the account is outside the pilot list, else places the hold
+    off the event loop."""
+    if not discount_enabled_for(user_id):
         return credits
     import asyncio
 

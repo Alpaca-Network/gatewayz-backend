@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends
 
 from src.db.inference_discount import get_balance, list_ledger
 from src.security.deps import get_current_user
-from src.services.discount_credits.billing import discount_enabled, discount_percent
+from src.services.discount_credits.billing import discount_enabled_for, discount_percent
 
 logger = logging.getLogger(__name__)
 
@@ -75,15 +75,17 @@ def _balance_view(row: dict[str, Any] | None) -> dict[str, str]:
 
 def _discount_block(user_id: int) -> dict[str, Any]:
     """The `discount` and `discount_history` keys. No DB read while discount
-    credits billing is off -- zeros and an empty list, same shape."""
+    credits billing is off or the account is outside the pilot list -- zeros
+    and an empty list, same shape."""
+    enabled = discount_enabled_for(user_id)
     config = {
-        "enabled": discount_enabled(),
+        "enabled": enabled,
         "discount_percent": _num(discount_percent()),
         # Deprecated: a field of the retired program, kept (always "0") so the
         # shape the app already parses is unchanged.
         "reward_share": "0",
     }
-    if not discount_enabled():
+    if not enabled:
         return {"discount": {**config, **_balance_view(None)}, "discount_history": []}
     return {
         "discount": {**config, **_balance_view(get_balance(user_id))},
