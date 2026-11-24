@@ -89,3 +89,29 @@ def test_messages_without_key_gets_anonymous_identity_not_500():
 
     assert resp.status_code != 500, resp.text
     assert captured.get("identity") is ANONYMOUS
+
+
+def test_messages_never_enables_auto_web_search():
+    """Agent traffic must not be rewritten or sent to a search vendor."""
+    captured = {}
+
+    async def fake_chat_completions(**kwargs):
+        captured.update(kwargs)
+        return _OK
+
+    with (
+        patch("src.routes.chat.chat_completions", new=fake_chat_completions),
+        patch(
+            "src.routes.messages.get_request_identity",
+            new=AsyncMock(side_effect=lambda request, api_key=None: _fake_identity(api_key)),
+        ),
+    ):
+        client = TestClient(app)
+        resp = client.post(
+            "/v1/messages",
+            json={**_BODY, "auto_web_search": True},
+            headers={"x-api-key": "placeholder-key", "anthropic-version": "2023-06-01"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["req"].auto_web_search is False

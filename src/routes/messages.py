@@ -544,6 +544,11 @@ async def create_message(
         model=req.model,
         messages=openai_messages,
         stream=bool(req.stream),
+        # Never on this route. Auto web search rewrites the prompt with an
+        # injected system message and sends the query to a search vendor; an
+        # agent's context is source code and tool output, and it brings its own
+        # tools when it wants to search.
+        auto_web_search=False,
         **openai_params,
     )
 
