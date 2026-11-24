@@ -42,7 +42,10 @@ tiktoken>=0.7.0
 prometheus-client==0.21.0
 python-snappy==0.7.0
 protobuf==5.29.4
-sentry-sdk[fastapi]>=2.20.0
+# Below 3: sentry-sdk 3.0 removed options this app passes to sentry_sdk.init
+# (send_default_pii), and the app then fails to start. Move to 3.x on purpose,
+# with src/utils/sentry_init.py updated in the same change.
+sentry-sdk[fastapi]>=2.20.0,<3
 
 # Scheduled Jobs (Phase 3 - Issue #996)
 APScheduler==3.10.4
