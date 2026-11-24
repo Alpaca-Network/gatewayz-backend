@@ -1052,7 +1052,7 @@ def deduct_credits(
         logger.info("Skipping credit deduction for zero-cost request")
         return
     tokens = float(quantize_cost_up(tokens))
-    # Delegated-staking inference discount drawn for this request (see below);
+    # Discount credits drawn for this request (see below);
     # stays 0 -- and is never touched -- while the discount is disabled.
     discount_applied = Decimal(0)
     discount_key = None
@@ -1139,17 +1139,21 @@ def deduct_credits(
         except Exception as e:
             logger.warning(f"Error checking admin tier status for credit deduction: {e}")
 
-        # DELEGATED-STAKING INFERENCE DISCOUNT (v3, src/services/delegation/
-        # discount.py). discount_enabled() is a config read: with
-        # DELEGATION_DISCOUNT_ENABLED / DELEGATED_STAKING_ENABLED off nothing
+        # DISCOUNT CREDITS (src/services/discount_credits/billing.py).
+        # discount_enabled() is a config read: with
+        # VAULT_DISCOUNT_BILLING_ENABLED off nothing
         # below runs and billing is unchanged. When on, d x cost is drawn from
-        # the account's discount balance first -- row-locked and idempotent on
-        # this same request_id, so a retry draws nothing new -- and only the
-        # rest is charged in credits. Any discount error charges full price.
-        from src.services.delegation.discount import discount_enabled
+        # the account's discount credits balance first -- row-locked and
+        # idempotent on this same request_id, so a retry draws nothing new --
+        # and only the rest is charged to the paid balance. Any discount error
+        # charges full price.
+        from src.services.discount_credits.billing import discount_enabled
 
         if discount_enabled():
-            from src.services.delegation.discount import apply_for_request, reverse_for_request
+            from src.services.discount_credits.billing import (
+                apply_for_request,
+                reverse_for_request,
+            )
 
             discount_key = request_id or (metadata or {}).get("request_id")
             cost_list = Decimal(repr(tokens)).quantize(LEDGER_UNIT)
@@ -1506,7 +1510,7 @@ def deduct_credits(
             # nothing was deducted: put the discount back. A transient failure
             # keeps it -- a retry with the same request_id reuses it, charging
             # the same (cost - discount) exactly once.
-            from src.services.delegation.discount import reverse_for_request
+            from src.services.discount_credits.billing import reverse_for_request
 
             reverse_for_request(discount_key)
         # Wrap exceptions in RuntimeError for consistency with test expectations

@@ -279,19 +279,6 @@ def _wallet_login_existing_user(
     return response
 
 
-def _pay_pending_delegation_rewards(address: str, user_id: int) -> None:
-    """A wallet just got linked -- pay any delegated-staking allowance that
-    accrued while it was unlinked (src/services/delegation/rewards.py). Lazy
-    import + never raises: a signup/link request must never fail because of
-    a rewards side effect."""
-    try:
-        from src.services.delegation.rewards import pay_pending_delegation_for_wallet
-
-        pay_pending_delegation_for_wallet(address, user_id)
-    except Exception as e:
-        logger.warning("delegation.pay_pending_delegation_for_wallet failed: %s", e)
-
-
 def _wallet_signup_new_user(
     address: str,
     background_tasks: BackgroundTasks,  # noqa: ARG001 -- kept for signature symmetry
@@ -345,8 +332,6 @@ def _wallet_signup_new_user(
         logger.error(
             "Wallet signup: user %s created but linking wallet %s failed", user_id, address
         )
-    else:
-        _pay_pending_delegation_rewards(address, user_id)
 
     return PrivyAuthResponse(
         success=True,
@@ -459,7 +444,6 @@ async def wallet_link(
             raise HTTPException(status_code=409, detail="wallet_linked_to_other_account")
         raise HTTPException(status_code=500, detail="wallet_link_failed")
 
-    _pay_pending_delegation_rewards(body.wallet_address, user_id)
     return {"success": True, "data": {"wallet": _wallet_view(wallet_row)}}
 
 
@@ -475,7 +459,7 @@ def _normalize_linked_address(value: str) -> str:
     src/routes/wallet_auth_cardano.py). Raises ValueError otherwise."""
     lowered = value.lower() if isinstance(value, str) else value
     if isinstance(lowered, str) and lowered.startswith(("stake1", "stake_test1")):
-        from src.services.delegation.cip8 import Cip8VerificationError, parse_stake_address
+        from src.services.wallet.cip8 import Cip8VerificationError, parse_stake_address
 
         try:
             # Testnet allowed: removing a link is never a privilege.

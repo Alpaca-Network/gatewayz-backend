@@ -810,15 +810,15 @@ async def refund_credits(
         if metadata:
             refund_metadata.update(metadata)
 
-        # Delegated-staking inference discount (src/services/delegation/
-        # discount.py): a discounted request paid only (cost - discount) in
-        # credits. Put the discount back on the discount balance and refund at
-        # most the credits the request was actually charged (its own credit
-        # row), so a refund can never turn discount into credits -- not even
+        # Discount credits (src/services/discount_credits/billing.py): a
+        # discounted request paid only (cost - discount) from the paid
+        # balance. Put the discount back on the discount credits balance and
+        # refund at most what the request was actually charged (its own credit
+        # row), so a refund can never turn discount credits into paid credits -- not even
         # when the reversal itself fails. Config-gated: no DB call while the
         # discount is disabled.
         if original_request_id:
-            from src.services.delegation.discount import (
+            from src.services.discount_credits.billing import (
                 charged_credits_for,
                 discount_enabled,
                 reverse_or_none,

@@ -481,10 +481,13 @@ class ChatInferenceHandler:
             logger.debug("[ChatHandler] Skipping credit check for free model %s", model_id)
             return max_tokens
 
-        # What those credits can buy at list price once a delegated-staking
-        # inference discount is counted (identity, no DB call, while disabled).
+        # What the paid balance can buy at list price once this request's
+        # discount credits are counted (identity, no DB call, while disabled).
         from src.services.billing.credit_precheck import calculate_maximum_cost
-        from src.services.delegation.discount import discount_aware_credits_async, discount_enabled
+        from src.services.discount_credits.billing import (
+            discount_aware_credits_async,
+            discount_enabled,
+        )
 
         credit_capacity = user_credits
         if discount_enabled():

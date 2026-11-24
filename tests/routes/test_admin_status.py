@@ -103,7 +103,6 @@ class TestResponseShape:
             "wayz",
             "provider_budget",
             "ops_alerts",
-            "delegation",
         ):
             assert key in data
 
@@ -128,9 +127,6 @@ class TestResponseShape:
             "pricing_drift",
             "gpu_liveness_sweep",
             "gpu_rollup",
-            "delegation_measurements",
-            "delegation_accruals",
-            "delegation_reconciliation",
         ):
             assert name in jobs
 

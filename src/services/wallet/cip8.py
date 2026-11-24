@@ -22,7 +22,7 @@ profiled by CIP-8) and ``key`` is the COSE_Key holding the Ed25519 public key.
    claim somebody else's address.
 
 No Cardano or CBOR library is in requirements.txt and adding one trips the CI
-wheelhouse cache (see the holdings decision note), so this module carries the
+wheelhouse cache, so this module carries the
 two small codecs it needs -- BIP-173 bech32 and a strict definite-length CBOR
 subset -- and uses ``cryptography`` (already a dependency) for Ed25519 and
 ``hashlib`` for blake2b. The CBOR decoder rejects anything COSE does not need:

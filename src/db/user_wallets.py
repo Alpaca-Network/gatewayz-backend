@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 _TABLE = "user_wallets"
 
 # user_wallets.chain_namespace values (CAIP-2 namespaces). Every wallet linked
-# before delegated staking is an EVM wallet; Cardano stake addresses linked
+# before Cardano linking is an EVM wallet; Cardano stake addresses linked
 # with a CIP-30 signData proof carry "cip34" (src/routes/wallet_auth_cardano.py).
 EVM_NAMESPACE = "eip155"
 CARDANO_NAMESPACE = "cip34"
@@ -143,8 +143,8 @@ _ALL_WALLETS_ROW_CAP = 10000
 
 def list_all_wallets() -> list[dict[str, Any]]:
     """Every linked wallet, oldest-linked first, for jobs that sweep the
-    whole set (the delegated-staking measurement sweep in
-    src/services/delegation/measurements.py). Ordered by created_at so the sweep
+    whole set (no caller today; kept for the vault mirror job). Ordered by
+    created_at so a sweep
     visits wallets in a stable order across runs, and row-capped like every
     other bulk read here. Empty list on any lookup error -- a sweep that
     sees no wallets records nothing, which is the safe outcome."""

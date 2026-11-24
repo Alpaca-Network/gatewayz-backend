@@ -1,17 +1,19 @@
-"""The inference discount at billing time (delegated staking v3).
+"""Discount credits at billing time.
 
-A delegated-staking account accrues a discount balance -- DELEGATION_REWARD_SHARE
-of the staking revenue its stake actually earned us (attribution.py). Each
-billed request then pays (1 - d) x list price in credits and d x list price
-is drawn from that balance until it runs out, d = DELEGATION_DISCOUNT_PERCENT.
-1 discount unit = $1 of list price.
+An account can hold a balance of discount credits. They come only from the
+Gatewayz vault: the vault mirror job grants them from on-chain mints (see
+src/db/inference_discount.py::grant_discount). Each billed request then pays
+(1 - d) x list price from the paid balance and d x list price is drawn from
+the discount credits balance until it runs out, d = VAULT_DISCOUNT_PERCENT.
+1 discount credit = $1 of list price.
 
-Billing reaches this from exactly one place, src/db/users.py::deduct_credits,
-and the rules there are:
+Billing reaches this from src/db/users.py::deduct_credits (the draw), the
+pre-request sufficiency checks (the hold) and refunds (the reversal), and the
+rules are:
 
 * **Dark by default.** :func:`discount_enabled` is a pure config read; with
-  DELEGATION_DISCOUNT_ENABLED or DELEGATED_STAKING_ENABLED off nothing here
-  touches the database and billing is unchanged.
+  VAULT_DISCOUNT_BILLING_ENABLED off nothing here touches the database and
+  billing is unchanged.
 * **Fail open to full price.** Any discount error -> 0 applied -> the user is
   charged the full list price and the request never fails because of the
   discount.
@@ -32,7 +34,6 @@ from src.config.config import Config
 
 logger = logging.getLogger(__name__)
 
-PAYOUT_MODELS = ("reward_share", "allowance")
 _DISCOUNT_DP = Decimal("0.000001")
 # d is capped below 1 so every billed request still pays something in credits
 # -- which writes its credit_transactions row (the retry guard and the usage
@@ -52,25 +53,14 @@ def _clamped(value: Any, default: str) -> Decimal:
     return min(max(d, Decimal(0)), Decimal(1))
 
 
-def payout_model() -> str:
-    """'reward_share' (default) or 'allowance'. Anything unrecognised is
-    reward_share -- the model that never pays more than we received."""
-    model = str(Config.DELEGATION_PAYOUT_MODEL or "").strip().lower()
-    return model if model in PAYOUT_MODELS else "reward_share"
-
-
-def reward_share() -> Decimal:
-    return _clamped(Config.DELEGATION_REWARD_SHARE, "0.95")
-
-
 def discount_percent() -> Decimal:
-    return min(_clamped(Config.DELEGATION_DISCOUNT_PERCENT, "0.99"), MAX_DISCOUNT_PERCENT)
+    return min(_clamped(Config.VAULT_DISCOUNT_PERCENT, "0.99"), MAX_DISCOUNT_PERCENT)
 
 
 def discount_enabled() -> bool:
-    """True when billing should draw on discount balances. Config only --
-    never a DB call."""
-    return bool(Config.DELEGATED_STAKING_ENABLED) and bool(Config.DELEGATION_DISCOUNT_ENABLED)
+    """True when billing should draw on discount credits balances
+    (VAULT_DISCOUNT_BILLING_ENABLED). Config only -- never a DB call."""
+    return bool(Config.VAULT_DISCOUNT_BILLING_ENABLED)
 
 
 def _uuid_or_none(value: Any) -> str | None:
@@ -88,7 +78,7 @@ def apply_for_request(
     """The discount drawn for one billed request -- 0 when disabled, when the
     request has no UUID request_id, when there is no balance, and on ANY
     error (full price). Never raises. Never more than trunc(cost x d, 6) with
-    d <= MAX_DISCOUNT_PERCENT, so the credit charge is always positive."""
+    d <= MAX_DISCOUNT_PERCENT, so the paid-balance charge is always positive."""
     if not discount_enabled() or cost <= 0:
         return Decimal(0)
     percent = discount_percent()
@@ -104,14 +94,14 @@ def apply_for_request(
         # described by class only.
         reason = str(e) if isinstance(e, DiscountUnavailableError) else type(e).__name__
         logger.warning(
-            "inference discount unavailable for user %s; charging full price: %s", user_id, reason
+            "discount credits unavailable for user %s; charging full price: %s", user_id, reason
         )
         return Decimal(0)
     ceiling = (cost * percent).quantize(_DISCOUNT_DP, rounding=ROUND_DOWN)
     if applied > ceiling:
         # The SQL never returns more than this; if it somehow did, charge
         # full price rather than trust it, and put back whatever it drew.
-        logger.warning("inference discount above its ceiling for user %s; reversing", user_id)
+        logger.warning("discount credits above its ceiling for user %s; reversing", user_id)
         reverse_for_request(key)
         return Decimal(0)
     return max(applied, Decimal(0)).quantize(_DISCOUNT_DP, rounding=ROUND_DOWN)
@@ -129,7 +119,7 @@ def reverse_or_none(request_id: Any) -> Decimal | None:
     try:
         return reverse_discount(key)
     except Exception as e:  # noqa: BLE001
-        logger.warning("inference discount reversal failed: %s", type(e).__name__)
+        logger.warning("discount credits reversal failed: %s", type(e).__name__)
         return None
 
 
@@ -165,7 +155,7 @@ def reverse_for_request(request_id: Any) -> Decimal:
         return reverse_discount(key)
     except Exception as e:  # noqa: BLE001
         reason = str(e) if isinstance(e, DiscountUnavailableError) else type(e).__name__
-        logger.warning("inference discount reversal failed: %s", reason)
+        logger.warning("discount credits reversal failed: %s", reason)
         return Decimal(0)
 
 
@@ -203,7 +193,7 @@ def discount_aware_credits(user_id: Any, credits: float, estimate: float, reques
     try:
         held = hold_discount(user_id, cost, percent, key, hold_ttl_seconds())
     except Exception as e:  # noqa: BLE001 - no hold -> the check counts credits only
-        logger.warning("inference discount hold unavailable for user %s: %s", user_id, e)
+        logger.warning("discount credits hold unavailable for user %s: %s", user_id, e)
         return credits
     if held <= 0:
         return credits
@@ -215,7 +205,7 @@ def discount_aware_credits(user_id: Any, credits: float, estimate: float, reques
 
 def hold_ttl_seconds() -> int:
     try:
-        ttl = int(Config.DELEGATION_DISCOUNT_HOLD_TTL_SECONDS)
+        ttl = int(Config.VAULT_DISCOUNT_HOLD_TTL_SECONDS)
     except (TypeError, ValueError):
         ttl = 900
     return min(max(ttl, 60), 3600)
