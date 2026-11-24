@@ -1643,6 +1643,25 @@ def stop_usage_anchor_scheduler():
         _usage_anchor_scheduler = None
 
 
+def get_pricing_drift_status() -> dict[str, Any]:
+    """Get the current status of the pricing-drift monitor (for health monitoring)."""
+    return {
+        "enabled": Config.ENABLE_PRICING_DRIFT_MONITOR,
+        "interval_minutes": Config.PRICING_DRIFT_INTERVAL_MINUTES,
+        "last_run_time": (
+            _last_pricing_drift_status["last_run_time"].isoformat()
+            if _last_pricing_drift_status["last_run_time"]
+            else None
+        ),
+        "last_ok": _last_pricing_drift_status["last_ok"],
+        "last_checked": _last_pricing_drift_status["last_checked"],
+        "last_drift_count": _last_pricing_drift_status["last_drift_count"],
+        "last_unpriced_count": _last_pricing_drift_status["last_unpriced_count"],
+        "last_worst_deficit_pct": _last_pricing_drift_status["last_worst_deficit_pct"],
+        "last_error": _last_pricing_drift_status["last_error"],
+    }
+
+
 # ============================================================================
 # Emission Epoch Job (Chutes-style WAYZ emission rewards, gatewayz-backend
 # tokenomics) -- daily job that splits WAYZ_DAILY_EMISSION 41/41/18 between
