@@ -225,13 +225,21 @@ def build_anthropic_payload(
             # Anthropic models tool results as a user turn containing
             # tool_result blocks. Merge into the previous user turn when
             # possible so consecutive results stay in one message.
+            result_content = (
+                content if isinstance(content, str) else _content_to_anthropic_blocks(content)
+            )
             block = {
                 "type": "tool_result",
                 "tool_use_id": msg.get("tool_call_id", ""),
-                "content": (
-                    content if isinstance(content, str) else _content_to_anthropic_blocks(content)
-                ),
+                "content": result_content,
             }
+            # A cache breakpoint set on a tool result arrives on its content
+            # part. Anthropic expects it on the tool_result block itself.
+            if isinstance(result_content, list):
+                for part in result_content:
+                    marker = part.pop("cache_control", None) if isinstance(part, dict) else None
+                    if marker:
+                        block["cache_control"] = marker
             if anthropic_messages and anthropic_messages[-1]["role"] == "user":
                 prev = anthropic_messages[-1]
                 if isinstance(prev["content"], list):

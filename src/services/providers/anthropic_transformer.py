@@ -8,6 +8,7 @@ Compatible with: https://platform.claude.com/docs/en/api/messages
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,22 @@ def _extract_system_text(system: str | list[dict[str, Any]] | None) -> str | Non
         return "\n".join(text_parts) if text_parts else None
 
     return str(system)
+
+
+def anthropic_input_tokens(usage: dict[str, Any] | None) -> int:
+    """``input_tokens`` as Anthropic defines it: prompt tokens that were neither
+    read from nor written to the cache.
+
+    The gateway's ``prompt_tokens`` is the whole prompt, cache included. Anthropic
+    clients add the cache counts to ``input_tokens`` themselves, so passing the
+    total through made them count cached tokens twice.
+    """
+    usage = usage or {}
+    total = usage.get("prompt_tokens", 0) or 0
+    cached = (usage.get("cache_read_input_tokens", 0) or 0) + (
+        usage.get("cache_creation_input_tokens", 0) or 0
+    )
+    return max(total - cached, 0)
 
 
 def _system_has_cache_control(system: str | list[dict[str, Any]] | None) -> bool:
@@ -238,6 +255,62 @@ def _transform_content_block(block: dict[str, Any]) -> dict[str, Any] | list[dic
         return block
 
 
+_EMPTY_TOOL_RESULT = "(no output)"
+
+
+def _tool_result_to_messages(
+    block: dict[str, Any], *, keep_cache_control: bool
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """One Anthropic ``tool_result`` block as an OpenAI ``role: "tool"`` message.
+
+    Returns the tool message and any image parts found inside the result. OpenAI
+    tool messages carry text only, so the caller places the images in a user
+    message directly after the tool messages.
+
+    Before this, tool results were rewritten as text inside a user message. An
+    assistant turn with tool calls was then followed by no tool results at all,
+    which every provider rejects, so no agent loop got past its first tool call.
+    """
+    raw = block.get("content", "")
+    texts: list[str] = []
+    images: list[dict[str, Any]] = []
+    if isinstance(raw, str):
+        texts.append(raw)
+    elif isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                texts.append(str(item))
+            elif item.get("type") == "text":
+                texts.append(item.get("text", ""))
+            elif item.get("type") == "image":
+                converted = _transform_content_block(item)
+                if isinstance(converted, dict):
+                    images.append(converted)
+    elif raw is not None:
+        texts.append(str(raw))
+
+    text = "\n".join(t for t in texts if t)
+    if block.get("is_error"):
+        text = f"Error: {text}" if text else "Error"
+    if not text:
+        text = "(see attached image)" if images else _EMPTY_TOOL_RESULT
+
+    tool_use_id = block.get("tool_use_id", "")
+    content: str | list[dict[str, Any]] = text
+    if keep_cache_control and block.get("cache_control"):
+        # Carried as a content part so the native Anthropic transport can put
+        # the breakpoint back on the tool_result block.
+        content = [{"type": "text", "text": text, "cache_control": block["cache_control"]}]
+
+    message = {"role": "tool", "tool_call_id": tool_use_id, "content": content}
+    if images:
+        images = [
+            {"type": "text", "text": f"Image output of tool call {tool_use_id}:"},
+            *images,
+        ]
+    return message, images
+
+
 def _transform_tool_choice(tool_choice: Any) -> Any:
     """
     Transform Anthropic tool_choice to OpenAI format.
@@ -326,6 +399,7 @@ def transform_anthropic_to_openai(
     stop_sequences: list[str] | None = None,
     tools: list[dict] | None = None,
     tool_choice: Any | None = None,
+    keep_tool_result_cache_control: bool = False,
 ) -> tuple:
     """
     Transform Anthropic Messages API request to OpenAI Chat Completions format.
@@ -342,6 +416,9 @@ def transform_anthropic_to_openai(
         stop_sequences: Stop sequences (maps to 'stop' in OpenAI)
         tools: Tool/function definitions for function calling
         tool_choice: Tool selection strategy ("auto", "any", "none", or specific tool)
+        keep_tool_result_cache_control: Keep ``cache_control`` set on tool_result
+            blocks (as a content part on the tool message). Only for providers
+            that understand it; others may reject list content on tool messages.
 
     Returns:
         Tuple of (openai_messages, openai_params)
@@ -375,6 +452,8 @@ def transform_anthropic_to_openai(
             # Content blocks
             content_parts = []
             tool_calls_list = []
+            tool_messages: list[dict[str, Any]] = []
+            tool_result_images: list[dict[str, Any]] = []
 
             for block in content:
                 if isinstance(block, dict):
@@ -392,6 +471,17 @@ def transform_anthropic_to_openai(
                                 },
                             }
                         )
+                    elif block_type == "tool_result" and role == "user":
+                        tool_message, images = _tool_result_to_messages(
+                            block, keep_cache_control=keep_tool_result_cache_control
+                        )
+                        tool_messages.append(tool_message)
+                        tool_result_images.extend(images)
+                    elif block_type in ("thinking", "redacted_thinking") and role == "assistant":
+                        # Prior reasoning is not replayed: OpenAI-shape providers
+                        # have no such block, and the request's thinking settings
+                        # are not forwarded on this path.
+                        continue
                     else:
                         transformed = _transform_content_block(block)
                         if transformed:
@@ -400,12 +490,23 @@ def transform_anthropic_to_openai(
                             else:
                                 content_parts.append(transformed)
 
+            if tool_messages:
+                # Tool results must directly follow the assistant turn that made
+                # the calls, in call order. Images from those results, then any
+                # text the user sent in the same turn, follow in a user message.
+                openai_messages.extend(tool_messages)
+                content_parts = tool_result_images + content_parts
+                if not content_parts:
+                    continue
+
             # Set content
             if len(content_parts) > 1:
                 openai_msg["content"] = content_parts
             elif len(content_parts) == 1:
                 # For single text block, use string for better compatibility
-                if content_parts[0].get("type") == "text":
+                if content_parts[0].get("type") == "text" and not content_parts[0].get(
+                    "cache_control"
+                ):
                     openai_msg["content"] = content_parts[0].get("text", "")
                 else:
                     openai_msg["content"] = content_parts
@@ -517,17 +618,24 @@ def transform_openai_to_anthropic(
             }
         )
 
-    # Check for tool_calls (they take priority over text content)
+    # Text comes before tool_use blocks, as Anthropic orders them.
+    if content and isinstance(content, str) and content.strip():
+        content_blocks.append({"type": "text", "text": content})
+
     tool_calls = message.get("tool_calls")
     has_tool_calls = tool_calls and len(tool_calls) > 0
 
     # Handle tool_calls from OpenAI format (convert to Anthropic tool_use blocks)
     if has_tool_calls:
+        # A response that carries tool calls always ends with tool_use, whatever
+        # finish_reason the provider reported.
+        stop_reason = "tool_use"
+        stop_sequence_triggered = None
         for tool_call in tool_calls:
             # Extract tool information
             tool_name = tool_call.get("function", {}).get("name", "tool")
             tool_args = tool_call.get("function", {}).get("arguments", "{}")
-            tool_id = tool_call.get("id", f"toolu_{int(time.time())}")
+            tool_id = tool_call.get("id") or f"toolu_{uuid.uuid4().hex[:24]}"
 
             # Parse arguments if they're a string
             if isinstance(tool_args, str):
@@ -546,17 +654,13 @@ def transform_openai_to_anthropic(
                 }
             )
 
-    # Add text content if present and non-empty
-    if content and isinstance(content, str) and content.strip():
-        content_blocks.append({"type": "text", "text": content})
-
     # If no content blocks were created, add empty text block
     if not content_blocks:
         content_blocks.append({"type": "text", "text": ""})
 
     # Build usage object with cache fields
     usage_response = {
-        "input_tokens": prompt_tokens,
+        "input_tokens": anthropic_input_tokens(usage),
         "output_tokens": completion_tokens,
     }
 
