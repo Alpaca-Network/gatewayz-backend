@@ -580,18 +580,6 @@ def create_app() -> FastAPI:
             "WAYZ Testnet Faucet",
         ),  # Testnet WAYZ claim (gatewayz-backend#2245)
         (
-            "staking",
-            "WAYZ Staking",
-        ),  # Public staking read API (supports gatewayz-backend#2246)
-        (
-            "admin_staking",
-            "Admin Staking Rewards",
-        ),  # Reward-rate control + manual runs (gatewayz-backend staking rewards)
-        (
-            "holdings",
-            "Holdings Rewards",
-        ),  # Credits for tokens held in a proven wallet + admin rate/registry control
-        (
             "wallet_auth",
             "Wallet Auth",
         ),  # SIWE wallet sign-in/sign-up + linking (gatewayz-backend#2249-#2252)

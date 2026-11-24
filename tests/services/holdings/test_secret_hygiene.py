@@ -3,23 +3,19 @@
 The key lives in the URL path (https://{net}.g.alchemy.com/v2/{key}), and
 requests puts the request URL in its exception messages -- "401 Client
 Error: Unauthorized for url: <url>", "Max retries exceeded with url:
-/v2/<key>". These tests drive a real sweep end to end through a real
-read_balances (only the web3 client is faked), raise exactly those errors,
-and check that the key is in no log record, no sweep summary, no
-ChainReadFailure and no ops alert payload. Nothing touches a network.
+/v2/<key>". These tests drive a real read_balances (only the web3 client is faked),
+raise exactly those errors, and check that the key is in no log record and
+no ChainReadFailure. Nothing touches a network.
 """
 
 import json
 import logging
-from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-import src.services.holdings.alerts as alerts
 import src.services.holdings.chains as chains
-import src.services.holdings.snapshots as snapshots
 from src.config.config import Config
 from src.services.holdings.chains import (
     CHAIN_ID_ETHEREUM,
@@ -28,10 +24,8 @@ from src.services.holdings.chains import (
     describe_rpc_error,
     read_balances,
 )
-from src.services.holdings.prices import PricePoint
 
 KEY = "FAKEalchemyKEY0123456789abcdef"
-NOW = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
 WALLET = "0x742d35cc6634c0532925a3b844bc454e4438f44e"
 
 ETH_NATIVE = TokenRef(CHAIN_ID_ETHEREUM, None, 18, "ETH", "ethereum")
@@ -68,10 +62,8 @@ def _alchemy_everywhere(monkeypatch):
     for attr in chains._RPC_CONFIG_ATTR.values():
         monkeypatch.setattr(Config, attr, None)
     chains.reset_endpoint_health()
-    alerts._reset_for_tests()
     yield
     chains.reset_endpoint_health()
-    alerts._reset_for_tests()
 
 
 @pytest.fixture
@@ -120,67 +112,6 @@ def test_read_balances_failures_and_logs_are_clean(every_endpoint_fails, caplog)
     # Every attempt was logged (primary + fallbacks) and none leaked.
     assert any("retrying on fallback (public)" in r.getMessage() for r in caplog.records)
     _assert_clean(*[r.getMessage() for r in caplog.records])
-
-
-def test_a_full_sweep_and_its_alert_are_clean(every_endpoint_fails, monkeypatch, caplog):
-    rows = [
-        {
-            "id": 1,
-            "chain_id": 1,
-            "contract_address": None,
-            "decimals": 18,
-            "symbol": "ETH",
-            "price_id": "ethereum",
-        },
-        {
-            "id": 2,
-            "chain_id": 137,
-            "contract_address": None,
-            "decimals": 18,
-            "symbol": "POL",
-            "price_id": "matic-network",
-        },
-    ]
-    monkeypatch.setattr(Config, "HOLDINGS_REWARDS_ENABLED", True)
-    monkeypatch.setattr(Config, "HOLDINGS_MIN_WALLET_AGE_DAYS", 3)
-    monkeypatch.setattr(snapshots, "list_enabled_tokens", lambda: rows)
-    monkeypatch.setattr(
-        snapshots,
-        "list_all_wallets",
-        lambda: [{"wallet_address": WALLET, "created_at": (NOW - timedelta(days=30)).isoformat()}],
-    )
-    monkeypatch.setattr(
-        snapshots,
-        "get_usd_prices",
-        lambda ids: {i: PricePoint(price=1, as_of=NOW) for i in ids},
-    )
-    monkeypatch.setattr(snapshots, "record_sweep", MagicMock(return_value=None))
-    monkeypatch.setattr(snapshots, "record_snapshot", MagicMock(return_value=None))
-
-    sent: list[dict] = []
-
-    def _send_email(to, subject, html, text=None, tags=None):  # noqa: ARG001
-        sent.append({"to": to, "subject": subject, "html": html, "text": text})
-        return MagicMock(sent=True)
-
-    with (
-        caplog.at_level(logging.DEBUG),
-        patch("src.services.holdings.alerts.get_redis_client", return_value=None),
-        patch(
-            "src.services.provider_alerting.resolve_ops_recipients",
-            return_value=(["ops@example.com"], "env"),
-        ),
-        patch("src.services.email.send_email", side_effect=_send_email),
-    ):
-        summary = snapshots.run_holdings_snapshots_once(now=NOW)
-        assert alerts.alert_if_sweep_recorded_nothing(summary) is True
-
-    assert summary["sweeps_recorded"] == 0
-    assert summary["failed_chains"] == {"1": 1, "137": 1}
-    assert len(sent) == 1
-    _assert_clean(summary, sent, *[r.getMessage() for r in caplog.records])
-    # The wallet address stays out of the alert too.
-    assert WALLET not in json.dumps(sent)
 
 
 @pytest.mark.parametrize(

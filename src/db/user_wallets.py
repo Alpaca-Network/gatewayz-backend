@@ -11,7 +11,6 @@ section 4.5.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -139,36 +138,13 @@ def count_all_wallets() -> int:
         return 0
 
 
-def count_wallets_linked_before(cutoff: datetime) -> int | None:
-    """How many EVM wallets were linked at or before ``cutoff`` -- the
-    wallets old enough for the holdings sweep to consider (it reads EVM
-    balances only, so a Cardano link is never eligible). A count, not a
-    list, for the sweep watchdog in src/services/holdings/alerts.py. None
-    (not 0) on a lookup error, so a failed read is never mistaken for "no
-    eligible wallets"."""
-    try:
-        client = get_supabase_client()
-        result = (
-            client.table(_TABLE)
-            .select("id", count="exact")
-            .eq("chain_namespace", EVM_NAMESPACE)
-            .lte("created_at", cutoff.isoformat())
-            .limit(1)
-            .execute()
-        )
-        return result.count or 0
-    except Exception as e:
-        logger.warning(f"user_wallets eligible count failed: {e}")
-        return None
-
-
 _ALL_WALLETS_ROW_CAP = 10000
 
 
 def list_all_wallets() -> list[dict[str, Any]]:
     """Every linked wallet, oldest-linked first, for jobs that sweep the
-    whole set (the holdings-rewards observation sweep in
-    src/services/holdings/snapshots.py). Ordered by created_at so the sweep
+    whole set (the delegated-staking measurement sweep in
+    src/services/delegation/measurements.py). Ordered by created_at so the sweep
     visits wallets in a stable order across runs, and row-capped like every
     other bulk read here. Empty list on any lookup error -- a sweep that
     sees no wallets records nothing, which is the safe outcome."""

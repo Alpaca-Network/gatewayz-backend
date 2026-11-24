@@ -814,34 +814,6 @@ async def lifespan(app):
         logger.warning(f"Failed to start usage anchor scheduler: {e}")
         # Don't fail startup if usage anchoring fails to start
 
-    # Start daily staking rewards job (gatewayz-backend staking rewards --
-    # boss's rule: WAYZ stakers are paid in inference credits)
-    try:
-        from src.services.scheduled_sync import start_staking_rewards_scheduler
-
-        start_staking_rewards_scheduler()
-        logger.info("Staking rewards service initialized")
-    except Exception as e:
-        logger.warning(f"Failed to start staking rewards scheduler: {e}")
-        # Don't fail startup if staking rewards scheduler fails to start
-
-    # Start the holdings-rewards jobs -- the observation sweep (several
-    # times a day) and the daily accrual. Both always start and no-op while
-    # HOLDINGS_REWARDS_ENABLED is off, so the ops page shows them as off
-    # rather than missing.
-    try:
-        from src.services.scheduled_sync import (
-            start_holdings_rewards_scheduler,
-            start_holdings_snapshots_scheduler,
-        )
-
-        start_holdings_snapshots_scheduler()
-        start_holdings_rewards_scheduler()
-        logger.info("Holdings rewards service initialized")
-    except Exception as e:
-        logger.warning(f"Failed to start holdings rewards schedulers: {e}")
-        # Don't fail startup if the holdings schedulers fail to start
-
     # Delegated staking jobs (measurement sweep, reconciliation, accrual) --
     # always start; no-op while DELEGATED_STAKING_ENABLED is off.
     try:
@@ -1121,28 +1093,6 @@ async def lifespan(app):
         logger.info("Usage anchor service stopped")
     except Exception as e:
         logger.warning(f"Usage anchor shutdown warning: {e}")
-
-    # Stop daily staking rewards job
-    try:
-        from src.services.scheduled_sync import stop_staking_rewards_scheduler
-
-        stop_staking_rewards_scheduler()
-        logger.info("Staking rewards service stopped")
-    except Exception as e:
-        logger.warning(f"Staking rewards shutdown warning: {e}")
-
-    # Stop the holdings-rewards jobs
-    try:
-        from src.services.scheduled_sync import (
-            stop_holdings_rewards_scheduler,
-            stop_holdings_snapshots_scheduler,
-        )
-
-        stop_holdings_snapshots_scheduler()
-        stop_holdings_rewards_scheduler()
-        logger.info("Holdings rewards service stopped")
-    except Exception as e:
-        logger.warning(f"Holdings rewards shutdown warning: {e}")
 
     # Stop the delegated staking jobs
     try:

@@ -227,32 +227,17 @@ class Config:
     USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES = int(
         _get_env_var("USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES", "10")
     )
-    # Staking rewards (gatewayz-backend staking rewards, boss's rule: WAYZ
-    # stakers are paid in inference credits; providers who offer inference
-    # are paid in ETH on Base -- see PROVIDER_PAYOUT_ASSET below).
-    # Off by default -- flips on in prod once the boss confirms the rate
-    # table (see supabase/migrations/20260911120000_staking_rewards.sql's
-    # tiny placeholder values) and docs/staking/REWARDS.md.
-    STAKING_REWARDS_ENABLED = _get_env_var("STAKING_REWARDS_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
+    # Per-wallet daily cap and minimum for staker credits paid by the
+    # emission epoch job (src/services/emission/epoch.py). The rate-table
+    # staking rewards program these were introduced for is retired.
     STAKING_REWARDS_DAILY_CAP_CREDITS = float(
         _get_env_var("STAKING_REWARDS_DAILY_CAP_CREDITS", "50.0")
     )
     STAKING_REWARDS_MIN_CREDITS = float(_get_env_var("STAKING_REWARDS_MIN_CREDITS", "0.0001"))
-    # Daily cron time (UTC) the job runs at -- see
-    # src/services/scheduled_sync.py::start_staking_rewards_scheduler.
-    STAKING_REWARDS_CRON_HOUR_UTC = int(_get_env_var("STAKING_REWARDS_CRON_HOUR_UTC", "0"))
-    STAKING_REWARDS_CRON_MINUTE_UTC = int(_get_env_var("STAKING_REWARDS_CRON_MINUTE_UTC", "20"))
 
-    # Holdings rewards: pay inference credits for *holding* supported top-20
-    # tokens in a wallet the user has proven they control. Strictly
-    # non-custodial -- we only ever READ balances over public RPC, we never
-    # take deposits and never sign or send a transaction.
-    #
-    # One RPC URL per supported EVM chain. Defaults are public endpoints so a
+    # Read-only EVM RPC access (delegated staking's vault reader, and
+    # BASE_RPC_URL for ETH payouts). One RPC URL per supported EVM chain.
+    # Defaults are public endpoints so a
     # fresh environment works without configuration; production should point
     # these at a paid provider, since public endpoints rate-limit and a
     # rate-limited chain is reported as a *failed* read (never a zero balance).
@@ -266,11 +251,10 @@ class Config:
     ALCHEMY_API_KEY = _get_env_var("ALCHEMY_API_KEY")
     ETHEREUM_RPC_URL = _get_env_var("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com")
     BNB_CHAIN_RPC_URL = _get_env_var("BNB_CHAIN_RPC_URL", "https://bsc-dataseed.binance.org")
-    # Mainnet C-Chain -- distinct from AVALANCHE_FUJI_RPC_URL (testnet, WAYZ staking).
+    # Mainnet C-Chain -- distinct from AVALANCHE_FUJI_RPC_URL (testnet, WAYZ contracts).
     AVALANCHE_RPC_URL = _get_env_var("AVALANCHE_RPC_URL", "https://api.avax.network/ext/bc/C/rpc")
     BASE_RPC_URL = _get_env_var("BASE_RPC_URL", "https://mainnet.base.org")
-    # polygon-rpc.com started answering 401 (key required), which failed every
-    # holdings sweep: one unreadable chain skips the whole wallet.
+    # polygon-rpc.com started answering 401 (key required).
     POLYGON_RPC_URL = _get_env_var("POLYGON_RPC_URL", "https://polygon-bor-rpc.publicnode.com")
     ARBITRUM_RPC_URL = _get_env_var("ARBITRUM_RPC_URL", "https://arb1.arbitrum.io/rpc")
     # v2 job usage lines for cost disputes (src/services/job_usage_v2.py). Ships
@@ -296,74 +280,15 @@ class Config:
     }
     DISPUTE_VAULT_KEYS = _get_env_var("DISPUTE_VAULT_KEYS", "")
     DISPUTE_VAULT_PUBLIC_BASE = _get_env_var("DISPUTE_VAULT_PUBLIC_BASE", "https://api.gatewayz.ai")
-    # Ships dark, exactly like STAKING_REWARDS_ENABLED did -- the schema, jobs
-    # and endpoints land inert until the rates/caps are a confirmed product
-    # decision.
-    HOLDINGS_REWARDS_ENABLED = _get_env_var("HOLDINGS_REWARDS_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    # A USD price older than this is treated as unusable and the token is
+    # Shared price feed and ops-alert cooldown (src/services/holdings/prices.py
+    # and alerts.py), used by delegated staking. The names are historical:
+    # the holdings rewards program they were introduced for is retired.
+    # A USD price older than this is treated as unusable and the asset is
     # skipped for that run (fail closed) rather than valued at a stale price.
     HOLDINGS_PRICE_MAX_STALENESS_SECONDS = int(
         _get_env_var("HOLDINGS_PRICE_MAX_STALENESS_SECONDS", "900")
     )
-    # Balance snapshots taken per UTC day; the day's reward is computed from
-    # these samples rather than one instant, so a momentary top-up can't game it.
-    HOLDINGS_SNAPSHOTS_PER_DAY = int(_get_env_var("HOLDINGS_SNAPSHOTS_PER_DAY", "4"))
-    # Sybil brake: wallets younger than this many days earn nothing.
-    HOLDINGS_MIN_WALLET_AGE_DAYS = int(_get_env_var("HOLDINGS_MIN_WALLET_AGE_DAYS", "3"))
-    # Distinct observation sweeps a wallet must have on a day before that day
-    # can be paid. "Lowest balance of the day" only resists farming if the day
-    # has more than one reading -- with a single recorded sweep the minimum is
-    # just that one moment, which is precisely the hole the rule exists to
-    # close. A wallet can legitimately end a day with one sweep, since the
-    # sweep drops a whole batch on an incomplete chain read or a missing
-    # price, so this is a real case and not a hypothetical one. Effective
-    # value is clamped to [1, HOLDINGS_SNAPSHOTS_PER_DAY]: requiring more
-    # sweeps than are ever taken would pay nobody.
-    HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY = int(
-        _get_env_var("HOLDINGS_MIN_SNAPSHOT_BATCHES_PER_DAY", "2")
-    )
-    # Holdings rewards are capped by what the account actually spent on
-    # inference: the programme exists to convert token holders into customers,
-    # so holding alone earns nothing. Multiplier 1.0 means "earn at most what
-    # you spent"; the lookback smooths lumpy usage, since nobody runs
-    # inference every single day. Set HOLDINGS_USAGE_MATCH_ENABLED=false to
-    # pay purely for holdings, which buys a wallet balance rather than a user.
-    HOLDINGS_USAGE_MATCH_ENABLED = _get_env_var("HOLDINGS_USAGE_MATCH_ENABLED", "true").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    # Parsed defensively: a typo in either of these must not take the whole
-    # app down at import, and the safe fallback for a payout multiplier is the
-    # documented default rather than a crash or an accidental zero.
-    HOLDINGS_USAGE_MATCH_MULTIPLIER = _decimal_env("HOLDINGS_USAGE_MATCH_MULTIPLIER", "1.0")
-    HOLDINGS_USAGE_LOOKBACK_DAYS = _int_env("HOLDINGS_USAGE_LOOKBACK_DAYS", 7)
-    # Per-account daily ceiling, and a global daily budget across all accounts.
-    # Both are placeholders until the boss sets the real numbers.
-    HOLDINGS_DAILY_CAP_CREDITS = float(_get_env_var("HOLDINGS_DAILY_CAP_CREDITS", "50.0"))
-    HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS = float(
-        _get_env_var("HOLDINGS_GLOBAL_DAILY_BUDGET_CREDITS", "10000.0")
-    )
-    # When the daily holdings accrual runs, UTC. It pays for YESTERDAY, so it
-    # only has to land after that day's final observation sweep -- 00:40 is
-    # after the 00:00 sweep and after staking_rewards at 00:20, keeping the
-    # midnight jobs from contending for the same worker.
-    HOLDINGS_REWARDS_CRON_HOUR_UTC = int(_get_env_var("HOLDINGS_REWARDS_CRON_HOUR_UTC", "0"))
-    HOLDINGS_REWARDS_CRON_MINUTE_UTC = int(_get_env_var("HOLDINGS_REWARDS_CRON_MINUTE_UTC", "40"))
-    # Minute-past-the-hour each observation sweep fires, so a sweep never
-    # starts exactly on a UTC day boundary where its taken_at could land on
-    # either side of the day it is meant to belong to.
-    HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC = int(_get_env_var("HOLDINGS_SNAPSHOT_CRON_MINUTE_UTC", "5"))
-    # Ops alerting for the observation sweep (src/services/holdings/alerts.py).
-    # A sweep that considered wallets but recorded none alerts immediately; a
-    # watchdog alerts when no sweep has recorded a wallet for this many hours
-    # while eligible wallets exist. Each condition alerts at most once per
-    # HOLDINGS_ALERT_COOLDOWN_HOURS.
-    HOLDINGS_SWEEP_STALE_HOURS = float(_get_env_var("HOLDINGS_SWEEP_STALE_HOURS", "8"))
+    # Each ops-alert condition is sent at most once per this many hours.
     HOLDINGS_ALERT_COOLDOWN_HOURS = float(_get_env_var("HOLDINGS_ALERT_COOLDOWN_HOURS", "12"))
     # Delegated staking (src/services/delegation/, docs/delegation/README.md):
     # users stake ETH from their own wallet into a Gatewayz-run StakeWise V3
@@ -607,14 +532,13 @@ class Config:
     #
     # REWARDS_MODE gates two mutually-exclusive payout paths:
     #   'per_unit' (default) -- today's behaviour: providers earn per
-    #     verified work item (src/services/gpu/earnings.py), stakers earn
-    #     off the tiered rate table (src/services/staking_rewards.py).
+    #     verified work item (src/services/gpu/earnings.py); stakers earn
+    #     nothing (the rate-table staking rewards program is retired).
     #     Ships dark; nothing below takes effect until this flips.
     #   'emission' -- providers earn a daily share of
     #     PROVIDER_EMISSION_USD_PER_DAY (paid in ETH) by 7-day rolling
     #     score (src/services/emission/), stakers earn
-    #     pro-rata to stake off the SAME emission pool instead of the rate
-    #     table. record_earning_for_verified_work() checks this flag and
+    #     pro-rata to stake off the SAME emission pool. record_earning_for_verified_work() checks this flag and
     #     stops creating per_unit earnings once it's 'emission' -- the two
     #     paths are never both live for the same day.
     REWARDS_MODE = _get_env_var("REWARDS_MODE", "per_unit")
@@ -627,8 +551,8 @@ class Config:
     EMISSION_SPLIT_STAKERS_BPS = int(_get_env_var("EMISSION_SPLIT_STAKERS_BPS", "4100"))
     EMISSION_SPLIT_TREASURY_BPS = int(_get_env_var("EMISSION_SPLIT_TREASURY_BPS", "1800"))
     # 'credits' (default, boss's standing rule for stakers) pays the staker
-    # share through the same staking_reward_accruals + add_credits_to_user
-    # path as the per_unit rate table, converted at WAYZ_CREDIT_RATE.
+    # share through staking_reward_accruals + add_credits_to_user
+    # (src/services/staking_rewards.py), converted at WAYZ_CREDIT_RATE.
     # 'wayz' has no payout rail yet (see src/services/emission/epoch.py's
     # _pay_stakers_wayz docstring) -- accruals are recorded 'pending' with
     # skip_reason='wayz_payout_not_implemented' until one exists.
@@ -654,7 +578,7 @@ class Config:
         "PROVIDER_SCORE_EXPONENT_ABOVE_MEDIAN", "1.3"
     )
     # Daily cron time (UTC) the emission_epoch job runs at -- after
-    # staking_rewards (00:20) and gpu_spot_check, per
+    # gpu_spot_check, per
     # src/services/scheduled_sync.py::start_emission_epoch_scheduler.
     EMISSION_EPOCH_CRON_HOUR_UTC = int(_get_env_var("EMISSION_EPOCH_CRON_HOUR_UTC", "0"))
     EMISSION_EPOCH_CRON_MINUTE_UTC = int(_get_env_var("EMISSION_EPOCH_CRON_MINUTE_UTC", "40"))

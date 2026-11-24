@@ -5,8 +5,7 @@ providers the way Chutes/Bittensor does). See docs/tokenomics/EMISSION.md.
 GET endpoints accept either an admin API key or the ADMIN_API_KEY env key
 (require_admin_or_env_key, matching src/routes/admin_wayz.py's ops-status
 endpoint); mutating endpoints (manual epoch runs, config changes) are
-superadmin-only and audited, matching src/routes/admin_staking.py's
-convention.
+superadmin-only and audited.
 """
 
 from __future__ import annotations
@@ -138,8 +137,7 @@ async def update_emission_config(
     admin_user: dict[str, Any] = Depends(require_superadmin),
 ) -> dict[str, Any]:
     """Not implemented yet: emission config is env-only today (no `kv`
-    store backs a runtime override the way staking_reward_rates does for
-    the per_unit rate table). Returns 501 with a clear message rather than
+    store backs a runtime override). Returns 501 with a clear message rather than
     silently no-op'ing or pretending to persist a change that won't
     survive a restart -- change the env vars and restart, or call
     POST /admin/emission/run to test a value without changing prod config."""

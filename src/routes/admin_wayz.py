@@ -58,18 +58,9 @@ _JOB_INTERVAL_MINUTES: dict[str, int] = {
     "pricing_drift": Config.PRICING_DRIFT_INTERVAL_MINUTES,
     "gpu_liveness_sweep": Config.GPU_LIVENESS_SWEEP_INTERVAL_MINUTES,
     "gpu_rollup": 60,
-    # Staking rewards (gatewayz-backend staking rewards) -- once a day.
-    "staking_rewards": 1440,
     # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics) --
-    # once a day, after staking_rewards/gpu_spot_check.
+    # once a day, after gpu_spot_check.
     "emission_epoch": 1440,
-    # Holdings rewards: the observation sweep runs HOLDINGS_SNAPSHOTS_PER_DAY
-    # times a day, the accrual once. Derived from the sweep count rather than
-    # hard-coded, so raising the count doesn't make the job read as stale.
-    "holdings_snapshots": 1440 // max(1, min(Config.HOLDINGS_SNAPSHOTS_PER_DAY, 24)),
-    "holdings_rewards": 1440,
-    # Hourly staleness check on holdings_snapshots (src/services/holdings/alerts.py).
-    "holdings_sweep_watchdog": 60,
     # Delegated staking (src/services/delegation/): the measurement sweep runs
     # DELEGATION_MEASUREMENTS_PER_DAY times a day; accrual and reconciliation daily.
     "delegation_measurements": 1440 // max(1, min(Config.DELEGATION_MEASUREMENTS_PER_DAY, 24)),

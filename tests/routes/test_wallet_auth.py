@@ -164,7 +164,7 @@ def test_nonce_rejects_malformed_address():
 # ---------------------------------------------------------------------------
 
 
-@patch("src.services.staking_rewards.pay_pending_for_wallet")
+@patch("src.services.delegation.rewards.pay_pending_delegation_for_wallet")
 @patch("src.routes.wallet_auth.link_wallet")
 @patch("src.routes.wallet_auth.create_api_key")
 @patch("src.routes.wallet_auth.resolve_key_environment")
@@ -559,12 +559,12 @@ def test_link_first_wallet_becomes_primary(
     assert kwargs["make_primary"] is True
 
 
-@patch("src.services.staking_rewards.pay_pending_for_wallet")
+@patch("src.services.delegation.rewards.pay_pending_delegation_for_wallet")
 @patch("src.routes.wallet_auth.link_wallet")
 @patch("src.routes.wallet_auth.count_wallets")
 @patch("src.routes.wallet_auth.get_wallet")
 @patch("src.routes.wallet_auth.get_redis_client")
-def test_link_pays_pending_staking_rewards_on_success(
+def test_link_pays_pending_delegation_rewards_on_success(
     mock_get_redis, mock_get_wallet, mock_count_wallets, mock_link_wallet, mock_pay_pending
 ):
     account = Account.create()

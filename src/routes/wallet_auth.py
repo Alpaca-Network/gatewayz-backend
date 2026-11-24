@@ -279,37 +279,11 @@ def _wallet_login_existing_user(
     return response
 
 
-def _pay_pending_staking_rewards(address: str, user_id: int) -> None:
-    """A wallet just got linked -- pay any staking rewards that accrued
-    while it was unlinked (src/services/staking_rewards.py). Lazy import +
-    never raises, same convention as src/routes/auth.py's identical
-    helper: a signup/link request must never fail because of a
-    staking-rewards side effect."""
-    try:
-        from src.services.staking_rewards import pay_pending_for_wallet
-
-        pay_pending_for_wallet(address, user_id)
-    except Exception as e:
-        logger.warning("staking_rewards.pay_pending_for_wallet failed for %s: %s", address, e)
-
-
-def _pay_pending_holdings_rewards(address: str, user_id: int) -> None:
-    """A wallet just got linked -- pay any holdings rewards that accrued
-    while it was unlinked (src/services/holdings/rewards.py). Lazy import +
-    never raises, same convention as the helper above: a signup/link
-    request must never fail because of a rewards side effect."""
-    try:
-        from src.services.holdings.rewards import pay_pending_holdings_for_wallet
-
-        pay_pending_holdings_for_wallet(address, user_id)
-    except Exception as e:
-        logger.warning("holdings.pay_pending_holdings_for_wallet failed for %s: %s", address, e)
-
-
 def _pay_pending_delegation_rewards(address: str, user_id: int) -> None:
     """A wallet just got linked -- pay any delegated-staking allowance that
     accrued while it was unlinked (src/services/delegation/rewards.py). Lazy
-    import + never raises, same convention as the helpers above."""
+    import + never raises: a signup/link request must never fail because of
+    a rewards side effect."""
     try:
         from src.services.delegation.rewards import pay_pending_delegation_for_wallet
 
@@ -372,8 +346,6 @@ def _wallet_signup_new_user(
             "Wallet signup: user %s created but linking wallet %s failed", user_id, address
         )
     else:
-        _pay_pending_staking_rewards(address, user_id)
-        _pay_pending_holdings_rewards(address, user_id)
         _pay_pending_delegation_rewards(address, user_id)
 
     return PrivyAuthResponse(
@@ -487,8 +459,6 @@ async def wallet_link(
             raise HTTPException(status_code=409, detail="wallet_linked_to_other_account")
         raise HTTPException(status_code=500, detail="wallet_link_failed")
 
-    _pay_pending_staking_rewards(body.wallet_address, user_id)
-    _pay_pending_holdings_rewards(body.wallet_address, user_id)
     _pay_pending_delegation_rewards(body.wallet_address, user_id)
     return {"success": True, "data": {"wallet": _wallet_view(wallet_row)}}
 
