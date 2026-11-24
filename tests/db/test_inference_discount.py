@@ -86,7 +86,10 @@ class TestGrantDiscount:
         first = {"status": "granted", "amount_usd": 5, "balance_after": 5}
         repeat = {"status": "exists", "amount_usd": 5, "balance_after": 5}
         client = MagicMock()
-        client.rpc.return_value.execute.side_effect = [MagicMock(data=first), MagicMock(data=repeat)]
+        client.rpc.return_value.execute.side_effect = [
+            MagicMock(data=first),
+            MagicMock(data=repeat),
+        ]
         with patch.object(idb, "get_supabase_client", return_value=client):
             assert idb.grant_discount(7, Decimal(5), REQ, "test:grant") == first
             assert idb.grant_discount(7, Decimal(5), REQ, "test:grant") == repeat
