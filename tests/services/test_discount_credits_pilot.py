@@ -16,6 +16,8 @@ from src.services.discount_credits import billing
 REQ = "6f9b1f0e-3c2a-4d5e-9b8a-1c2d3e4f5a6b"
 PILOT = 10
 OTHER = 11
+APPLY = "src.db.inference_discount.apply_discount"
+HOLD = "src.db.inference_discount.hold_discount"
 
 
 @pytest.fixture
@@ -57,29 +59,26 @@ class TestBillingOutsideThePilot:
     and the database is never asked."""
 
     def test_apply_draws_nothing_and_makes_no_db_call(self, pilot_only):
-        with patch("src.db.inference_discount.apply_discount") as apply:
+        with patch(APPLY) as apply:
             assert billing.apply_for_request(OTHER, Decimal("2"), REQ) == Decimal(0)
         apply.assert_not_called()
 
     def test_precheck_counts_paid_credits_only_and_places_no_hold(self, pilot_only):
-        with patch("src.db.inference_discount.hold_discount") as hold:
+        with patch(HOLD) as hold:
             assert billing.discount_aware_credits(OTHER, 5.0, 2.0, REQ) == 5.0
-            assert asyncio.run(billing.discount_aware_credits_async(OTHER, 5.0, 2.0, REQ)) == 5.0
+            via_async = asyncio.run(billing.discount_aware_credits_async(OTHER, 5.0, 2.0, REQ))
+            assert via_async == 5.0
         hold.assert_not_called()
 
 
 class TestBillingInsideThePilot:
     def test_apply_draws_for_a_listed_account(self, pilot_only):
-        with patch(
-            "src.db.inference_discount.apply_discount", return_value=Decimal("1.98")
-        ) as apply:
+        with patch(APPLY, return_value=Decimal("1.98")) as apply:
             assert billing.apply_for_request(PILOT, Decimal("2"), REQ) == Decimal("1.98")
         apply.assert_called_once()
 
     def test_precheck_places_a_hold_for_a_listed_account(self, pilot_only):
-        with patch(
-            "src.db.inference_discount.hold_discount", return_value=Decimal("1.98")
-        ) as hold:
+        with patch(HOLD, return_value=Decimal("1.98")) as hold:
             assert billing.discount_aware_credits(PILOT, 5.0, 2.0, REQ) > 5.0
         hold.assert_called_once()
 
