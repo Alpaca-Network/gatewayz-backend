@@ -42,6 +42,7 @@ from src.services.auth_rate_limiting import get_client_ip
 from src.services.job_usage import JOB_BUSY, job_lease_of
 from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.providers.anthropic_transformer import (
+    anthropic_input_tokens,
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
 )
@@ -262,6 +263,11 @@ async def _stream_anthropic_events_impl(
     )
 
     block_index = -1
+    # Index of the block that is currently open (text or tool_use), or None.
+    # Anthropic clients finish a block only on its content_block_stop, so every
+    # block is closed before the next one opens. Leaving earlier tool blocks
+    # open made clients keep one of several parallel tool calls.
+    open_block: int | None = None
     text_block_open = False
     # Maps an OpenAI tool_call index to the Anthropic content-block index.
     tool_blocks: dict[int, int] = {}
@@ -331,7 +337,13 @@ async def _stream_anthropic_events_impl(
             content = delta.get("content")
             if content:
                 if not text_block_open:
+                    if open_block is not None:
+                        yield _sse(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": open_block},
+                        )
                     block_index += 1
+                    open_block = block_index
                     text_block_open = True
                     yield _sse(
                         "content_block_start",
@@ -355,14 +367,16 @@ async def _stream_anthropic_events_impl(
                 fn = tool_call.get("function") or {}
 
                 if tc_index not in tool_blocks:
-                    # A tool call starting means any open text block is finished.
-                    if text_block_open:
+                    # A tool call starting means the open block is finished,
+                    # whether that is text or an earlier tool call.
+                    if open_block is not None:
                         yield _sse(
                             "content_block_stop",
-                            {"type": "content_block_stop", "index": block_index},
+                            {"type": "content_block_stop", "index": open_block},
                         )
-                        text_block_open = False
+                    text_block_open = False
                     block_index += 1
+                    open_block = block_index
                     tool_blocks[tc_index] = block_index
                     yield _sse(
                         "content_block_start",
@@ -371,7 +385,7 @@ async def _stream_anthropic_events_impl(
                             "index": block_index,
                             "content_block": {
                                 "type": "tool_use",
-                                "id": tool_call.get("id", f"toolu_{uuid.uuid4().hex[:16]}"),
+                                "id": tool_call.get("id") or f"toolu_{uuid.uuid4().hex[:24]}",
                                 "name": fn.get("name", ""),
                                 "input": {},
                             },
@@ -415,11 +429,15 @@ async def _stream_anthropic_events_impl(
         return
 
     # Close whichever block is still open.
-    if text_block_open or tool_blocks:
-        yield _sse("content_block_stop", {"type": "content_block_stop", "index": block_index})
+    if open_block is not None:
+        yield _sse("content_block_stop", {"type": "content_block_stop", "index": open_block})
+    if tool_blocks:
+        # A turn that made tool calls ends with tool_use, whatever finish_reason
+        # the provider reported.
+        stop_reason = "tool_use"
 
     anthropic_usage = {
-        "input_tokens": usage.get("prompt_tokens", 0),
+        "input_tokens": anthropic_input_tokens(usage),
         "output_tokens": usage.get("completion_tokens", 0),
     }
     if usage.get("cache_read_input_tokens"):
@@ -518,12 +536,19 @@ async def create_message(
         stop_sequences=req.stop_sequences,
         tools=req.tools,
         tool_choice=req.tool_choice,
+        # Only Anthropic understands a cache breakpoint on a tool result.
+        keep_tool_result_cache_control="claude" in req.model.lower(),
     )
 
     proxy_request = ProxyRequest(
         model=req.model,
         messages=openai_messages,
         stream=bool(req.stream),
+        # Never on this route. Auto web search rewrites the prompt with an
+        # injected system message and sends the query to a search vendor; an
+        # agent's context is source code and tool output, and it brings its own
+        # tools when it wants to search.
+        auto_web_search=False,
         **openai_params,
     )
 
