@@ -921,140 +921,17 @@ Delete a chat session.
 }
 ```
 
-## WAYZ Staking & Faucet
+## WAYZ Faucet
 
 WAYZ is Gatewayz's utility token on Avalanche Fuji testnet (chain id `43113`).
 These endpoints are additive and degrade cleanly (sane zeros / `configured:
-false`) when the token/staking contracts aren't deployed, which is the case
-in production today. Big numbers (`staked_amount`, `daily_allowance`,
-`total_staked`) are always decimal strings in wei — never floats or ints in
-JSON, which overflow JS numbers.
+false`) when the token contracts aren't deployed, which is the case
+in production today. Big numbers are always decimal strings in wei — never
+floats or ints in JSON, which overflow JS numbers.
 
-### Get Wallet Staking State
-
-```http
-GET /staking/wallets/{wallet_address}
-```
-
-Public, no auth. `wallet_address` must match `^0x[0-9a-fA-F]{40}$` (422
-otherwise). An unknown wallet returns `200` with zeros and `synced: false`,
-not `404` — simpler for the dashboard to render.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "wallet_address": "0x...",
-    "staked_amount": "0",
-    "daily_allowance": "0",
-    "last_synced_block": null,
-    "last_synced_at": null,
-    "synced": false,
-    "total_staked": "0",
-    "daily_inference_capacity": "0",
-    "contracts": { "chain_id": 43113, "token": null, "staking": null },
-    "configured": false
-  }
-}
-```
-
-### Staking Rewards (WAYZ stakers paid in inference credits)
-
-Stakers are paid in inference credits (GPU providers who offer inference
-are paid in native ETH on Base, USD-denominated — a separate system; see
-`docs/gpu/VERIFICATION_AND_PAYOUTS.md`). See
-`docs/staking/REWARDS.md` for the full design — how the daily job
-computes and pays rewards, idempotency, unlinked-wallet handling, and ops.
-
-`GET /staking/wallets/{wallet_address}` above also carries a `rewards`
-block computed from the rate table alone (no user/wallet-link data), so
-it's safe on that no-auth endpoint:
-
-```json
-"rewards": { "estimated_credits_per_day": "0.050000", "rate_credits_per_1k": "0.010000" }
-```
-
-```http
-GET /staking/rewards
-```
-
-Requires auth. The calling user's staking-rewards view: whether the
-feature is live, the current rate table, their linked wallets with a live
-daily-credit estimate, running totals, and recent history. All numbers are
-strings.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "enabled": false,
-    "mode": "per_unit",
-    "rate_table": [
-      { "min_stake_wayz": "0", "credits_per_1k_wayz_per_day": "0.010000" },
-      { "min_stake_wayz": "10000", "credits_per_1k_wayz_per_day": "0.012000" },
-      { "min_stake_wayz": "100000", "credits_per_1k_wayz_per_day": "0.015000" }
-    ],
-    "wallets": [
-      { "address": "0x...", "staked_wayz": "5000", "estimated_credits_per_day": "0.050000" }
-    ],
-    "totals": {
-      "credits_paid_30d": "0",
-      "credits_paid_all": "0",
-      "pending_credits": "0"
-    },
-    "history": [
-      {
-        "reward_date": "2026-09-10",
-        "wallet_address": "0x...",
-        "staked_wayz": "5000",
-        "credits": "0.050000",
-        "status": "paid"
-      }
-    ]
-  }
-}
-```
-
-`mode` is `Config.REWARDS_MODE` (`per_unit` or `emission`). Once
-`emission` mode has run at least one epoch, the response also gains
-(Chutes-style WAYZ emission rewards, gatewayz-backend tokenomics — see
-`docs/tokenomics/EMISSION.md`):
-
-```json
-"emission": {
-  "daily_emission_wayz": "100000",
-  "stakers_share_bps": 4100,
-  "your_share": "0.010000000000",
-  "estimated_credits_per_day": "0.410000"
-}
-```
-
-### Get Staking Summary
-
-```http
-GET /staking/summary
-```
-
-Public, no auth. Protocol-wide totals, aggregated across `wallet_stakes`.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "total_staked": "0",
-    "wallet_count": 0,
-    "daily_inference_capacity": "0",
-    "unstake_cooldown_seconds": 604800,
-    "last_synced_block": null,
-    "last_synced_at": null,
-    "contracts": { "chain_id": 43113, "token": null, "staking": null },
-    "configured": false
-  }
-}
-```
+The public staking read API (`GET /staking/wallets/{wallet_address}`,
+`GET /staking/rewards`, `GET /staking/summary`) was removed together with
+the retired rate-table staking rewards program.
 
 ### Get Faucet Status
 
@@ -1491,77 +1368,6 @@ workstream) plus two dedicated docs. Starting points:
 - **Emission rewards** (Chutes-style WAYZ emission rewards) — "Admin —
   Emission Rewards" below and `docs/tokenomics/EMISSION.md`.
 
-## Admin — Staking Rewards
-
-Rate-table control and manual runs for the staking-rewards job. See
-`docs/staking/REWARDS.md` for the full design. Envelope is `{success,
-data}`; error reasons are `error.context.parameter_value`.
-
-```http
-GET /admin/staking/reward-rates
-```
-
-`Depends(require_admin_or_env_key)`. Returns every active rate row
-(`{id, min_stake_wayz, credits_per_1k_wayz_per_day, active, note}`).
-
-```http
-PUT /admin/staking/reward-rates
-```
-
-`Depends(require_superadmin)`. Body: `{"rates": [{"min_stake_wayz": 0,
-"credits_per_1k_wayz_per_day": 0.01, "note": "..."}]}` — `rates` must be
-non-empty. Deactivates the current active set and inserts the new one
-(existing rows referenced by a paid accrual are never mutated in place).
-Audited as `staking.rates.update`. Returns the newly-inserted rows.
-
-```http
-POST /admin/staking/rewards/run
-```
-
-`Depends(require_superadmin)`. Body: `{"reward_date": "2026-09-10"}`
-(optional — defaults to yesterday UTC). Runs the job immediately, with the
-same idempotency guarantees as the scheduled run — safe to call any number
-of times. Audited as `staking.rewards.run`. Returns the run summary:
-
-```json
-{
-  "success": true,
-  "data": {
-    "reward_date": "2026-09-10",
-    "wallets": 3,
-    "paid": 2,
-    "pending": 1,
-    "skipped": 0,
-    "credits_paid": "0.150000",
-    "capped": 0,
-    "duration": 0.42
-  }
-}
-```
-
-A stale on-chain sync returns `409`:
-```json
-{ "error": { "code": "stake_sync_stale", "context": { "parameter_value": "stake_sync_stale" } } }
-```
-
-```http
-GET /admin/staking/rewards/summary
-```
-
-`Depends(require_admin_or_env_key)`. The last job run (from the ops job
-registry, same shape as one entry of `GET /admin/wayz/status`'s `jobs`
-block) plus global totals across every user:
-
-```json
-{
-  "success": true,
-  "data": {
-    "last_run": { "name": "staking_rewards", "ok": true, "ran_at": "...", "summary": { "...": "..." } },
-    "totals": { "credits_paid_30d": "0", "credits_paid_all": "0", "pending_credits": "0" }
-  }
-}
-```
-
 ## Admin — Emission Rewards
 
 Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics) — the
@@ -1569,8 +1375,7 @@ daily job that splits `WAYZ_DAILY_EMISSION` 41/41/18 between providers (by
 7-day rolling score), stakers (pro-rata to stake), and treasury. See
 `docs/tokenomics/EMISSION.md` for the full design and worked example.
 Envelope is `{success, data}`; error reasons are
-`error.context.parameter_value`, same convention as Admin — Staking
-Rewards above.
+`error.context.parameter_value`.
 
 ```http
 GET /admin/emission/epochs?limit=30
@@ -1614,8 +1419,10 @@ Returns the run summary:
 }
 ```
 
-A stale on-chain stake sync returns `409`, same shape as
-`POST /admin/staking/rewards/run`.
+A stale on-chain stake sync returns `409`:
+```json
+{ "error": { "code": "stake_sync_stale", "context": { "parameter_value": "stake_sync_stale" } } }
+```
 
 ```http
 GET  /admin/emission/config
@@ -1745,7 +1552,7 @@ precision loss); all timestamps are ISO-8601 with a `Z`/`+00:00` offset.
 `wayz_staking_sync`, `gpu_spot_check`, `gpu_settlement` (the stuck-settlement
 reconciliation pass runs inline as part of this job and is folded into its
 `summary`, not a separate entry), `pricing_drift`, `gpu_liveness_sweep`,
-`gpu_rollup`, `staking_rewards`, `emission_epoch` (Chutes-style WAYZ
+`gpu_rollup`, `emission_epoch` (Chutes-style WAYZ
 emission rewards — see "Admin — Emission Rewards" above). `stale` is
 `true` when a job has never recorded a run, or its
 last run was more than 2× its configured `interval_minutes` ago. Backed by

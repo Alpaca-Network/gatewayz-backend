@@ -5,9 +5,10 @@ way [Chutes](https://chutes.ai/docs/miner-resources/scoring) (a
 [Bittensor](https://docs.learnbittensor.org/learn/emissions) subnet)
 does. This doc is the binding design, a worked example, and the operator
 tuning guide. See also `docs/gpu/VERIFICATION_AND_PAYOUTS.md` (per_unit
-vs emission for providers) and `docs/staking/REWARDS.md` (rate-table vs
-emission for stakers) -- both already-shipped systems this mode replaces
-for the day it's live.
+vs emission for providers) -- the already-shipped system this mode replaces
+for the day it's live. (The rate-table staking rewards program this mode
+was also designed to replace is retired and removed; outside emission mode
+stakers earn nothing.)
 
 > **Providers are paid in USD → ETH on Base, not WAYZ (2026-09-22).** WAYZ
 > is not going public for now. In emission mode the providers' share is a
@@ -45,8 +46,7 @@ separate validator role).
 
 - `record_earning_for_verified_work` keeps accruing per-unit provider
   earnings exactly as before (`docs/gpu/VERIFICATION_AND_PAYOUTS.md`).
-- `run_staking_rewards_once` keeps paying stakers off the rate table
-  exactly as before (`docs/staking/REWARDS.md`).
+- Stakers are paid nothing (the rate-table staking rewards job is retired).
 - The `emission_epoch` job runs on schedule but immediately returns
   `{"skipped": "disabled"}` (recorded on the ops job page like any other
   run).
@@ -161,24 +161,25 @@ settlement code needed to change for the nullable `work_id`.
 
 `stakers_wei` is split pro-rata to each linked-or-unlinked wallet's share
 of total staked WAYZ (`wallet_stakes.staked_amount`) -- an unlinked
-wallet accrues exactly like today's rate-table path (row written with
-`user_id=NULL`, paid once linked or on a future retry sweep). Same
-stale-chain guard as the per_unit job
+wallet accrues a row written with `user_id=NULL`. **Known gap:** the
+pay-on-wallet-link hook and the retry sweep belonged to the retired
+rate-table program and were removed with it, so a pending accrual is only
+retried when the job is re-run for the same `epoch_date`; build a
+pay-on-link / retry path before turning emission mode on. Stale-chain guard
 (`src/services/staking_rewards.py::is_stake_sync_stale`) -- if
 `wallet_stakes` hasn't synced recently enough to trust, the **entire**
-`emission_epoch` run raises rather than pay off stale numbers, exactly
-like `run_staking_rewards_once` does today.
+`emission_epoch` run raises rather than pay off stale numbers.
 
 `STAKER_REWARD_ASSET` (default `credits`) picks the payout asset:
 
 - **`credits`** (default): `credits = wayz_amount × WAYZ_CREDIT_RATE`
-  (default `0.001` credits per WAYZ), paid through the EXACT SAME
+  (default `0.001` credits per WAYZ), paid through the
   `staking_reward_accruals` + `add_credits_to_user` insert-before-pay path
-  the rate-table job uses (`source='emission'`, `wayz_amount_wei`
+  in `src/services/staking_rewards.py` (`source='emission'`, `wayz_amount_wei`
   recorded, `rate_id=NULL` since there's no rate-table row behind it).
   Same per-user daily cap (`STAKING_REWARDS_DAILY_CAP_CREDITS`) and
   minimum (`STAKING_REWARDS_MIN_CREDITS`, below which the day is
-  `skipped` with `skip_reason='below_min'`) as today.
+  `skipped` with `skip_reason='below_min'`).
 - **`wayz`**: **not implemented** -- there is no on-chain payout rail for
   raw WAYZ to a staker's wallet yet (providers are paid in ETH on Base
   via `provider_settlements`). An accrual row
@@ -250,7 +251,7 @@ All of the above are env vars, no code changes needed to retune:
 - `STAKER_REWARD_ASSET` / `WAYZ_CREDIT_RATE` -- the staker payout asset
   and conversion rate.
 - `EMISSION_EPOCH_CRON_HOUR_UTC` / `_MINUTE_UTC` (default `00:40` UTC) --
-  when the daily job runs. Kept after `staking_rewards` (`00:20`) and
+  when the daily job runs. Kept after
   `gpu_spot_check` so the trailing-7d verification data it scores against
   has had a chance to settle for the day.
 
@@ -262,18 +263,16 @@ All of the above are env vars, no code changes needed to retune:
   provider has been
   scored at least once (absent entirely before that, or while the
   feature is off).
-- `GET /staking/rewards` gains `mode` (always) and `emission:
-  {daily_emission_wayz, stakers_share_bps, your_share,
-  estimated_credits_per_day}` (once emission mode has run at least one
-  epoch), computed from the caller's own linked-wallet stake.
+- There is no staker-facing endpoint today: `GET /staking/rewards` (which
+  carried `mode` and an `emission` block) was removed with the retired
+  rate-table program. `get_staker_emission_view` still computes the block.
 - `GET /gpu/public/summary` gains an aggregate-only `emission: {mode,
   daily_emission_wayz, provider_pool_usd_per_day, provider_payout_asset,
   providers_bps, stakers_bps, treasury_bps,
   last_epoch}` -- no per-provider or per-user data, keeping the endpoint's
   no-envelope, aggregate-only guarantee
   (`tests/security/test_gpu_public_aggregate_only.py`).
-- Admin (`src/routes/admin_emission.py`, mirrors
-  `src/routes/admin_staking.py`'s auth conventions):
+- Admin (`src/routes/admin_emission.py`):
   - `GET /admin/emission/epochs?limit` -- recent `emission_epochs` rows.
   - `GET /admin/emission/epochs/{date}` -- that day's `provider_scores`,
     highest share first.
@@ -284,7 +283,7 @@ All of the above are env vars, no code changes needed to retune:
   - `GET /admin/emission/config` -- the effective env-derived config plus
     `disabled_reason` (non-null iff the startup bps-sum check failed).
   - `PUT /admin/emission/config` -- `501 Not Implemented`. Config is
-    env-only today (unlike `staking_reward_rates`, there's no `kv` store
+    env-only today (there's no `kv` store
     backing a runtime override); change the env vars and restart, or use
     `POST /admin/emission/run` to test a one-off value.
 

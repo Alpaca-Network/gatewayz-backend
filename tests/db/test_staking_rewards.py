@@ -1,4 +1,4 @@
-"""Tests for src.db.staking_rewards (gatewayz-backend staking rewards)."""
+"""Tests for src.db.staking_rewards (accrual rows behind the emission staker leg)."""
 
 from unittest.mock import MagicMock, patch
 
@@ -7,14 +7,8 @@ import pytest
 from src.db.staking_rewards import (
     create_accrual,
     get_accrual,
-    get_accruals_for_user,
-    get_active_rates,
-    get_all_accruals_since,
-    list_pending_accruals,
     mark_accrual_paid,
     mark_accrual_pending_failed,
-    mark_accrual_skipped,
-    replace_active_rates,
 )
 
 
@@ -53,49 +47,6 @@ def _mock_table_client(table_data: dict):
     client = MagicMock()
     client.table.side_effect = make_query
     return client
-
-
-class TestGetActiveRates:
-    def test_returns_rows_ordered_by_min_stake(self, sb):
-        rows = [{"id": 1, "min_stake_wayz": "0"}, {"id": 2, "min_stake_wayz": "10000"}]
-        client = _mock_table_client({"staking_reward_rates": rows})
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            result = get_active_rates()
-        assert result == rows
-        table_query = client.table("staking_reward_rates")
-        args, _ = table_query.eq.call_args
-        assert args == ("active", True)
-
-    def test_returns_empty_on_error(self, sb):
-        client = MagicMock()
-        client.table.side_effect = RuntimeError("boom")
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            assert get_active_rates() == []
-
-
-class TestReplaceActiveRates:
-    def test_deactivates_then_inserts_new_rows(self, sb):
-        new_rows = [{"id": 5, "min_stake_wayz": "0", "credits_per_1k_wayz_per_day": "0.02"}]
-        client = _mock_table_client({"staking_reward_rates": new_rows})
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            result = replace_active_rates(
-                [{"min_stake_wayz": 0, "credits_per_1k_wayz_per_day": 0.02, "note": "x"}]
-            )
-
-        table_query = client.table("staking_reward_rates")
-        # update({"active": False}).eq("active", True) happened
-        table_query.update.assert_called_once_with({"active": False})
-        table_query.insert.assert_called_once()
-        assert result == new_rows
-
-    def test_returns_none_on_error(self, sb):
-        client = MagicMock()
-        client.table.side_effect = RuntimeError("boom")
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            assert (
-                replace_active_rates([{"min_stake_wayz": 0, "credits_per_1k_wayz_per_day": 0.01}])
-                is None
-            )
 
 
 class TestGetAccrual:
@@ -194,78 +145,3 @@ class TestMarkAccrualPendingFailed:
         client.table.side_effect = RuntimeError("boom")
         with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
             assert mark_accrual_pending_failed(1, "ValueError") is False
-
-
-class TestMarkAccrualSkipped:
-    def test_returns_true_on_success(self, sb):
-        client = _mock_table_client({})
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            assert mark_accrual_skipped(1, "below_min") is True
-
-    def test_returns_false_on_error(self, sb):
-        client = MagicMock()
-        client.table.side_effect = RuntimeError("boom")
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            assert mark_accrual_skipped(1, "below_min") is False
-
-
-class TestListPendingAccruals:
-    def test_filters_by_status_and_date(self, sb):
-        rows = [{"id": 1, "status": "pending"}]
-        client = _mock_table_client({"staking_reward_accruals": rows})
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            result = list_pending_accruals("2026-08-11")
-        assert result == rows
-        table_query = client.table("staking_reward_accruals")
-        assert table_query.eq.call_args_list[0].args == ("status", "pending")
-        assert table_query.gte.call_args.args == ("reward_date", "2026-08-11")
-
-    def test_scopes_to_one_wallet_when_given(self, sb):
-        client = _mock_table_client({"staking_reward_accruals": []})
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            list_pending_accruals("2026-08-11", wallet_address="0xABC")
-        table_query = client.table("staking_reward_accruals")
-        assert ("wallet_address", "0xabc") in [c.args for c in table_query.eq.call_args_list]
-
-    def test_returns_empty_on_error(self, sb):
-        client = MagicMock()
-        client.table.side_effect = RuntimeError("boom")
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            assert list_pending_accruals("2026-08-11") == []
-
-
-class TestGetAccrualsForUser:
-    def test_returns_rows(self, sb):
-        rows = [{"id": 1, "user_id": 42}]
-        client = _mock_table_client({"staking_reward_accruals": rows})
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            assert get_accruals_for_user(42) == rows
-
-    def test_returns_empty_on_error(self, sb):
-        client = MagicMock()
-        client.table.side_effect = RuntimeError("boom")
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            assert get_accruals_for_user(42) == []
-
-
-class TestGetAllAccrualsSince:
-    def test_returns_rows_without_date_filter(self, sb):
-        rows = [{"id": 1}]
-        client = _mock_table_client({"staking_reward_accruals": rows})
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            assert get_all_accruals_since() == rows
-        table_query = client.table("staking_reward_accruals")
-        table_query.gte.assert_not_called()
-
-    def test_applies_date_filter_when_given(self, sb):
-        client = _mock_table_client({"staking_reward_accruals": []})
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            get_all_accruals_since("2026-08-11")
-        table_query = client.table("staking_reward_accruals")
-        table_query.gte.assert_called_once_with("reward_date", "2026-08-11")
-
-    def test_returns_empty_on_error(self, sb):
-        client = MagicMock()
-        client.table.side_effect = RuntimeError("boom")
-        with patch("src.db.staking_rewards.get_supabase_client", return_value=client):
-            assert get_all_accruals_since() == []

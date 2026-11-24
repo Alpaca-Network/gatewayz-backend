@@ -120,7 +120,7 @@ def list_epochs(limit: int = _EPOCH_LIST_ROW_CAP) -> list[dict[str, Any]]:
 def get_latest_epoch() -> dict[str, Any] | None:
     """The most recent emission_epochs row (any status), or None if none
     have run yet (or on error) -- backs the `emission.last_epoch` block on
-    GET /gpu/public/summary and GET /staking/rewards."""
+    GET /gpu/public/summary."""
     rows = list_epochs(limit=1)
     return rows[0] if rows else None
 

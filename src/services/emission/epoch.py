@@ -6,19 +6,19 @@ docs/tokenomics/EMISSION.md for the full design and worked example.
 Only takes effect once Config.REWARDS_MODE == 'emission' (default
 'per_unit' -- ships dark). While in emission mode, provider payouts move
 from src/services/gpu/earnings.py's per-verified-work accrual to this
-job's daily per-provider share, and staker payouts move from
-src/services/staking_rewards.py's rate-table job to this job's daily
-pro-rata share -- both switches are enforced by a REWARDS_MODE check at
-the top of each of those other paths, not here, so the two payout modes
-can never both be live for the same day.
+job's daily per-provider share, and stakers are paid this job's daily
+pro-rata share (the per_unit rate-table staking rewards job is retired, so
+stakers earn nothing outside emission mode). The provider switch is
+enforced by a REWARDS_MODE check at the top of that other path, not here,
+so the two provider payout modes can never both be live for the same day.
 
 Idempotent: emission_epochs.epoch_date (PRIMARY KEY) plus
 provider_earnings' idx_provider_earnings_emission (UNIQUE(provider_id,
 epoch_date) WHERE source='emission') and staking_reward_accruals' existing
 UNIQUE(wallet_address, reward_date) together make a re-run of the same
 epoch_date safe: get_epoch() is checked first (the primary,
-application-level guard, same convention as
-src/services/staking_rewards.py's get_accrual() check), and the two
+application-level guard, same convention as the get_accrual() check in
+the staker path below), and the two
 per-row unique indexes are the DB-level backstop -- letting a crash
 mid-run recover cleanly on retry (whatever was already written is a
 no-op 'duplicate'/'skipped' outcome, and whatever wasn't gets created).
@@ -319,11 +319,9 @@ def _process_emission_wallet(
     wayz_amount_wei: int,
     credit_rate: Decimal,
 ) -> tuple[str, bool, Decimal]:
-    """One wallet's emission-mode payout for one epoch. Same
-    insert-before-pay idempotency pattern as
-    src/services/staking_rewards.py::_process_wallet_for_date (a 'pending'
-    accrual row is written FIRST, then paid via pay_pending_accrual()) --
-    reused here rather than duplicated. Returns
+    """One wallet's emission-mode payout for one epoch. Insert-before-pay
+    idempotency: a 'pending' accrual row is written FIRST, then paid via
+    src/services/staking_rewards.py::pay_pending_accrual(). Returns
     (outcome, was_capped, credits_paid)."""
     existing = get_accrual(wallet_address, epoch_date_str)
     if existing is not None and existing["status"] != "pending":
@@ -408,8 +406,9 @@ def _process_emission_wallet(
 
 def _pay_stakers(epoch_date_str: str, stakers_wei: int) -> dict[str, Any]:
     """Pay stakers_wei out pro-rata to each wallet's share of total staked
-    WAYZ. Unlinked wallets fall to 'pending' exactly like the per_unit
-    rate-table job -- see docs/staking/REWARDS.md.
+    WAYZ. Unlinked wallets fall to 'pending' (accrual row written with
+    user_id=NULL); a pending row is retried only when this job is re-run
+    for the same epoch_date.
 
     Returns a `dust_wei` field alongside the usual counts: the wei left
     over after every wallet's floor(stakers_wei * share) allocation --
@@ -484,9 +483,9 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
     """Run one pass of the daily emission_epoch job for `epoch_date`
     (default: yesterday UTC). Idempotent -- see module docstring. Raises
     StakingRewardsStaleError if the on-chain stake sync is too stale to
-    trust today's staker split (same guard staking_rewards.py's own job
-    uses, since this job's staker path reads the exact same
-    wallet_stakes table); callers turn that into a failed job run / a 409,
+    trust today's staker split (src/services/staking_rewards.py::
+    is_stake_sync_stale -- the staker path reads the wallet_stakes
+    table); callers turn that into a failed job run / a 409,
     never a crash."""
     if Config.REWARDS_MODE != "emission":
         return {"skipped": "disabled"}
@@ -641,12 +640,12 @@ def get_provider_emission_view(provider_id: int) -> dict[str, Any] | None:
 
 
 def get_staker_emission_view(total_staked_wei: int) -> dict[str, Any] | None:
-    """The `emission` block for GET /staking/rewards, or None if the
-    feature is off (mode != 'emission') or no epoch has run yet.
+    """A staker's `emission` view block, or None if the feature is off
+    (mode != 'emission') or no epoch has run yet. No route serves it today:
+    its only caller, GET /staking/rewards, was removed with the retired
+    rate-table staking rewards program.
     `total_staked_wei` is the caller's own linked-wallet total (0 if none)
-    -- this function has no user/wallet-link lookups of its own, matching
-    src/services/staking_rewards.py::estimate_rewards_for_stake's
-    "safe on data the caller already scoped" convention."""
+    -- this function has no user/wallet-link lookups of its own."""
     if Config.REWARDS_MODE != "emission":
         return None
     latest = get_latest_epoch()

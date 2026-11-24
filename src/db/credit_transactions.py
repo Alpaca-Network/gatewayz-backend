@@ -101,8 +101,8 @@ _METADATA_ALLOWED_KEYS = frozenset(
         "reinstated_owed",
         "topup_fee_rate",
         "topup_fee",
-        # Staking rewards (src/services/staking_rewards.py) -- daily WAYZ
-        # staking payout metadata.
+        # Staker credits (src/services/staking_rewards.py, paid by the
+        # emission epoch job) -- payout metadata.
         "wallet",
         "reward_date",
         "staked_amount_wei",
@@ -146,8 +146,9 @@ class TransactionType:
     SUBSCRIPTION_CANCELLATION = "subscription_cancellation"  # Allowance forfeited on cancel
     SUBSCRIPTION_UPGRADE = "subscription_upgrade"  # Allowance reset on tier upgrade
     SUBSCRIPTION_DOWNGRADE = "subscription_downgrade"  # Allowance reset on tier downgrade
-    STAKING_REWARD = "staking_reward"  # Daily WAYZ staking payout (inference credits)
-    HOLDINGS_REWARD = "holdings_reward"  # Daily payout for tokens held in a proven wallet
+    # Staker credits. The rate-table staking rewards program is retired; the
+    # emission epoch job's staker leg still writes this type.
+    STAKING_REWARD = "staking_reward"
     DELEGATION_REWARD = "delegation_reward"  # Daily inference allowance for delegated stake
 
 
@@ -161,7 +162,7 @@ def reward_request_uuid(key: str) -> str:
 
     ``credit_transactions.request_id`` (and ``atomic_add_credits.p_request_id``)
     are UUID columns. Passing a readable key such as
-    ``"holdings_reward:<wallet>:<date>"`` makes the atomic RPC reject the call
+    ``"staking_reward:<wallet>:<date>"`` makes the atomic RPC reject the call
     and the legacy fallback credit the balance before its ledger insert fails,
     so the accrual stays pending and is paid again on the next run. The same
     ``key`` always maps to the same UUID, which keeps the ledger's unique index

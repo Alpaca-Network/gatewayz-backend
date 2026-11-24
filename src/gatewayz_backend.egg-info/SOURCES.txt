@@ -40,7 +40,6 @@ src/db/gpu.py
 src/db/gpu_payouts.py
 src/db/gpu_rollups.py
 src/db/gpu_work.py
-src/db/holdings.py
 src/db/ip_whitelist.py
 src/db/model_capabilities_db.py
 src/db/model_health.py
@@ -96,7 +95,6 @@ src/routes/admin_coupons.py
 src/routes/admin_downtime.py
 src/routes/admin_emission.py
 src/routes/admin_staff.py
-src/routes/admin_staking.py
 src/routes/admin_status.py
 src/routes/admin_wayz.py
 src/routes/api_key_monitoring.py
@@ -125,7 +123,6 @@ src/routes/gpu.py
 src/routes/gpu_earnings.py
 src/routes/gpu_public.py
 src/routes/health.py
-src/routes/holdings.py
 src/routes/ip_whitelist.py
 src/routes/live_model_test.py
 src/routes/messages.py
@@ -143,7 +140,6 @@ src/routes/rate_limits.py
 src/routes/roles.py
 src/routes/root.py
 src/routes/share.py
-src/routes/staking.py
 src/routes/status_page.py
 src/routes/system.py
 src/routes/tools.py
@@ -161,7 +157,6 @@ src/schemas/coupons.py
 src/schemas/downtime.py
 src/schemas/errors.py
 src/schemas/gpu_public.py
-src/schemas/holdings.py
 src/schemas/models_catalog.py
 src/schemas/payments.py
 src/schemas/plans.py
@@ -169,7 +164,6 @@ src/schemas/providers.py
 src/schemas/proxy.py
 src/schemas/share.py
 src/schemas/staff.py
-src/schemas/staking.py
 src/schemas/users.py
 src/schemas/internal/__init__.py
 src/schemas/internal/chat.py

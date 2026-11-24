@@ -96,9 +96,6 @@ class TestResponseShape:
             "pricing_drift",
             "gpu_liveness_sweep",
             "gpu_rollup",
-            "staking_rewards",
-            "holdings_snapshots",
-            "holdings_rewards",
         ):
             assert name in jobs
             assert "interval_minutes" in jobs[name]

@@ -6,8 +6,7 @@ admin panel needs: job health (reused, not copied, from admin_wayz's own
 block builders), external integration health
 (``src/services/integrations_health.py``), secrets *presence* -- never
 values -- for a fixed allow-list of env vars, and provider budget
-exhaustion (``src/services/provider_budget_alerts.py``), and holdings sweep
-coverage (``src/services/holdings/alerts.py``), and delegated staking
+exhaustion (``src/services/provider_budget_alerts.py``), and delegated staking
 (``src/services/delegation/``). ``GET /admin/wayz/status``
 keeps working unchanged; this route is additive.
 
@@ -36,7 +35,6 @@ from src.routes.admin_wayz import (
     _safe_block,
 )
 from src.security.deps import require_admin_or_env_key
-from src.services.holdings.alerts import holdings_sweep_health
 from src.services.integrations_health import check_all
 from src.services.privy_migration import migration_counts
 from src.services.provider_alerting import ops_alerts_status
@@ -162,9 +160,6 @@ async def get_admin_status(
         "migration": _safe_block(_build_migration_block, "migration"),
         "provider_budget": _safe_block(_build_provider_budget_block, "provider_budget"),
         "ops_alerts": _safe_block(ops_alerts_status, "ops_alerts"),
-        # Is the holdings sweep actually recording wallets? A job that runs
-        # "ok" while skipping every wallet looks healthy in `jobs`.
-        "holdings_sweeps": _safe_block(holdings_sweep_health, "holdings_sweeps"),
         # Delegated staking: configured / paused (fail closed) / job runs.
         "delegation": _safe_block(_build_delegation_block, "delegation"),
     }
