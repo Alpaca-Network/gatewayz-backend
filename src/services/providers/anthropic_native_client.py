@@ -468,9 +468,7 @@ def make_anthropic_native_request_stream(messages, model, **kwargs) -> Iterator[
     # from them.
     passthrough = anthropic_passthrough.current()
     if passthrough is not None:
-        payload = passthrough.upstream_body(
-            model, stream=True, max_tokens=kwargs.get("max_tokens")
-        )
+        payload = passthrough.upstream_body(model, stream=True, max_tokens=kwargs.get("max_tokens"))
         headers = passthrough.upstream_headers(headers)
 
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
