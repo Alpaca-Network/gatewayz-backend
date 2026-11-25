@@ -128,3 +128,30 @@ An empty or mistyped value admits nobody, so a missing setting can never open di
 For an account the switch does not apply to, billing takes exactly the switch-off path: no draw, no hold, no discount lookup on a refund, and `GET /discount-credits` returns the disabled shape (zeros, `discount_percent: null`) without reading the database. Every billing call site checks `discount_enabled_for(user_id)`, never the switch alone; a test enforces that.
 
 Remove an account from the list only after its recent requests can no longer be refunded: a refund for an account outside the list does not put a discount back.
+
+## Daily cap
+
+An account may use at most its daily cap of discount credits per UTC calendar day. The default is US$50. The account owner sets it.
+
+| Rule | Detail |
+|---|---|
+| Reaching the cap | The request is not refused. `discount_apply` draws what is left of the cap (possibly nothing) and the rest is charged to the paid balance as usual |
+| The day | UTC calendar day. Use counted on an earlier day reads as 0 |
+| Lowering the cap | Applies at once |
+| Raising the cap | Applies from the next UTC day, so a leaked API key cannot lift the cap and use up the balance the same day |
+| A cap of 0 | Stops discount credits from being used |
+| Refunds | Reversing a use made today frees that much of today's cap. Reversing an older use does not |
+| Holds | A pre-request hold never reserves more than what is left of the cap |
+
+`PUT /discount-credits/daily-cap` with `{"daily_cap_usd": "20"}` sets it (0 to 1,000,000). The answer has `status` `set` or `scheduled` and the same `daily_cap` object that `GET /discount-credits` returns under `discount`:
+
+| Field | Meaning |
+|---|---|
+| `daily_cap_usd` | The cap in force today |
+| `used_today_usd`, `left_today_usd` | Use so far today and what remains |
+| `resets_at` | The next UTC midnight |
+| `next_daily_cap_usd`, `next_daily_cap_from` | A raise waiting to take effect, or null |
+
+The rules live in the database (`supabase/migrations/20261125120000_discount_daily_cap.sql`), under the same row lock as the balance, and are tested against a real database in `tests/sql/test_discount_daily_cap_sql.py`.
+
+Not built yet: a notification when the cap or the balance runs out, credit batches with expiry, and a ceiling on the cap.

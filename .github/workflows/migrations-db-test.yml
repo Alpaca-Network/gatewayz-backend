@@ -38,7 +38,10 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned to the version supabase-migrations.yml pushes with: `latest`
+          # (v3) rejects the [inbucket] section of supabase/config.toml and the
+          # database never starts.
+          version: 2.122.1
 
       # Applies the seed too, so supabase/seed.sql (local dev data) cannot rot
       # unnoticed again: it broke when users.credits was dropped (20260417000000).

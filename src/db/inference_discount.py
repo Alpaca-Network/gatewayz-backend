@@ -169,6 +169,25 @@ def grant_discount(
         return None
 
 
+def set_daily_cap(user_id: int, cap_usd: Decimal) -> dict[str, Any] | None:
+    """Set the account's daily cap on discount credits use, in USD (supabase
+    function discount_set_daily_cap).
+
+    Lowering applies at once. Raising applies from the next UTC day, so a
+    leaked API key cannot lift the cap and drain the balance the same day.
+    Returns {status: set | scheduled | invalid, daily_cap_usd?,
+    next_daily_cap_usd?, next_daily_cap_from?}; None on failure."""
+    try:
+        client = get_supabase_client()
+        result = client.rpc(
+            "discount_set_daily_cap", {"p_user_id": user_id, "p_cap": str(cap_usd)}
+        ).execute()
+        return _rpc_payload(result.data)
+    except Exception as e:
+        logger.warning(f"discount_set_daily_cap failed for user {user_id}: {type(e).__name__}")
+        return None
+
+
 def get_balance(user_id: int) -> dict[str, Any] | None:
     """The account's balance row, or None when it has none (or on error)."""
     try:
