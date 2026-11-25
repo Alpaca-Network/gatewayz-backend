@@ -248,3 +248,16 @@ def test_images_get_a_flat_allowance():
         model="m", messages=[{"role": "user", "content": [image, question]}]
     )
     assert estimate_input_tokens(body) < 2000
+
+
+def test_count_tokens_rejects_an_invalid_x_api_key():
+    with patch(
+        "src.routes.messages.validate_api_key_security",
+        side_effect=ValueError("Invalid API key"),
+    ):
+        resp = TestClient(app).post(
+            "/v1/messages/count_tokens",
+            json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+            headers=_HEADERS,
+        )
+    assert resp.status_code == 401
