@@ -430,8 +430,7 @@ class Config:
     # x-forwarded-for-rightmost | cf-connecting-ip. See
     # src/services/auth_rate_limiting.get_client_ip for the topology rationale.
     TRUSTED_CLIENT_IP_HEADER = (
-        _get_env_var("TRUSTED_CLIENT_IP_HEADER", "x-forwarded-for-rightmost")
-        or "x-forwarded-for-rightmost"
+        _get_env_var("TRUSTED_CLIENT_IP_HEADER", "x-real-ip") or "x-real-ip"
     ).lower()
     COMMUNITY_SETTLEMENT_STUCK_HOURS = int(_get_env_var("COMMUNITY_SETTLEMENT_STUCK_HOURS", "2"))
     COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS = int(
