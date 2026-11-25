@@ -4,6 +4,7 @@ caller's discount credits balance and recent movements. The DB is mocked."""
 from __future__ import annotations
 
 import re
+from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -105,7 +106,14 @@ def test_enabled_shape(enabled):
         "balance_usd": "12.500000",
         "lifetime_granted_usd": "20.000000",
         "lifetime_used_usd": "7.500000",
+        "daily_cap": body["data"]["discount"]["daily_cap"],
     }
+    # No cap columns on the mocked row: the default cap, nothing used today.
+    cap = body["data"]["discount"]["daily_cap"]
+    assert cap["daily_cap_usd"] == "50.000000"
+    assert cap["used_today_usd"] == "0.000000"
+    assert cap["left_today_usd"] == "50.000000"
+    assert cap["resets_at"].endswith("T00:00:00Z")
     balance.assert_called_once_with(42)
     ledger.assert_called_once_with(42, limit=50)
     history = body["data"]["discount_history"]
@@ -149,6 +157,14 @@ def test_disabled_shape_is_the_same_keys_with_zeros_and_no_db_read(disabled):
         "balance_usd": "0.000000",
         "lifetime_granted_usd": "0.000000",
         "lifetime_used_usd": "0.000000",
+        "daily_cap": {
+            "daily_cap_usd": None,
+            "used_today_usd": "0.000000",
+            "left_today_usd": "0.000000",
+            "resets_at": None,
+            "next_daily_cap_usd": None,
+            "next_daily_cap_from": None,
+        },
     }
     assert data["discount_history"] == []
     balance.assert_not_called()
@@ -168,12 +184,14 @@ def test_disclaimer_is_neutral_and_carries_no_number_or_promise(disabled):
 
 
 def test_no_route_grants_or_adjusts_discount_credits():
-    """Granting is internal only (src/db/inference_discount.py::grant_discount)."""
+    """Granting is internal only (src/db/inference_discount.py::grant_discount).
+    The only write route sets a limit on use; it cannot change a balance."""
+    allowed = {"/discount-credits": {"GET"}, "/discount-credits/daily-cap": {"PUT"}}
     for route in app.routes:
         path = getattr(route, "path", "")
         methods = getattr(route, "methods", None) or set()
         if "discount" in path:
-            assert path == "/discount-credits" and methods == {"GET"}
+            assert allowed.get(path) == methods, (path, methods)
         assert "delegation" not in path
 
 
@@ -215,3 +233,99 @@ def test_an_account_on_the_pilot_list_sees_its_balance():
         assert body["data"]["discount"]["balance_usd"] == "12.500000"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+# --- The daily cap -----------------------------------------------------------
+
+TODAY = date(2026, 11, 25)
+
+
+def _cap(row):
+    return routes._cap_view(row, today=TODAY)
+
+
+def test_cap_view_counts_only_use_made_today():
+    row = {"daily_cap_usd": "50", "cap_used_usd": "12.5", "cap_day": "2026-11-25"}
+    view = _cap(row)
+    assert view["used_today_usd"] == "12.500000"
+    assert view["left_today_usd"] == "37.500000"
+    assert view["resets_at"] == "2026-11-26T00:00:00Z"
+
+    stale = _cap({**row, "cap_day": "2026-11-24"})
+    assert stale["used_today_usd"] == "0.000000"
+    assert stale["left_today_usd"] == "50.000000"
+
+
+def test_cap_view_shows_a_pending_raise_until_its_day_comes():
+    row = {
+        "daily_cap_usd": "50",
+        "cap_used_usd": "50",
+        "cap_day": "2026-11-25",
+        "next_daily_cap_usd": "80",
+        "next_daily_cap_from": "2026-11-26",
+    }
+    view = _cap(row)
+    assert view["daily_cap_usd"] == "50.000000"
+    assert view["left_today_usd"] == "0.000000"
+    assert view["next_daily_cap_usd"] == "80.000000"
+    assert view["next_daily_cap_from"] == "2026-11-26"
+
+    next_day = routes._cap_view(row, today=date(2026, 11, 26))
+    assert next_day["daily_cap_usd"] == "80.000000"
+    assert next_day["used_today_usd"] == "0.000000"
+    assert next_day["next_daily_cap_usd"] is None and next_day["next_daily_cap_from"] is None
+
+
+def test_setting_the_cap_returns_the_new_view(enabled):
+    row = {"daily_cap_usd": "20", "cap_used_usd": "0", "cap_day": "2026-11-25"}
+    with (
+        patch.object(routes, "set_daily_cap", return_value={"status": "set"}) as set_cap,
+        patch.object(routes, "get_balance", return_value=row),
+    ):
+        response = client.put("/discount-credits/daily-cap", json={"daily_cap_usd": "20"})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "set"
+    assert data["daily_cap"]["daily_cap_usd"] == "20.000000"
+    set_cap.assert_called_once_with(42, Decimal("20"))
+
+
+def test_a_raise_is_reported_as_scheduled(enabled):
+    with (
+        patch.object(routes, "set_daily_cap", return_value={"status": "scheduled"}),
+        patch.object(routes, "get_balance", return_value={"daily_cap_usd": "50"}),
+    ):
+        response = client.put("/discount-credits/daily-cap", json={"daily_cap_usd": 80})
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "scheduled"
+
+
+@pytest.mark.parametrize("bad", [-1, "1000000.01", "abc", None, "1.0000001"])
+def test_a_bad_cap_is_refused_before_the_database(enabled, bad):
+    with patch.object(routes, "set_daily_cap") as set_cap:
+        response = client.put("/discount-credits/daily-cap", json={"daily_cap_usd": bad})
+    assert response.status_code == 422
+    set_cap.assert_not_called()
+
+
+def test_an_account_outside_the_program_cannot_set_a_cap(disabled):
+    with patch.object(routes, "set_daily_cap") as set_cap:
+        response = client.put("/discount-credits/daily-cap", json={"daily_cap_usd": 10})
+    assert response.status_code == 404
+    set_cap.assert_not_called()
+
+
+def test_a_database_failure_is_a_503_not_a_silent_success(enabled):
+    with patch.object(routes, "set_daily_cap", return_value=None):
+        response = client.put("/discount-credits/daily-cap", json={"daily_cap_usd": 10})
+    assert response.status_code == 503
+
+
+def test_setting_the_cap_needs_a_signed_in_caller():
+    saved = dict(app.dependency_overrides)
+    app.dependency_overrides.clear()
+    try:
+        response = client.put("/discount-credits/daily-cap", json={"daily_cap_usd": 10})
+    finally:
+        app.dependency_overrides.update(saved)
+    assert response.status_code in (401, 403)
