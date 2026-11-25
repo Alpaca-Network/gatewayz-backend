@@ -19,7 +19,7 @@ from src.config import Config
 from src.services.providers.base import ProviderAdapter
 from src.services.providers.openai_compat import OpenAICompatAdapter
 
-TIER2_SLUGS = ["deepseek", "moonshot", "minimax", "xiaomi", "meta"]
+TIER2_SLUGS = ["deepseek", "moonshot", "minimax", "xiaomi", "meta", "opencode"]
 
 # slug -> (base_url, api_key_env, error_match)
 EXPECTED_CONFIG = {
@@ -47,6 +47,11 @@ EXPECTED_CONFIG = {
         "https://api.meta.ai/v1",
         "META_API_KEY",
         "Meta API key not configured",
+    ),
+    "opencode": (
+        "https://opencode.ai/inference/openai/v1",
+        "OPENCODE_API_KEY",
+        "OpenCode Zen API key not configured",
     ),
 }
 
@@ -237,6 +242,7 @@ class TestTier2ConfigEnvVars:
             "MINIMAX_API_KEY",
             "XIAOMI_API_KEY",
             "META_API_KEY",
+            "OPENCODE_API_KEY",
         ],
     )
     def test_config_has_attribute(self, attr):

@@ -1349,10 +1349,14 @@
       "https://www.together.ai/pricing (Together AI - 200+ models)",
       "https://akashml.com (Akash Network - decentralized AI inference)",
       "https://developers.cloudflare.com/workers-ai/platform/pricing/ (Cloudflare Workers AI - neuron-based pricing)",
-      "https://nosana.com (Nosana - distributed GPU computing network)"
+      "https://nosana.com (Nosana - distributed GPU computing network)",
+      "https://opencode.ai/docs/zen (OpenCode Zen published per-1M prices, read 2026-11-25)"
     ],
     "currency": "USD",
-    "units": "per 1M tokens (unless specified otherwise)"
+    "units": "per 1M tokens (unless specified otherwise)",
+    "provider_notes": {
+      "opencode": "OpenCode Zen published prices (https://opencode.ai/docs/zen, read 2026-11-25), per 1M tokens, base context tier. Time-limited promo discounts (Gemini 4 Carbon/Argon, Gemini 3.6-3.8 Flash, DeepSeek V4.1 Flash, GLM 5.3, Mistral Large 4) are deliberately NOT applied: they are the undiscounted list price so billing never drops below cost when a promo ends."
+    }
   },
   "moonshot": {
     "moonshot/kimi-k2.6": {
@@ -1408,6 +1412,458 @@
     "grok-code-fast-1": {
       "prompt": "5",
       "completion": "15",
+      "request": "0",
+      "image": "0"
+    }
+  },
+  "opencode": {
+    "opencode/gpt-6.2-astra": {
+      "prompt": "8.00",
+      "completion": "40.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-6.2-sol": {
+      "prompt": "2.00",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-6-astra": {
+      "prompt": "10.00",
+      "completion": "50.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-6-sol": {
+      "prompt": "2.00",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-6.1-sol": {
+      "prompt": "2.00",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-6-luna": {
+      "prompt": "0.10",
+      "completion": "0.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.6-sol": {
+      "prompt": "4.00",
+      "completion": "20.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.6-terra": {
+      "prompt": "2.00",
+      "completion": "12.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.6-luna": {
+      "prompt": "0.20",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.5": {
+      "prompt": "5.00",
+      "completion": "30.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.5-pro": {
+      "prompt": "30.00",
+      "completion": "180.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.4": {
+      "prompt": "2.50",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.4-pro": {
+      "prompt": "30.00",
+      "completion": "180.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.4-mini": {
+      "prompt": "0.75",
+      "completion": "4.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.4-nano": {
+      "prompt": "0.20",
+      "completion": "1.25",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.3-codex-spark": {
+      "prompt": "1.75",
+      "completion": "14.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.3-codex": {
+      "prompt": "1.75",
+      "completion": "14.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.2": {
+      "prompt": "1.75",
+      "completion": "14.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.2-codex": {
+      "prompt": "1.75",
+      "completion": "14.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.1": {
+      "prompt": "1.07",
+      "completion": "8.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.1-codex": {
+      "prompt": "1.07",
+      "completion": "8.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.1-codex-max": {
+      "prompt": "1.25",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5.1-codex-mini": {
+      "prompt": "0.25",
+      "completion": "2.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5": {
+      "prompt": "1.07",
+      "completion": "8.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5-codex": {
+      "prompt": "1.07",
+      "completion": "8.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gpt-5-nano": {
+      "prompt": "0.05",
+      "completion": "0.40",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-fable-5-2": {
+      "prompt": "8.00",
+      "completion": "40.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-fable-5-1": {
+      "prompt": "10.00",
+      "completion": "50.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-fable-5": {
+      "prompt": "10.00",
+      "completion": "50.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-opus-5-5": {
+      "prompt": "4.00",
+      "completion": "20.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-opus-5": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-opus-4-8": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-opus-4-7": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-opus-4-6": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-opus-4-5": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-sonnet-5-5": {
+      "prompt": "2.00",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-sonnet-5": {
+      "prompt": "2.00",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-sonnet-4-6": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-sonnet-4-5": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-haiku-5-5": {
+      "prompt": "0.10",
+      "completion": "0.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/claude-haiku-4-5": {
+      "prompt": "1.00",
+      "completion": "5.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gemini-4-neon": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gemini-4-carbon": {
+      "prompt": "4.00",
+      "completion": "20.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gemini-4-argon": {
+      "prompt": "4.00",
+      "completion": "20.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gemini-4-hydrogen": {
+      "prompt": "1.50",
+      "completion": "7.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gemini-3.8-flash": {
+      "prompt": "1.50",
+      "completion": "7.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gemini-3.7-flash": {
+      "prompt": "1.50",
+      "completion": "7.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gemini-3.6-flash": {
+      "prompt": "1.50",
+      "completion": "7.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gemini-3.5-flash": {
+      "prompt": "1.50",
+      "completion": "9.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/gemini-3.5-flash-lite": {
+      "prompt": "0.30",
+      "completion": "2.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/grok-4.7": {
+      "prompt": "2.00",
+      "completion": "6.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/grok-4.6": {
+      "prompt": "2.00",
+      "completion": "6.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/grok-4.5": {
+      "prompt": "2.00",
+      "completion": "6.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/grok-build-0.1": {
+      "prompt": "1.00",
+      "completion": "2.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/muse-ember-1.0": {
+      "prompt": "0.10",
+      "completion": "0.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/muse-wonder-1.0": {
+      "prompt": "4.00",
+      "completion": "20.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/muse-spark-1.3": {
+      "prompt": "1.25",
+      "completion": "4.25",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/muse-spark-1.2": {
+      "prompt": "1.25",
+      "completion": "4.25",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/qwen3.8-max": {
+      "prompt": "2.00",
+      "completion": "6.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/qwen3.8-flash": {
+      "prompt": "0.15",
+      "completion": "0.47",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/qwen3.6-plus": {
+      "prompt": "0.50",
+      "completion": "3.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/qwen3.5-plus": {
+      "prompt": "0.20",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/deepseek-v4.1-flash": {
+      "prompt": "0.30",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/deepseek-v4-pro": {
+      "prompt": "1.74",
+      "completion": "3.48",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/minimax-m3": {
+      "prompt": "0.30",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/minimax-m2.7": {
+      "prompt": "0.30",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/minimax-m2.5": {
+      "prompt": "0.30",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/glm-5.3-flash": {
+      "prompt": "0.15",
+      "completion": "0.50",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/glm-5.3": {
+      "prompt": "1.40",
+      "completion": "4.40",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/kimi-k2.5": {
+      "prompt": "0.60",
+      "completion": "3.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/kimi-k2.6": {
+      "prompt": "0.95",
+      "completion": "4.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/kimi-k2.7-code": {
+      "prompt": "0.95",
+      "completion": "4.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/kimi-k3": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/kimi-k3.1-pro": {
+      "prompt": "2.00",
+      "completion": "10.00",
+      "request": "0",
+      "image": "0"
+    },
+    "opencode/mistral-large-4": {
+      "prompt": "1.36",
+      "completion": "4.18",
       "request": "0",
       "image": "0"
     }

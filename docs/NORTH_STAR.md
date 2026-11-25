@@ -114,7 +114,7 @@ Modifiers: BYOK keys pin to the user's provider (fee applies); explicit `provide
 
 - **No GPU hosting, no dedicated capacity, no model training.** We are a router.
 - **No postpaid billing.**
-- **No aggregator-of-aggregators as primary supply.** Aggregators (incl. OpenRouter itself) are *fallback only* — reselling a reseller has negative margin and no reliability edge.
+- **Aggregators are listed, never preferred.** OpenRouter and OpenCode Zen are listed gateways (amended 2026-11-25, see Amendments), but direct providers always win: failover tries direct hosts first, and the cost router breaks price ties in favor of direct providers. Reselling a reseller has thin margin and no reliability edge, so aggregators add catalog breadth, not primary volume.
 - **No per-provider special-case logic in the hot path.** Provider differences are absorbed at the client-adapter layer and the registry, never in routing code.
 - **No catalog breadth for its own sake.** 7,000 unpriced/unhealthy models is a liability, not a feature. Every listed model must be priced, health-checked, and routable, or it isn't listed.
 
@@ -173,3 +173,15 @@ Owner decisions on the items parked above (branch `refactor/gap-closure-decision
 | D5 | `audio`, `tools` | **DEFERRED** — no KPI usage data yet to inform a keep/cut call; still parked. |
 
 Also cut in this pass, unrelated to the provider/chat-surface calls above: the dead `referral_code` field on `UserRegistrationRequest` and `PrivyAuthRequest` (referral/coupon system itself was already cut; this was its last unused vestige).
+
+### 2026-11-25 — Aggregators listed as gateways: OpenRouter back, OpenCode Zen added
+
+Owner decision (Joaquim): OpenRouter and OpenCode Zen are **listed gateways**, shown in `/v1/gateways` and the catalog like any direct provider. This replaces the §5 rule that aggregators are fallback only.
+
+| # | Decision | Call |
+|---|---|---|
+| D1 | OpenRouter | **LIST** — no code change needed (client, registry entry and failover already exist); enabled by adding `openrouter` to production `ENABLED_PROVIDERS` with a live `OPENROUTER_API_KEY`. |
+| D2 | OpenCode Zen (`opencode`) | **ADD** — new `adapter_configs.py` entry on the shared OpenAI-compatible adapter (`https://opencode.ai/inference/openai/v1`, ids `opencode/<zen-id>`), `opencode_catalog.py` fetcher. Zen's free models are dropped at ingestion (OpenCode-client-only, some train on prompts). Priced from Zen's published table in `manual_pricing.json` at undiscounted list price; OpenRouter cross-reference only for models not yet in the table. Not in `FALLBACK_PROVIDER_PRIORITY` (its ids differ from upstream ids). |
+| D3 | Guardrail | Direct providers still win: failover order unchanged, and `_filter_and_sort_by_cost` breaks price ties against aggregators. |
+
+Open: OpenCode Zen's published docs don't address resale or use behind another gateway; confirm with OpenCode (help@anoma.ly) before meaningful volume. Zen and OpenRouter both bill long-context tiers higher (e.g. >272K for GPT, >200K for Claude Sonnet 4.5); our price book has one tier, same as the direct OpenAI/Anthropic entries.

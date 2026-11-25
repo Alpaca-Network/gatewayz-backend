@@ -184,6 +184,18 @@ _FALLBACK_REGISTRY: dict[str, dict[str, Any]] = {
         "fetch_slug_override": None,
         "logo_url": None,
     },
+    "opencode": {
+        "name": "OpenCode Zen",
+        "color": "bg-zinc-800",
+        "priority": "slow",
+        "site_url": "https://opencode.ai/zen",
+        "timeout": 30,
+        "has_fetch_function": True,
+        "aliases": [],
+        "icon": None,
+        "fetch_slug_override": None,
+        "logo_url": None,
+    },
     "zai": {
         "name": "Z.AI",
         "color": "bg-purple-700",

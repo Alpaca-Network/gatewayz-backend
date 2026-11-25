@@ -143,6 +143,19 @@ ADAPTER_CONFIGS: dict[str, ProviderConfig] = {
         # bare model name. Strip the slug prefix before the upstream call.
         model_prefix="meta/",
     ),
+    # OpenCode Zen — OpenCode's pay-as-you-go model gateway (an aggregator, like
+    # OpenRouter; listed as supply by the 2026-11-25 North Star §5 amendment).
+    # Every text model is served on the OpenAI chat-completions path; Zen
+    # translates for models whose native API is Responses/Messages/Gemini
+    # (https://opencode.ai/docs/zen). Catalog ids are "opencode/<zen-id>";
+    # Zen expects the bare id, so strip the prefix before the upstream call.
+    "opencode": ProviderConfig(
+        slug="opencode",
+        base_url="https://opencode.ai/inference/openai/v1",
+        api_key_env="OPENCODE_API_KEY",
+        display_name="OpenCode Zen",
+        model_prefix="opencode/",
+    ),
 }
 
 ADAPTERS: dict[str, OpenAICompatAdapter] = {

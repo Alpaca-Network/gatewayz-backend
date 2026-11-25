@@ -38,7 +38,7 @@ def test_every_provider_declares_a_full_trio():
     #     xiaomi, meta, sambanova
     assert len(PROVIDER_FUNCTIONS) >= 7, "expected ~8 bespoke MVP-roster providers declared"
     # Exact-set drift guard: ADAPTERS must be precisely the five Tier-1
-    # consolidated providers plus the six Tier-2 providers (Task 18 + Meta + SambaNova) —
+    # consolidated providers plus the Tier-2 providers (Task 18 + Meta + SambaNova + OpenCode Zen) —
     # not merely a superset. Adding/removing an adapter slug must update
     # this assertion deliberately.
     assert set(ADAPTERS) == {
@@ -53,6 +53,7 @@ def test_every_provider_declares_a_full_trio():
         "xiaomi",
         "meta",
         "sambanova",
+        "opencode",
     }
     assert (
         len(PROVIDER_FUNCTIONS) + len(ADAPTERS) >= 13
