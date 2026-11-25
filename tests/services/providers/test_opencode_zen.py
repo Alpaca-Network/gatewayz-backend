@@ -72,9 +72,7 @@ class TestZenPricing:
     def test_published_price_comes_from_manual_book(self):
         from src.services.pricing.pricing_lookup import get_model_pricing
 
-        with patch(
-            "src.utils.pricing_normalization.get_provider_format", return_value="per_1m"
-        ):
+        with patch("src.utils.pricing_normalization.get_provider_format", return_value="per_1m"):
             pricing = get_model_pricing("opencode", "opencode/claude-opus-5-5")
 
         assert pricing is not None
