@@ -27,6 +27,9 @@ ALLOWLIST = {
     # Anonymous / optional-auth inference (rate limited, anonymous tier by design)
     ("POST", "/v1/chat/completions"): "anonymous chat, optional key",
     ("POST", "/v1/messages"): "anonymous chat (anthropic format), optional key",
+    # Key required, checked in the handler because Anthropic clients send it as
+    # x-api-key as well as Bearer. Returns a token estimate; writes nothing.
+    ("POST", "/v1/messages/count_tokens"): "key required in handler (x-api-key or Bearer)",
     ("POST", "/v1/completions"): "optional key",
     # Login / registration / credential flows (cannot require an existing session)
     ("POST", "/auth"): "Privy login",

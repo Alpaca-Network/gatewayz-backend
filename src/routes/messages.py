@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Any
@@ -129,6 +130,61 @@ def _detail_message(exc: HTTPException) -> str:
     return str(detail) if detail else "request failed"
 
 
+# Any URL except our own: a top-up or docs link in a gateway message is kept.
+_URL_RE = re.compile(r"https?://(?![\w.-]*gatewayz\.ai)\S+")
+_GENERIC_UPSTREAM_ERROR = "The model provider returned an error."
+_GENERIC_GATEWAY_ERROR = "The gateway could not process the provider's response."
+
+
+def _safe_error_message(message: Any) -> str:
+    """An error message with internal details removed.
+
+    Provider and library errors reach this route as raw exception text: the
+    upstream URL from an HTTP client error, or a validation dump naming our
+    internal classes. Neither helps the caller and both describe our internals.
+    """
+    text = str(message or "").strip()
+    if not text:
+        return _GENERIC_UPSTREAM_ERROR
+    if "validation error" in text and " for " in text:
+        return _GENERIC_GATEWAY_ERROR
+    lines = [
+        line
+        for line in text.splitlines()
+        if not line.strip().lower().startswith("for more information")
+    ]
+    text = _URL_RE.sub("", " ".join(lines))
+    text = re.sub(r"\s+for url\s*'?'?", " ", text)
+    text = re.sub(r"\s{2,}", " ", text).strip(" :'")
+    if not text:
+        return _GENERIC_UPSTREAM_ERROR
+    return text[:500]
+
+
+_PLAN_LIMIT_PREFIX = "Plan limit exceeded:"
+
+
+def _is_plan_period_limit(status_code: int, message: str) -> bool:
+    """True for a spent daily or monthly plan allowance.
+
+    These arrive as 429, which Anthropic clients retry with backoff. Retrying
+    cannot help before the period resets, so the caller is told once instead of
+    waiting through minutes of retries. Per-minute limits stay 429.
+    """
+    if status_code != 429 or not message.startswith(_PLAN_LIMIT_PREFIX):
+        return False
+    lowered = message.lower()
+    return "daily" in lowered or "monthly" in lowered
+
+
+def _plan_limit_message(message: str) -> str:
+    reason = message[len(_PLAN_LIMIT_PREFIX) :].strip()
+    return (
+        f"Gatewayz plan limit reached: {reason}. Retrying will not help until the "
+        "limit resets or the plan is raised."
+    )
+
+
 def _detail_code(exc: HTTPException) -> str | None:
     """The gateway error code (`model_not_found`, ...) when the detail carries one."""
     detail = exc.detail
@@ -187,7 +243,11 @@ _STREAM_ERROR_TYPE_MAP = {
 # Error-shaped chunks that are advisories emitted AFTER content was fully
 # delivered (chat_streaming continues to [DONE] after them). Terminating on
 # these would discard a delivered-and-billed response.
-_NON_FATAL_STREAM_ERROR_TYPES = frozenset({"stream_normalization_warning"})
+#
+# plan_limit_exceeded is the post-usage check in chat_streaming: this response
+# crossed the plan allowance, and it was already delivered and billed. The NEXT
+# request is refused before it starts; this one must end normally.
+_NON_FATAL_STREAM_ERROR_TYPES = frozenset({"stream_normalization_warning", "plan_limit_exceeded"})
 
 
 async def _aclose_stream(openai_stream) -> None:
@@ -315,7 +375,7 @@ async def _stream_anthropic_events_impl(
                             "type": _STREAM_ERROR_TYPE_MAP.get(err.get("type"), "api_error"),
                             # Never fall back to repr-ing the raw error object —
                             # it may carry internal fields (provider, request_id).
-                            "message": err.get("message") or "upstream provider error",
+                            "message": _safe_error_message(err.get("message")),
                         },
                     },
                 )
@@ -479,19 +539,8 @@ def _unwrap_chat_result(result):
     raise _anthropic_error(500, "api_error", "unexpected upstream response shape")
 
 
-@router.post("/messages", tags=["messages"])
-async def create_message(
-    req: AnthropicMessagesRequest,
-    background_tasks: BackgroundTasks,
-    request: Request = None,
-    api_key: str | None = Depends(get_optional_api_key_strict),
-):
-    """Anthropic Messages API endpoint.
-
-    Point Claude Code at the gateway with:
-        ANTHROPIC_BASE_URL=https://api.gatewayz.ai
-        ANTHROPIC_AUTH_TOKEN=<gatewayz key>
-    """
+def _resolve_checked_api_key(request: Request, api_key: str | None) -> str | None:
+    """The caller's key, with the key security checks applied to ``x-api-key``."""
     resolved_key = _resolve_api_key(request, api_key)
     if resolved_key and not api_key:
         # x-api-key bypassed the Bearer dependency; apply the same key security
@@ -520,6 +569,23 @@ async def create_message(
             # Released by JobLeaseMiddleware when the response finishes.
             if lease_sink:
                 request.state.job_lease = lease_sink[0]
+    return resolved_key
+
+
+@router.post("/messages", tags=["messages"])
+async def create_message(
+    req: AnthropicMessagesRequest,
+    background_tasks: BackgroundTasks,
+    request: Request = None,
+    api_key: str | None = Depends(get_optional_api_key_strict),
+):
+    """Anthropic Messages API endpoint.
+
+    Point Claude Code at the gateway with:
+        ANTHROPIC_BASE_URL=https://api.gatewayz.ai
+        ANTHROPIC_AUTH_TOKEN=<gatewayz key>
+    """
+    resolved_key = _resolve_checked_api_key(request, api_key)
 
     if not req.messages:
         raise _anthropic_error(400, "invalid_request_error", "messages must not be empty")
@@ -544,6 +610,10 @@ async def create_message(
         model=req.model,
         messages=openai_messages,
         stream=bool(req.stream),
+        # Anthropic streams always end with usage. The chat pipeline sends a
+        # usage chunk only to callers that ask, so without this every
+        # OpenAI-shape provider reported 0 input and 0 output tokens here.
+        **({"stream_options": {"include_usage": True}} if req.stream else {}),
         # Never on this route. Auto web search rewrites the prompt with an
         # injected system message and sends the query to a search vendor; an
         # agent's context is source code and tool output, and it brings its own
@@ -577,10 +647,16 @@ async def create_message(
     except HTTPException as exc:
         # Re-wrap gateway errors in Anthropic's envelope so Anthropic SDKs
         # surface a useful message instead of "unknown error shape".
+        message = _detail_message(exc)
+        if _is_plan_period_limit(exc.status_code, message):
+            # 402 like the other "pay or wait" conditions: not retried by SDKs.
+            raise _anthropic_error(
+                402, "invalid_request_error", _plan_limit_message(message)
+            ) from exc
         raise _anthropic_error(
             exc.status_code,
             _anthropic_error_type(exc.status_code, _detail_code(exc)),
-            _detail_message(exc),
+            _safe_error_message(message),
         ) from exc
 
     if req.stream:
@@ -611,6 +687,76 @@ async def create_message(
     if content_hash:
         return JSONResponse(content=anthropic_response, headers={CONTENT_HASH_HEADER: content_hash})
     return anthropic_response
+
+
+class AnthropicCountTokensRequest(BaseModel):
+    """Body of ``POST /v1/messages/count_tokens``. Same shape as a message request,
+    without ``max_tokens``."""
+
+    model: str = Field(..., description="Model identifier")
+    messages: list[dict[str, Any]] = Field(..., description="Conversation turns")
+    system: str | list[dict[str, Any]] | None = None
+    tools: list[dict[str, Any]] | None = None
+
+    class Config:
+        extra = "allow"
+
+
+def _count_block_tokens(value: Any) -> int:
+    """Tokens in one piece of Anthropic content: text, or any JSON-shaped block."""
+    from src.utils.token_estimator import count_tokens_text
+
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        return count_tokens_text(value)
+    if isinstance(value, list):
+        return sum(_count_block_tokens(item) for item in value)
+    if isinstance(value, dict):
+        block_type = value.get("type")
+        if block_type == "text":
+            return count_tokens_text(value.get("text", ""))
+        if block_type in ("image", "document"):
+            # Binary payloads are not text. A flat allowance keeps a base64 blob
+            # from being counted as hundreds of thousands of tokens.
+            return 1500
+        if block_type == "tool_result":
+            return 4 + _count_block_tokens(value.get("content"))
+        if block_type in ("thinking", "redacted_thinking"):
+            return count_tokens_text(value.get("thinking", ""))
+        return count_tokens_text(json.dumps(value, separators=(",", ":")))
+    return count_tokens_text(str(value))
+
+
+def estimate_input_tokens(body: AnthropicCountTokensRequest) -> int:
+    """Estimated input tokens for a message request.
+
+    An estimate from the gateway's tokenizer, not the provider's count: close
+    enough for a client's context meter, and it costs no upstream call.
+    """
+    total = _count_block_tokens(body.system)
+    for message in body.messages:
+        total += 4 + _count_block_tokens(message.get("content"))
+    for tool in body.tools or []:
+        total += _count_block_tokens(tool)
+    return max(total, 1)
+
+
+@router.post("/messages/count_tokens", tags=["messages"])
+async def count_message_tokens(
+    body: AnthropicCountTokensRequest,
+    request: Request = None,
+    api_key: str | None = Depends(get_optional_api_key_strict),
+):
+    """Anthropic ``count_tokens``: how many input tokens a request would use.
+
+    Agent clients call this to keep their context meter accurate. Not billed.
+    Requires a key, so it cannot be used as a free anonymous service.
+    """
+    resolved_key = _resolve_checked_api_key(request, api_key)
+    if not resolved_key:
+        raise _anthropic_error(401, "authentication_error", "An API key is required")
+    return {"input_tokens": estimate_input_tokens(body)}
 
 
 @router.get("/messages/health", tags=["messages"])
