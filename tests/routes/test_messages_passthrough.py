@@ -357,3 +357,116 @@ def test_header_mode_passes_through_only_requests_that_opt_in(monkeypatch):
             "/v1/messages", json=_BODY, headers={**_HEADERS, "x-gatewayz-passthrough": "true"}
         )
     assert seen["passthrough"] is not None
+
+
+# --- Claude Code auto mode: safeguards ----------------------------------------------
+#
+# In auto mode Claude Code sends `anthropic-beta: dangerous-tool-use-*` and a
+# top-level `safeguards` field, and reads `safeguard_results` from the reply.
+# When any of the three is lost it falls back to running the safety check as
+# extra billed model calls on the caller's key.
+
+_SAFEGUARDS = {"tool_use": {"enabled": True}}
+_AUTO_MODE_BETA = "interleaved-thinking-2025-05-14,dangerous-tool-use-2026-09-03"
+
+
+def _post_auto_mode(fake_chat_completions, body):
+    with (
+        patch("src.routes.chat.chat_completions", new=fake_chat_completions),
+        patch(
+            "src.routes.messages.get_request_identity",
+            new=AsyncMock(side_effect=lambda request, api_key=None: _identity(api_key)),
+        ),
+    ):
+        return TestClient(app).post(
+            "/v1/messages",
+            json=body,
+            headers={**_HEADERS, "anthropic-beta": _AUTO_MODE_BETA},
+        )
+
+
+def test_passthrough_forwards_safeguards_and_beta_and_returns_results(monkeypatch):
+    monkeypatch.setenv("MESSAGES_PASSTHROUGH_ENABLED", "true")
+    seen = {}
+
+    async def fake(**kwargs):
+        passthrough = pt.current()
+        seen["upstream_body"] = passthrough.upstream_body(
+            "claude-haiku-4-5-20251001", stream=False, max_tokens=None
+        )
+        seen["upstream_headers"] = passthrough.upstream_headers({"x-api-key": "ours"})
+        passthrough.response_json = {**_NATIVE_OK, "safeguard_results": [{"verdict": "allow"}]}
+        passthrough.used = True
+        return _OPENAI_OK
+
+    resp = _post_auto_mode(fake, {**_BODY, "safeguards": _SAFEGUARDS})
+    assert resp.status_code == 200
+    assert seen["upstream_body"]["safeguards"] == _SAFEGUARDS
+    assert seen["upstream_headers"]["anthropic-beta"] == _AUTO_MODE_BETA
+    assert resp.json()["safeguard_results"] == [{"verdict": "allow"}]
+
+
+def test_passthrough_stream_relays_safeguard_results(monkeypatch):
+    monkeypatch.setenv("MESSAGES_PASSTHROUGH_ENABLED", "true")
+    results = (
+        "message_delta",
+        '{"type":"message_delta","delta":{"stop_reason":"tool_use"},'
+        '"usage":{"output_tokens":9},"safeguard_results":[{"verdict":"allow"}]}',
+    )
+
+    async def fake(**kwargs):
+        passthrough = pt.current()
+
+        async def body():
+            passthrough.used = True
+            for name, data in [RAW[0], results, RAW[-1]]:
+                passthrough.push_event(name, data)
+                await asyncio.sleep(0)
+                yield _openai({"content": "x"})
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(body(), media_type="text/event-stream")
+
+    resp = _post_auto_mode(fake, {**_BODY, "stream": True, "safeguards": _SAFEGUARDS})
+    assert resp.status_code == 200
+    assert f"event: {results[0]}\ndata: {results[1]}\n\n" in resp.text
+
+
+def test_safeguards_without_passthrough_get_the_documented_400(monkeypatch):
+    """Not silently dropped: a 400 naming `safeguards`, before anything is billed."""
+    monkeypatch.delenv("MESSAGES_PASSTHROUGH_ENABLED", raising=False)
+    called = {"pipeline": False}
+
+    async def fake(**kwargs):
+        called["pipeline"] = True
+        return _OPENAI_OK
+
+    resp = _post_auto_mode(fake, {**_BODY, "safeguards": _SAFEGUARDS})
+    assert resp.status_code == 400
+    error = resp.json()["error"]
+    assert error["type"] == "invalid_request_error"
+    assert "safeguards" in error["message"]
+    assert called["pipeline"] is False
+
+
+def test_safeguards_on_a_non_claude_model_get_the_documented_400(monkeypatch):
+    monkeypatch.setenv("MESSAGES_PASSTHROUGH_ENABLED", "true")
+
+    async def fake(**kwargs):
+        raise AssertionError("pipeline must not run")
+
+    resp = _post_auto_mode(
+        fake, {**_BODY, "model": "openai/gpt-5.4-mini", "safeguards": _SAFEGUARDS}
+    )
+    assert resp.status_code == 400
+    assert "safeguards" in resp.text
+
+
+def test_requests_without_safeguards_are_unaffected(monkeypatch):
+    monkeypatch.delenv("MESSAGES_PASSTHROUGH_ENABLED", raising=False)
+
+    async def fake(**kwargs):
+        return _OPENAI_OK
+
+    resp = _post_auto_mode(fake, _BODY)
+    assert resp.status_code == 200
