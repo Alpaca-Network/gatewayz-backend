@@ -90,7 +90,7 @@ def test_events_are_relayed_as_received():
     names = [f.split("\n", 1)[0][len("event: ") :] for f in frames]
     assert names == [name for name, _ in RAW]
     # every event after message_start is byte-for-byte what Anthropic sent
-    for frame, (name, data) in list(zip(frames, RAW))[1:]:
+    for frame, (name, data) in list(zip(frames, RAW, strict=True))[1:]:
         assert frame == f"event: {name}\ndata: {data}\n\n"
     assert '"signature":"SIG=="' in frames[2]
     assert frames[4] == 'event: some_future_event\ndata: {"type":"some_future_event","x":1}\n\n'
