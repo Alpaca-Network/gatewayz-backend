@@ -42,6 +42,7 @@ from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
 from src.security.security import ApiKeyLookupUnavailable, validate_api_key_security
 from src.services.auth_rate_limiting import get_client_ip
+from src.services.claude_code_models import strip_claude_code_prefix
 from src.services.job_usage import JOB_BUSY, job_lease_of
 from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.providers import anthropic_passthrough
@@ -752,6 +753,8 @@ async def create_message(
         ANTHROPIC_AUTH_TOKEN=<gatewayz key>
     """
     resolved_key = _resolve_checked_api_key(request, api_key)
+    # Ids from Claude Code's model picker: claude-code/<catalog id>.
+    req.model = strip_claude_code_prefix(req.model)
 
     if not req.messages:
         raise _anthropic_error(400, "invalid_request_error", "messages must not be empty")

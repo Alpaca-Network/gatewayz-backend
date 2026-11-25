@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Response
 
 from src.db.gateway_analytics import (
     get_all_gateways_summary,
@@ -2207,6 +2207,14 @@ async def get_all_models(
         ),
     ),
     tier: str | None = Query(SERVING_TIER_ALL, description=DESC_TIER),
+    anthropic_version: str | None = Header(
+        None,
+        alias="anthropic-version",
+        description=(
+            "Sent by Anthropic clients. When present, the response is an "
+            "Anthropic-shaped model list for Claude Code's model picker."
+        ),
+    ),
 ):
     """List the models this gateway serves (OpenAI-compatible ``/v1/models``).
 
@@ -2215,6 +2223,26 @@ async def get_all_models(
     ``"community"`` (community GPU network, beta, unpriced), and ``?tier=``
     filters on it — pin ``?tier=provider`` for the provider-only catalog.
     """
+    if isinstance(anthropic_version, str) and anthropic_version:
+        # Claude Code's model discovery. Its picker hides ids without "claude"
+        # in them, so agent-capable models are listed under ids it will show
+        # (see claude_code_models).
+        from src.services.claude_code_models import claude_code_model_listing
+
+        catalog = await get_models(
+            provider=None,
+            is_private=None,
+            limit=1000,
+            offset=0,
+            gateway="all",
+            unique_models=False,
+            tier=tier,
+        )
+        if isinstance(catalog, Response):
+            catalog = json.loads(catalog.body)
+        entries = catalog.get("data", []) if isinstance(catalog, dict) else []
+        return claude_code_model_listing(entries)
+
     return await get_models(
         provider=provider,
         is_private=is_private,
