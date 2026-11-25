@@ -227,6 +227,7 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
     "minimax": _safe_adapter_routing("minimax"),
     "xiaomi": _safe_adapter_routing("xiaomi"),
     "meta": _safe_adapter_routing("meta"),
+    "opencode": _safe_adapter_routing("opencode"),
     "sambanova": _safe_adapter_routing("sambanova"),
 }
 

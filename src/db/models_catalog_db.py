@@ -1602,6 +1602,20 @@ def get_model_pricing_by_ids(supabase: Any, ids: list[Any]) -> dict[Any, dict[st
     return pricing_by_id
 
 
+# Aggregators resell other providers' models (North Star §5, 2026-11-25
+# amendment: listed, but never preferred). On a price tie a direct provider wins.
+AGGREGATOR_PROVIDER_SLUGS: frozenset[str] = frozenset({"openrouter", "opencode"})
+
+
+def _is_aggregator_model(model: dict[str, Any]) -> bool:
+    provider = model.get("providers")
+    slug = provider.get("slug") if isinstance(provider, dict) else None
+    if not slug:
+        model_id = str(model.get("id") or "")
+        slug = model_id.split("/", 1)[0] if "/" in model_id else None
+    return (slug or "").lower() in AGGREGATOR_PROVIDER_SLUGS
+
+
 def _filter_and_sort_by_cost(
     supabase: Any, candidates: list[dict[str, Any]], cost_ceiling: float
 ) -> list[dict[str, Any]]:
@@ -1610,6 +1624,7 @@ def _filter_and_sort_by_cost(
     Blended price uses the same 0.25 input / 0.75 output weighting as
     `model_categorizer`'s `cheapest` rule. A model with no priced row in
     `model_pricing` is excluded — unknown price never passes a ceiling.
+    Ties go to direct providers over aggregators (OpenRouter, OpenCode Zen).
     """
     ids = [m["id"] for m in candidates if m.get("id")]
     if not ids:
@@ -1626,7 +1641,7 @@ def _filter_and_sort_by_cost(
         if blended <= cost_ceiling:
             priced.append((blended, model))
 
-    priced.sort(key=lambda pair: pair[0])
+    priced.sort(key=lambda pair: (pair[0], _is_aggregator_model(pair[1])))
     return [model for _, model in priced]
 
 

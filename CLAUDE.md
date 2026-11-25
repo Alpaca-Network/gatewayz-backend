@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-**Gatewayz v2.0.4** - Enterprise FastAPI gateway providing unified access to 100+ AI models from 17 providers (OpenAI, Anthropic, Google Vertex, xAI, DeepSeek, Alibaba/Qwen, Moonshot/Kimi, MiniMax, Xiaomi, Z.ai, DeepInfra, Novita, Together, Fireworks, Groq, Cerebras, Featherless), with OpenRouter kept as an aggregator-of-last-resort fallback, never primary supply.
+**Gatewayz v2.0.4** - Enterprise FastAPI gateway providing unified access to 100+ AI models from 17 providers (OpenAI, Anthropic, Google Vertex, xAI, DeepSeek, Alibaba/Qwen, Moonshot/Kimi, MiniMax, Xiaomi, Z.ai, DeepInfra, Novita, Together, Fireworks, Groq, Cerebras, Featherless), plus two aggregators listed as gateways: OpenRouter and OpenCode Zen (North Star §5 amendment 2026-11-25; direct providers still win failover and price ties).
 
 **Core Features**: OpenAI/Anthropic API compatibility, multi-provider routing, credit-based billing, encrypted API keys, IP allowlists, audit logging, chat history, subscriptions, Prometheus/Sentry observability, rate limiting, health monitoring, provider failover.
 
@@ -46,7 +46,7 @@ src/                           # Python source
 │   │                         # openrouter, cerebras, featherless, novita, alibaba) +
 │   │                         # openai_compat.py adapter with adapter_configs.py driving
 │   │                         # deepinfra/together/fireworks/groq/zai/deepseek/moonshot/
-│   │                         # minimax/xiaomi off one shared trio
+│   │                         # minimax/xiaomi/meta/opencode off one shared trio
 │   ├── models.py, providers.py, pricing.py, rate_limiting.py  # Core services
 │   ├── *_monitor.py         # health monitoring services
 │   ├── *_cache.py           # caching services

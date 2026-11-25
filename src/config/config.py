@@ -795,6 +795,9 @@ class Config:
     # Meta Llama API Configuration (Llama model family, OpenAI-compatible)
     META_API_KEY = os.environ.get("META_API_KEY")
 
+    # OpenCode Zen Configuration (OpenCode's pay-as-you-go model gateway, OpenAI-compatible)
+    OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY")
+
     # Soundsgood Configuration (GLM-4.5-Air distilled model)
     SOUNDSGOOD_API_KEY = os.environ.get("SOUNDSGOOD_API_KEY")
 

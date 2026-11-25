@@ -307,6 +307,7 @@ ADAPTER_SLUGS = [
     "minimax",
     "xiaomi",
     "meta",
+    "opencode",
 ]
 
 ALL_PROVIDERS = {

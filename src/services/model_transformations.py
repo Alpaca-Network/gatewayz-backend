@@ -639,6 +639,10 @@ def detect_provider_from_model_id(
         if org == "meta":
             return "meta"
 
+        # OpenCode Zen models (e.g., "opencode/claude-opus-5-5") — Zen adapter
+        if org == "opencode":
+            return "opencode"
+
         # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
         if org == "alpaca-network" or org == "alpaca":
             return "alpaca-network"

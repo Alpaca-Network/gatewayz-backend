@@ -404,6 +404,7 @@ class TestAdapterRegistry:
             "xiaomi",
             "meta",
             "sambanova",
+            "opencode",
         }
 
     def test_all_entries_satisfy_protocol(self):

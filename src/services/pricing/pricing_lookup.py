@@ -86,6 +86,9 @@ GATEWAY_PROVIDERS = {
     "minimax",
     "deepseek",
     "xiaomi",
+    # OpenCode Zen: priced from its published table in manual_pricing.json;
+    # cross-reference covers any model Zen adds before that table is updated.
+    "opencode",
 }
 
 # Map our provider slug -> the org prefix OpenRouter uses, for precise
