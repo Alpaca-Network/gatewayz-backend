@@ -32,7 +32,7 @@ def get_eligibility(user_id: int) -> dict[str, Any] | None:
         rows = result.data or []
         return rows[0] if rows else {}
     except Exception as e:
-        logger.warning(f"delegation_eligibility lookup failed: {e}")
+        logger.warning(f"wallet eligibility lookup failed: {e}")
         return None
 
 
@@ -67,7 +67,7 @@ def record_attestation(
         rows = result.data or []
         return rows[0] if rows else None
     except Exception as e:
-        logger.warning(f"delegation_eligibility attestation write failed: {e}")
+        logger.warning(f"wallet eligibility attestation write failed: {e}")
         return None
 
 
@@ -89,5 +89,5 @@ def mark_restricted(user_id: int, country: str | None, reason: str) -> bool:
         ).execute()
         return True
     except Exception as e:
-        logger.warning(f"delegation_eligibility restrict write failed: {e}")
+        logger.warning(f"wallet eligibility restrict write failed: {e}")
         return False

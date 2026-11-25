@@ -6,7 +6,7 @@ switched on, each request is paid mostly from the discount credits balance and
 the rest from the paid balance, until the discount credits run out. After that
 the account pays full price from its paid balance, as before.
 
-One discount credit covers one US dollar of list price.
+Balances are kept in US dollars to six decimal places. One discount credit is US$0.000001 of discount, so a balance of `5.000000` is five million credits.
 
 ## How a request is billed
 
@@ -32,6 +32,7 @@ One discount credit covers one US dollar of list price.
 | `VAULT_DISCOUNT_BILLING_ENABLED` | `false` | Master switch. Off means billing is unchanged. |
 | `VAULT_DISCOUNT_PERCENT` | `0.99` | Share of a request's list price drawn from discount credits. Capped at 99% in code and in the SQL. |
 | `VAULT_DISCOUNT_HOLD_TTL_SECONDS` | `900` | How long a pre-request hold on the balance lives if the request is never billed (clamped to between one minute and one hour). |
+| `VAULT_DISCOUNT_PILOT_USER_IDS` | empty | Which accounts the switch applies to: account ids, or `*` for all. Empty means nobody |
 
 There are no aliases for older key names.
 
@@ -73,7 +74,8 @@ The database calls behind these are in `src/db/inference_discount.py`
 }
 ```
 
-- `discount.enabled` reflects `VAULT_DISCOUNT_BILLING_ENABLED`.
+- `discount.enabled` is true when the switch is on and it applies to the calling account (see "Who the switch applies to").
+- `discount.discount_percent` is a fraction such as `"0.99"`; it is `null` for an account the switch does not apply to.
 - While billing is off the balance fields are zero and the history is empty;
   no database read is made.
 - `reward_share` is a leftover field kept so the response shape did not
@@ -110,14 +112,19 @@ The tables and SQL functions keep the names they were created with:
 `delegation_eligibility`. They were introduced by an earlier, retired program;
 only the names are historical.
 
-## Pilot list
+## Who the switch applies to
 
-`VAULT_DISCOUNT_PILOT_USER_IDS` is a comma-separated list of account ids. While it names at least one account, billing draws on discount credits for those accounts only. Every other account is billed exactly as with the switch off, with no extra database call, and `GET /discount-credits` shows them the disabled shape.
-
-Use it to try discount credits on a few accounts in production before opening them to everyone. Leave it empty to include every account (the switch must still be on).
+`VAULT_DISCOUNT_PILOT_USER_IDS` decides which accounts the switch applies to.
 
 | `VAULT_DISCOUNT_BILLING_ENABLED` | `VAULT_DISCOUNT_PILOT_USER_IDS` | Who gets the discount |
 |---|---|---|
 | off | anything | Nobody |
+| on | empty, or nothing valid in it | **Nobody** |
 | on | `10,37` | Accounts 10 and 37 |
-| on | empty | Every account with a balance |
+| on | `*` | Every account with a balance |
+
+An empty or mistyped value admits nobody, so a missing setting can never open discount billing to every account. Opening it to everyone takes an explicit `*`.
+
+For an account the switch does not apply to, billing takes exactly the switch-off path: no draw, no hold, no discount lookup on a refund, and `GET /discount-credits` returns the disabled shape (zeros, `discount_percent: null`) without reading the database. Every billing call site checks `discount_enabled_for(user_id)`, never the switch alone; a test enforces that.
+
+Remove an account from the list only after its recent requests can no longer be refunded: a refund for an account outside the list does not put a discount back.

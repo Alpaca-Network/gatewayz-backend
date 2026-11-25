@@ -1140,16 +1140,17 @@ def deduct_credits(
             logger.warning(f"Error checking admin tier status for credit deduction: {e}")
 
         # DISCOUNT CREDITS (src/services/discount_credits/billing.py).
-        # discount_enabled() is a config read: with
-        # VAULT_DISCOUNT_BILLING_ENABLED off nothing
-        # below runs and billing is unchanged. When on, d x cost is drawn from
+        # discount_enabled_for() is a config read: with
+        # VAULT_DISCOUNT_BILLING_ENABLED off, or for an account outside the
+        # pilot list, nothing below runs and billing is unchanged. Otherwise
+        # d x cost is drawn from
         # the account's discount credits balance first -- row-locked and
         # idempotent on this same request_id, so a retry draws nothing new --
         # and only the rest is charged to the paid balance. Any discount error
         # charges full price.
-        from src.services.discount_credits.billing import discount_enabled
+        from src.services.discount_credits.billing import discount_enabled_for
 
-        if discount_enabled():
+        if discount_enabled_for(user_id):
             from src.services.discount_credits.billing import (
                 apply_for_request,
                 reverse_for_request,

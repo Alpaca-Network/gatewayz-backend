@@ -67,6 +67,7 @@ def _user():
 def enabled(monkeypatch):
     monkeypatch.setattr(billing.Config, "VAULT_DISCOUNT_BILLING_ENABLED", True)
     monkeypatch.setattr(billing.Config, "VAULT_DISCOUNT_PERCENT", Decimal("0.99"))
+    monkeypatch.setattr(billing.Config, "VAULT_DISCOUNT_ALL_ACCOUNTS", True)
 
 
 @pytest.fixture
@@ -142,7 +143,8 @@ def test_disabled_shape_is_the_same_keys_with_zeros_and_no_db_read(disabled):
     assert set(data) == {"discount", "discount_history", "disclaimer"}
     assert data["discount"] == {
         "enabled": False,
-        "discount_percent": "0.99",
+        # The share is shown only to accounts it applies to.
+        "discount_percent": None,
         "reward_share": "0",
         "balance_usd": "0.000000",
         "lifetime_granted_usd": "0.000000",
@@ -182,6 +184,7 @@ def test_an_account_outside_the_pilot_list_sees_the_disabled_shape_and_no_db_rea
     try:
         with (
             patch.object(billing.Config, "VAULT_DISCOUNT_BILLING_ENABLED", True),
+            patch.object(billing.Config, "VAULT_DISCOUNT_ALL_ACCOUNTS", False),
             patch.object(
                 billing.Config, "VAULT_DISCOUNT_PILOT_USER_IDS", frozenset({USER["id"] + 1})
             ),
@@ -202,6 +205,7 @@ def test_an_account_on_the_pilot_list_sees_its_balance():
     try:
         with (
             patch.object(billing.Config, "VAULT_DISCOUNT_BILLING_ENABLED", True),
+            patch.object(billing.Config, "VAULT_DISCOUNT_ALL_ACCOUNTS", False),
             patch.object(billing.Config, "VAULT_DISCOUNT_PILOT_USER_IDS", frozenset({USER["id"]})),
             patch.object(routes, "get_balance", return_value=BALANCE),
             patch.object(routes, "list_ledger", return_value=[]),
