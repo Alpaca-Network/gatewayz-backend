@@ -40,6 +40,7 @@ import httpx
 
 from src.config import Config
 from src.services.connection_pool import get_http_client
+from src.services.providers import anthropic_passthrough
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -418,15 +419,29 @@ def make_anthropic_native_request(messages, model, **kwargs):
         request_uses_caching(messages, **kwargs),
     )
 
+    headers = _headers()
+    # A native request from /v1/messages: send the caller's own body, not the
+    # one rebuilt from the OpenAI shape (see anthropic_passthrough).
+    passthrough = anthropic_passthrough.current()
+    if passthrough is not None:
+        payload = passthrough.upstream_body(
+            model, stream=False, max_tokens=kwargs.get("max_tokens")
+        )
+        headers = passthrough.upstream_headers(headers)
+
     client = get_http_client()
     response = client.post(
         f"{ANTHROPIC_API_BASE}/v1/messages",
-        headers=_headers(),
+        headers=headers,
         json=payload,
         timeout=120.0,
     )
     response.raise_for_status()
-    return anthropic_response_to_openai(response.json(), model)
+    data = response.json()
+    if passthrough is not None:
+        passthrough.response_json = data
+        passthrough.used = True
+    return anthropic_response_to_openai(data, model)
 
 
 def make_anthropic_native_request_stream(messages, model, **kwargs) -> Iterator[dict[str, Any]]:
@@ -446,6 +461,17 @@ def make_anthropic_native_request_stream(messages, model, **kwargs) -> Iterator[
 
     # Validate credentials eagerly -- _headers() raises when the key is absent.
     headers = _headers()
+
+    # A native request from /v1/messages: send the caller's own body and relay
+    # Anthropic's events to the route as they arrive (see anthropic_passthrough).
+    # The OpenAI-shaped chunks below are still produced; the pipeline bills
+    # from them.
+    passthrough = anthropic_passthrough.current()
+    if passthrough is not None:
+        payload = passthrough.upstream_body(
+            model, stream=True, max_tokens=kwargs.get("max_tokens")
+        )
+        headers = passthrough.upstream_headers(headers)
 
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -481,17 +507,31 @@ def make_anthropic_native_request_stream(messages, model, **kwargs) -> Iterator[
         client.close()
         raise
 
+    if passthrough is not None:
+        # Only now: a failed call may be retried on another transport or
+        # provider, and the route must then translate that output instead.
+        passthrough.used = True
+
     def _generate() -> Iterator[dict[str, Any]]:
         nonlocal tool_index, usage_totals
         try:
             yield _chunk({"role": "assistant", "content": ""})
 
+            event_name: str | None = None
             for line in response.iter_lines():
+                if line.startswith("event:"):
+                    event_name = line[len("event:") :].strip() or None
+                    continue
                 if not line or not line.startswith("data: "):
                     continue
                 raw = line[len("data: ") :].strip()
                 if not raw:
                     continue
+                if passthrough is not None:
+                    # Relayed as received, including event types this client
+                    # does not interpret (thinking, signatures, pings).
+                    passthrough.push_event(event_name, raw)
+                event_name = None
                 try:
                     event = json.loads(raw)
                 except json.JSONDecodeError:

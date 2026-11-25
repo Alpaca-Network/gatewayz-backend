@@ -122,7 +122,7 @@ def make_anthropic_request(messages, model, **kwargs):
             request_uses_caching,
         )
 
-        uses_caching = request_uses_caching(messages, **kwargs)
+        uses_caching = request_uses_caching(messages, **kwargs) or _passthrough_active()
         try:
             return make_anthropic_native_request(messages, model, **kwargs)
         except Exception as e:
@@ -144,6 +144,18 @@ def make_anthropic_request(messages, model, **kwargs):
             )
 
     return _make_anthropic_request_compat(messages, model, **kwargs)
+
+
+def _passthrough_active() -> bool:
+    """A native /v1/messages request is being passed through.
+
+    Treated like a cached request: the compatibility endpoint cannot carry the
+    caller's native body (thinking, betas, cache breakpoints), so falling back
+    to it would silently drop what they asked for.
+    """
+    from src.services.providers import anthropic_passthrough
+
+    return anthropic_passthrough.current() is not None
 
 
 def _make_anthropic_request_compat(messages, model, **kwargs):
@@ -185,7 +197,7 @@ def make_anthropic_request_stream(messages, model, **kwargs):
             request_uses_caching,
         )
 
-        uses_caching = request_uses_caching(messages, **kwargs)
+        uses_caching = request_uses_caching(messages, **kwargs) or _passthrough_active()
         try:
             return make_anthropic_native_request_stream(messages, model, **kwargs)
         except Exception as e:

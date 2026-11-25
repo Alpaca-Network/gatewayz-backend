@@ -24,6 +24,8 @@ static prefix cheap to replay.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -42,6 +44,7 @@ from src.security.security import ApiKeyLookupUnavailable, validate_api_key_secu
 from src.services.auth_rate_limiting import get_client_ip
 from src.services.job_usage import JOB_BUSY, job_lease_of
 from src.services.job_usage_v2 import CONTENT_HASH_HEADER
+from src.services.providers import anthropic_passthrough
 from src.services.providers.anthropic_transformer import (
     anthropic_input_tokens,
     transform_anthropic_to_openai,
@@ -516,6 +519,169 @@ async def _stream_anthropic_events_impl(
     yield _sse("message_stop", {"type": "message_stop"})
 
 
+def _relay_event(name: str | None, data: str, model: str) -> tuple[str, str | None]:
+    """One raw Anthropic event as an SSE frame, and its type.
+
+    Sent on as received. The one edit: ``message_start`` reports the model id
+    the caller asked for rather than the provider's own id for it.
+    """
+    event_type = name
+    if name in (None, "message_start"):
+        try:
+            parsed = json.loads(data)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            event_type = name or parsed.get("type")
+            message = parsed.get("message")
+            if parsed.get("type") == "message_start" and isinstance(message, dict):
+                message["model"] = model
+                data = json.dumps(parsed)
+    if event_type:
+        return f"event: {event_type}\ndata: {data}\n\n", event_type
+    return f"data: {data}\n\n", None
+
+
+def _inner_error(raw: str) -> dict[str, Any] | None:
+    """The fatal error carried by a pipeline SSE line, if it carries one."""
+    if not raw or not raw.startswith("data: "):
+        return None
+    payload = raw[len("data: ") :].strip()
+    if not payload or payload == "[DONE]":
+        return None
+    try:
+        chunk = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    err = chunk.get("error") if isinstance(chunk, dict) else None
+    if not err:
+        return None
+    err = err if isinstance(err, dict) else {}
+    if err.get("type") in _NON_FATAL_STREAM_ERROR_TYPES:
+        return None
+    return err
+
+
+async def _stream_with_passthrough(
+    openai_stream,
+    model: str,
+    message_id: str,
+    passthrough: anthropic_passthrough.Passthrough,
+):
+    """Stream a /v1/messages response for a request that may be passed through.
+
+    The pipeline's stream is always consumed to the end: that is what runs its
+    usage recording and billing. What the caller receives depends on whether
+    the native Anthropic client served the request:
+
+    - it did (``passthrough.used``): Anthropic's own events, as received;
+    - it did not (another provider, or a failover): the pipeline's OpenAI
+      chunks translated to Anthropic events, exactly as without pass-through.
+    """
+    queue = passthrough.queue
+    done = anthropic_passthrough.STREAM_DONE
+
+    async def pump():
+        try:
+            async for raw in openai_stream:
+                queue.put_nowait(("inner", raw))
+        except Exception:
+            logger.exception("Pipeline stream raised mid-flight for model %s", model)
+            queue.put_nowait(("inner_failed",))
+        finally:
+            queue.put_nowait((done,))
+
+    pump_task = asyncio.create_task(pump())
+
+    def error_event(message: str, error_type: str = "api_error") -> str:
+        return _sse("error", {"type": "error", "error": {"type": error_type, "message": message}})
+
+    try:
+        # Decide the mode from the first item that settles it. Pipeline lines
+        # seen before that are kept, in case they have to be translated.
+        held: list[tuple] = []
+        relay = False
+        while True:
+            item = await queue.get()
+            if item[0] == "event" or (item[0] == "inner" and passthrough.used):
+                relay = True
+                held.append(item)
+                break
+            held.append(item)
+            if item[0] is done or item[0] == "inner_failed":
+                break
+            if item[0] == "inner" and item[1] and item[1].startswith("data: "):
+                break
+
+        if not relay:
+
+            async def replay():
+                for early in held:
+                    if early[0] is done:
+                        return
+                    if early[0] == "inner_failed":
+                        raise RuntimeError("pipeline stream failed")
+                    if early[0] == "inner":
+                        yield early[1]
+                while True:
+                    later = await queue.get()
+                    if later[0] is done:
+                        return
+                    if later[0] == "inner_failed":
+                        raise RuntimeError("pipeline stream failed")
+                    if later[0] == "inner":
+                        yield later[1]
+
+            async for event in _stream_anthropic_events_impl(replay(), model, message_id):
+                yield event
+            return
+
+        finished = False  # a message_stop or error event has gone out
+        pending = held
+        while True:
+            for item in pending:
+                kind = item[0]
+                if kind is done:
+                    if not finished:
+                        yield error_event(
+                            "The upstream provider connection ended before the response was "
+                            "complete."
+                        )
+                    return
+                if kind == "event":
+                    frame, event_type = _relay_event(item[1], item[2], model)
+                    yield frame
+                    if event_type in ("message_stop", "error"):
+                        finished = True
+                elif kind == "inner":
+                    raw = item[1]
+                    if raw and raw.startswith(_CONTENT_HASH_COMMENT):
+                        yield raw
+                    elif not finished:
+                        err = _inner_error(raw)
+                        if err is not None:
+                            yield error_event(
+                                _safe_error_message(err.get("message")),
+                                _STREAM_ERROR_TYPE_MAP.get(err.get("type"), "api_error"),
+                            )
+                            finished = True
+                elif kind == "inner_failed" and not finished:
+                    yield error_event(
+                        "The upstream provider connection failed mid-stream. The response is "
+                        "incomplete."
+                    )
+                    finished = True
+            pending = [await queue.get()]
+    finally:
+        # Stop the pump first: cancelling it unwinds the pipeline's generator,
+        # which is what bills a response the client walked away from.
+        pump_task.cancel()
+        with contextlib.suppress(BaseException):
+            await pump_task
+        with contextlib.suppress(BaseException):
+            await _aclose_stream(openai_stream)
+
+
 def _unwrap_chat_result(result):
     """Normalize chat_completions' return value to the response dict.
 
@@ -606,6 +772,31 @@ async def create_message(
         keep_tool_result_cache_control="claude" in req.model.lower(),
     )
 
+    # Claude models: hand the caller's original body to the native Anthropic
+    # client instead of the one rebuilt from the OpenAI shape below. The
+    # pipeline still runs on the translated request (credit check, limits,
+    # billing); see anthropic_passthrough.
+    passthrough: anthropic_passthrough.Passthrough | None = None
+    passthrough_token = None
+    if anthropic_passthrough.passthrough_enabled() and anthropic_passthrough.is_claude_model(
+        req.model
+    ):
+        original = req.model_dump(exclude_unset=True)
+        dropped_tools = anthropic_passthrough.strip_billed_server_tools(original)
+        passthrough = anthropic_passthrough.Passthrough(
+            body=original,
+            requested_model=req.model,
+            beta=request.headers.get("anthropic-beta") if request else None,
+            version=request.headers.get("anthropic-version") if request else None,
+            loop=asyncio.get_running_loop(),
+            queue=asyncio.Queue() if req.stream else None,
+            dropped_tools=dropped_tools,
+        )
+        passthrough_token = anthropic_passthrough.bind(passthrough)
+    extra_headers = (
+        {"x-gatewayz-dropped": "server_tools"} if passthrough and passthrough.dropped_tools else {}
+    )
+
     proxy_request = ProxyRequest(
         model=req.model,
         messages=openai_messages,
@@ -658,21 +849,42 @@ async def create_message(
             _anthropic_error_type(exc.status_code, _detail_code(exc)),
             _safe_error_message(message),
         ) from exc
+    finally:
+        # A streaming response may reach the provider only once its body is
+        # iterated, so the binding stays for the life of this request's context.
+        if passthrough_token is not None and not req.stream:
+            anthropic_passthrough.unbind(passthrough_token)
 
     if req.stream:
         if not isinstance(result, StreamingResponse):
             raise _anthropic_error(
                 500, "api_error", "upstream did not return a stream for a streaming request"
             )
+        events = (
+            _stream_with_passthrough(result.body_iterator, req.model, message_id, passthrough)
+            if passthrough is not None
+            else _stream_anthropic_events(result.body_iterator, req.model, message_id)
+        )
         return StreamingResponse(
-            _stream_anthropic_events(result.body_iterator, req.model, message_id),
+            events,
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache, no-transform",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
+                **extra_headers,
             },
         )
+
+    content_hash = getattr(getattr(request, "state", None), "gatewayz_content_hash", None)
+    if content_hash:
+        extra_headers = {**extra_headers, CONTENT_HASH_HEADER: content_hash}
+
+    if passthrough is not None and passthrough.used and passthrough.response_json is not None:
+        # Anthropic's own response, as received; only the model id is the
+        # caller's. Billing already ran in the pipeline on the same counts.
+        native_response = {**passthrough.response_json, "model": req.model}
+        return JSONResponse(content=native_response, headers=extra_headers)
 
     openai_response = _unwrap_chat_result(result)
 
@@ -682,10 +894,9 @@ async def create_message(
         stop_sequences=req.stop_sequences,
     )
     anthropic_response["id"] = message_id
-    # Job keys only: the content fingerprint of this request's usage line.
-    content_hash = getattr(getattr(request, "state", None), "gatewayz_content_hash", None)
-    if content_hash:
-        return JSONResponse(content=anthropic_response, headers={CONTENT_HASH_HEADER: content_hash})
+    # Job keys: the content fingerprint of this request's usage line.
+    if extra_headers:
+        return JSONResponse(content=anthropic_response, headers=extra_headers)
     return anthropic_response
 
 
