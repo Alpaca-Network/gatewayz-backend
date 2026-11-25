@@ -75,6 +75,8 @@ def _ok_deduct(name, params):
 def flags(monkeypatch):
     def set_(enabled=True, percent="0.99"):
         monkeypatch.setattr(discount.Config, "VAULT_DISCOUNT_BILLING_ENABLED", enabled)
+        # These tests are about one account with the switch on: apply it to everyone.
+        monkeypatch.setattr(discount.Config, "VAULT_DISCOUNT_ALL_ACCOUNTS", True)
         monkeypatch.setattr(discount.Config, "VAULT_DISCOUNT_PERCENT", Decimal(percent))
 
     return set_

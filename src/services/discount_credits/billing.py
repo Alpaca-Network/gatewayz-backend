@@ -64,17 +64,23 @@ def discount_enabled() -> bool:
 
 
 def account_in_pilot(user_id: Any) -> bool:
-    """True when billing may draw on this account's discount credits: either
-    no pilot list is set (VAULT_DISCOUNT_PILOT_USER_IDS empty, everyone), or
-    the account is on it. Config only -- never a DB call."""
-    pilot = Config.VAULT_DISCOUNT_PILOT_USER_IDS
-    if not pilot:
+    """True when billing may draw on this account's discount credits: the
+    account is named in VAULT_DISCOUNT_PILOT_USER_IDS, or that setting is "*"
+    (every account). An empty or invalid setting admits nobody. Config only --
+    never a DB call."""
+    if Config.VAULT_DISCOUNT_ALL_ACCOUNTS:
         return True
-    return isinstance(user_id, int) and not isinstance(user_id, bool) and user_id in pilot
+    return (
+        isinstance(user_id, int)
+        and not isinstance(user_id, bool)
+        and user_id in Config.VAULT_DISCOUNT_PILOT_USER_IDS
+    )
 
 
 def discount_enabled_for(user_id: Any) -> bool:
-    """The switch and the pilot list together, for one account."""
+    """The switch and the pilot list together, for one account. This is what
+    every billing call site checks, so an account outside the list takes
+    exactly the same path as with the switch off."""
     return discount_enabled() and account_in_pilot(user_id)
 
 

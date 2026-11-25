@@ -816,15 +816,15 @@ async def refund_credits(
         # refund at most what the request was actually charged (its own credit
         # row), so a refund can never turn discount credits into paid credits -- not even
         # when the reversal itself fails. Config-gated: no DB call while the
-        # discount is disabled.
+        # discount is disabled or for an account outside the pilot list.
         if original_request_id:
             from src.services.discount_credits.billing import (
                 charged_credits_for,
-                discount_enabled,
+                discount_enabled_for,
                 reverse_or_none,
             )
 
-            if discount_enabled():
+            if discount_enabled_for(user_id):
                 restored = await asyncio.to_thread(reverse_or_none, original_request_id)
                 charged = await asyncio.to_thread(charged_credits_for, original_request_id)
                 if restored:

@@ -486,11 +486,11 @@ class ChatInferenceHandler:
         from src.services.billing.credit_precheck import calculate_maximum_cost
         from src.services.discount_credits.billing import (
             discount_aware_credits_async,
-            discount_enabled,
+            discount_enabled_for,
         )
 
         credit_capacity = user_credits
-        if discount_enabled():
+        if discount_enabled_for(self.user.get("id")):
             # Holds this request's discount (keyed by the same billing ref
             # deduct_credits settles on), so concurrent pre-checks cannot
             # all count one balance.

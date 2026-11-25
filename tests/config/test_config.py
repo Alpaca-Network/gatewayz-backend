@@ -755,3 +755,31 @@ class TestEnabledProvidersRoster:
             {"openai", "anthropic", "xai", "moonshot"}
         )
         assert config.Config.ENABLED_PROVIDERS_EXPLICIT is True
+
+
+@pytest.mark.parametrize(
+    "raw, ids, everyone",
+    [
+        ("", frozenset(), False),
+        ("10", frozenset({10}), False),
+        (" 10 , 37 ", frozenset({10, 37}), False),
+        ("*", frozenset(), True),
+        ("12a", frozenset(), False),  # a typo admits nobody, not everybody
+        ("10,*", frozenset({10}), False),  # "*" counts only when it stands alone
+        ("0,-3,4.5", frozenset(), False),
+    ],
+)
+def test_discount_pilot_setting_is_parsed_strictly(monkeypatch, raw, ids, everyone):
+    import importlib
+    import sys
+
+    saved = sys.modules.get("src.config.config")
+    monkeypatch.setenv("VAULT_DISCOUNT_PILOT_USER_IDS", raw)
+    try:
+        sys.modules.pop("src.config.config", None)
+        config = importlib.import_module("src.config.config")
+        assert config.Config.VAULT_DISCOUNT_PILOT_USER_IDS == ids
+        assert config.Config.VAULT_DISCOUNT_ALL_ACCOUNTS is everyone
+    finally:
+        if saved is not None:
+            sys.modules["src.config.config"] = saved

@@ -276,14 +276,17 @@ class Config:
     # lives if the request is never billed (60..3600 s). Settled holds go at
     # once.
     VAULT_DISCOUNT_HOLD_TTL_SECONDS = _int_env("VAULT_DISCOUNT_HOLD_TTL_SECONDS", 900)
-    # Pilot list: comma-separated account ids. While it names at least one
-    # account, billing draws on discount credits for those accounts only and
-    # every other account is billed exactly as with the switch off (no extra
-    # DB call). Empty (default) -> every account, once the switch is on.
-    # Anything that is not a positive whole number is ignored.
+    # Who the switch applies to. Comma-separated account ids: billing draws
+    # on discount credits for those accounts only, and every other account is
+    # billed exactly as with the switch off. A single "*" means every
+    # account. Empty (default), or a value with no valid id in it, means
+    # NOBODY: a missing or mistyped setting can never open discount billing
+    # to all accounts. Entries that are not positive whole numbers are ignored.
+    _VAULT_DISCOUNT_PILOT_RAW = (_get_env_var("VAULT_DISCOUNT_PILOT_USER_IDS", "") or "").strip()
+    VAULT_DISCOUNT_ALL_ACCOUNTS = _VAULT_DISCOUNT_PILOT_RAW == "*"
     VAULT_DISCOUNT_PILOT_USER_IDS = frozenset(
         int(part)
-        for part in (_get_env_var("VAULT_DISCOUNT_PILOT_USER_IDS", "") or "").split(",")
+        for part in _VAULT_DISCOUNT_PILOT_RAW.split(",")
         if part.strip().isdigit() and int(part) > 0
     )
     # Cardano wallet linking (src/routes/wallet_auth_cardano.py,

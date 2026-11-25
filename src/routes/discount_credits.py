@@ -80,7 +80,9 @@ def _discount_block(user_id: int) -> dict[str, Any]:
     enabled = discount_enabled_for(user_id)
     config = {
         "enabled": enabled,
-        "discount_percent": _num(discount_percent()),
+        # The fraction (for example "0.99") of a request's list price that
+        # discount credits pay. Shown only to accounts it applies to.
+        "discount_percent": _num(discount_percent()) if enabled else None,
         # Deprecated: a field of the retired program, kept (always "0") so the
         # shape the app already parses is unchanged.
         "reward_share": "0",
