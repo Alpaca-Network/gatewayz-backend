@@ -778,9 +778,10 @@ async def create_message(
     # billing); see anthropic_passthrough.
     passthrough: anthropic_passthrough.Passthrough | None = None
     passthrough_token = None
-    if anthropic_passthrough.passthrough_enabled() and anthropic_passthrough.is_claude_model(
+    opt_in = request.headers.get(anthropic_passthrough.OPT_IN_HEADER) if request else None
+    if anthropic_passthrough.is_claude_model(
         req.model
-    ):
+    ) and anthropic_passthrough.passthrough_enabled(opt_in):
         original = req.model_dump(exclude_unset=True)
         dropped_tools = anthropic_passthrough.strip_billed_server_tools(original)
         passthrough = anthropic_passthrough.Passthrough(

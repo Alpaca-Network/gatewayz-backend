@@ -333,3 +333,27 @@ def test_streaming_route_relays_native_events(monkeypatch):
     events = [line[len("event: ") :] for line in lines if line.startswith("event: ")]
     assert events == [name for name, _ in RAW]
     assert '"signature":"SIG=="' in resp.text
+
+
+def test_header_mode_passes_through_only_requests_that_opt_in(monkeypatch):
+    monkeypatch.setenv("MESSAGES_PASSTHROUGH_ENABLED", "header")
+    seen = {}
+
+    async def fake(**kwargs):
+        seen["passthrough"] = pt.current()
+        return _OPENAI_OK
+
+    _post(fake, _BODY)
+    assert seen["passthrough"] is None
+
+    with (
+        patch("src.routes.chat.chat_completions", new=fake),
+        patch(
+            "src.routes.messages.get_request_identity",
+            new=AsyncMock(side_effect=lambda request, api_key=None: _identity(api_key)),
+        ),
+    ):
+        TestClient(app).post(
+            "/v1/messages", json=_BODY, headers={**_HEADERS, "x-gatewayz-passthrough": "true"}
+        )
+    assert seen["passthrough"] is not None

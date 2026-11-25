@@ -45,13 +45,27 @@ BILLED_SERVER_TOOL_PREFIXES = ("web_search", "web_fetch", "code_execution")
 STREAM_DONE = object()
 
 
-def passthrough_enabled() -> bool:
-    return os.getenv("MESSAGES_PASSTHROUGH_ENABLED", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+OPT_IN_HEADER = "x-gatewayz-passthrough"
+_TRUE = {"1", "true", "yes", "on"}
+
+
+def passthrough_enabled(opt_in: str | None = None) -> bool:
+    """Whether this request may be passed through.
+
+    ``MESSAGES_PASSTHROUGH_ENABLED``:
+
+    - unset / ``false``: never;
+    - ``header``: only requests that send ``x-gatewayz-passthrough: true``, so
+      it can be tried on chosen sessions in production before anyone else
+      is affected;
+    - ``true``: every Claude request on /v1/messages.
+    """
+    mode = os.getenv("MESSAGES_PASSTHROUGH_ENABLED", "false").strip().lower()
+    if mode in _TRUE:
+        return True
+    if mode == "header":
+        return (opt_in or "").strip().lower() in _TRUE
+    return False
 
 
 def is_claude_model(model: str | None) -> bool:

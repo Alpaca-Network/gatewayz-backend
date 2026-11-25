@@ -76,6 +76,15 @@ def test_flag_is_off_by_default(monkeypatch):
     assert pt.passthrough_enabled() is True
 
 
+def test_header_mode_needs_the_opt_in_header(monkeypatch):
+    monkeypatch.setenv("MESSAGES_PASSTHROUGH_ENABLED", "header")
+    assert pt.passthrough_enabled() is False
+    assert pt.passthrough_enabled("false") is False
+    assert pt.passthrough_enabled("true") is True
+    monkeypatch.setenv("MESSAGES_PASSTHROUGH_ENABLED", "false")
+    assert pt.passthrough_enabled("true") is False
+
+
 def test_only_claude_models_qualify():
     assert pt.is_claude_model("anthropic/claude-sonnet-5-5")
     assert pt.is_claude_model("claude-haiku-4-5")
