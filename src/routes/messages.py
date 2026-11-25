@@ -93,6 +93,26 @@ class AnthropicMessagesRequest(BaseModel):
         extra = "allow"
 
 
+# Claude Code in auto mode adds a top-level ``safeguards`` field (and an
+# ``anthropic-beta: dangerous-tool-use-*`` value) asking the upstream to run
+# auto mode's safety check, and reads ``safeguard_results`` from the reply.
+# Pass-through forwards all three untouched. Every other path would drop the
+# field silently, so the client would pay for the check as extra billed model
+# calls without being told why. Claude Code's gateway contract for that case:
+# answer 400 invalid_request_error naming ``safeguards``; the client then
+# retries without it and runs the check itself.
+SAFEGUARDS_FIELD = "safeguards"
+
+
+def _safeguards_unsupported() -> HTTPException:
+    return _anthropic_error(
+        400,
+        "invalid_request_error",
+        f"`{SAFEGUARDS_FIELD}` is not supported for this model on this gateway; "
+        "retry without it.",
+    )
+
+
 def _resolve_api_key(request: Request, api_key: str | None) -> str | None:
     """Accept Anthropic-style ``x-api-key`` as well as ``Authorization: Bearer``.
 
@@ -797,6 +817,9 @@ async def create_message(
             dropped_tools=dropped_tools,
         )
         passthrough_token = anthropic_passthrough.bind(passthrough)
+    elif SAFEGUARDS_FIELD in (req.model_extra or {}):
+        # Refused before the pipeline runs, so nothing is billed for it.
+        raise _safeguards_unsupported()
     extra_headers = (
         {"x-gatewayz-dropped": "server_tools"} if passthrough and passthrough.dropped_tools else {}
     )
