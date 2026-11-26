@@ -305,6 +305,11 @@ class Config:
     # whatever the client sent. Set it only behind an edge that always sets it.
     # Unset -> the self-attestation is the only check.
     WALLET_LINK_COUNTRY_HEADER = (_get_env_var("WALLET_LINK_COUNTRY_HEADER", "") or "").lower()
+    # Local MaxMind DB (.mmdb) country database used when no country header
+    # is configured: the country of the trusted client IP
+    # (auth_rate_limiting.get_client_ip). Empty (the default) turns the
+    # lookup off. See docs/wallet/ip-country.md.
+    WALLET_LINK_IP_COUNTRY_DB_PATH = _get_env_var("WALLET_LINK_IP_COUNTRY_DB_PATH", "") or ""
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.
