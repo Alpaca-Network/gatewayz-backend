@@ -219,12 +219,14 @@ jobs:
         id: test_run
         env:
           CATEGORY: ${{ matrix.category }}
-          # Test environment variables
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://test-placeholder.invalid' }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || 'test-key' }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || 'test-key' }}
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'test-encryption-key-32-bytes!' }}
-          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY || 'test-admin-key' }}
+          # Placeholders only. Unit tests must never reach a real database or
+          # provider: with the production values here, any test that forgot
+          # to mock a write wrote into the production database on every run.
+          SUPABASE_URL: https://test-placeholder.invalid
+          SUPABASE_KEY: test-key
+          OPENROUTER_API_KEY: test-key
+          ENCRYPTION_KEY: test-encryption-key-32-bytes!
+          ADMIN_API_KEY: test-admin-key
         run: |
           # Build test path array from space-separated paths
           IFS=' ' read -ra PATHS <<< "${{ matrix.paths }}"
