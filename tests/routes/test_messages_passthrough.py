@@ -8,8 +8,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from src.main import app
-from src.routes.messages import _stream_with_passthrough
 from src.security.identity import RequestIdentity
+from src.services.anthropic_messages.stream import relay_passthrough_stream
 from src.services.providers import anthropic_passthrough as pt
 
 _HEADERS = {
@@ -62,7 +62,7 @@ async def _collect(make_inner, *, used):
         queue=asyncio.Queue(),
     )
     frames = []
-    async for frame in _stream_with_passthrough(
+    async for frame in relay_passthrough_stream(
         make_inner(passthrough, used), "anthropic/claude-haiku-4-5", "msg_local", passthrough
     ):
         frames.append(frame)

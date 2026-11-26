@@ -371,7 +371,7 @@ async def test_dispatch_streaming_sends_the_hash_before_done():
 
 @pytest.mark.asyncio
 async def test_anthropic_stream_passes_the_hash_comment_through():
-    from src.routes import messages
+    from src.services.anthropic_messages import stream as anthropic_stream
 
     h_hash = "0x" + "34" * 32
 
@@ -379,7 +379,7 @@ async def test_anthropic_stream_passes_the_hash_comment_through():
         yield f": x-gatewayz-content-hash: {h_hash}\n\n"
         yield "data: [DONE]\n\n"
 
-    out = [c async for c in messages._stream_anthropic_events_impl(upstream(), "m", "msg_1")]
+    out = [c async for c in anthropic_stream.translate_stream_events(upstream(), "m", "msg_1")]
     assert f": x-gatewayz-content-hash: {h_hash}\n\n" in out
 
 

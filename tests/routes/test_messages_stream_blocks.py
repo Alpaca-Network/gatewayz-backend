@@ -8,7 +8,7 @@ was sent three parallel tool calls kept one.
 import asyncio
 import json
 
-from src.routes.messages import _stream_anthropic_events
+from src.services.anthropic_messages.stream import translate_stream
 
 
 def _chunk(delta=None, finish=None, usage=None):
@@ -33,7 +33,7 @@ async def _collect(chunks):
             yield chunk
 
     events = []
-    async for raw in _stream_anthropic_events(source(), "m", "msg_1"):
+    async for raw in translate_stream(source(), "m", "msg_1"):
         for line in raw.splitlines():
             if line.startswith("data: "):
                 events.append(json.loads(line[len("data: ") :]))

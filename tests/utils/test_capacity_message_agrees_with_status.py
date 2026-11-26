@@ -25,7 +25,7 @@ free and a later regression is not.
 
 from __future__ import annotations
 
-from src.routes.messages import _STREAM_ERROR_TYPE_MAP, _anthropic_error_type
+from src.services.anthropic_messages.errors import STREAM_ERROR_TYPE_MAP, anthropic_error_type
 from src.utils.errors import PROVIDER_CAPACITY_MESSAGE
 
 # Anthropic error types whose documented handling is "wait, then retry".
@@ -63,11 +63,11 @@ def test_the_capacity_message_leaks_no_credential_or_url():
 
 def test_the_402_envelope_type_is_terminal():
     # The non-stream half, pinned alongside the message it carries.
-    assert _anthropic_error_type(402, None) not in RETRY_ADVISING_TYPES
+    assert anthropic_error_type(402, None) not in RETRY_ADVISING_TYPES
 
 
 def test_the_mid_stream_capacity_event_is_terminal_too():
-    mapped = _STREAM_ERROR_TYPE_MAP["capacity_error"]
+    mapped = STREAM_ERROR_TYPE_MAP["capacity_error"]
     assert mapped not in RETRY_ADVISING_TYPES, (
         f"capacity_error -> {mapped}: the identical cause the non-stream path "
         "now calls terminal, still telling a streaming SDK to retry"
@@ -77,5 +77,5 @@ def test_the_mid_stream_capacity_event_is_terminal_too():
 def test_a_genuine_upstream_overload_is_still_retryable():
     # The carve-out. 503 must keep meaning "real capacity, retrying is the right
     # advice", or this trades one wrong status for another.
-    assert _anthropic_error_type(503, None) == "overloaded_error"
-    assert _anthropic_error_type(429, None) == "rate_limit_error"
+    assert anthropic_error_type(503, None) == "overloaded_error"
+    assert anthropic_error_type(429, None) == "rate_limit_error"
