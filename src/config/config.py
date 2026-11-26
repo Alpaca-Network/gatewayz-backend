@@ -339,6 +339,10 @@ class Config:
     # (auth_rate_limiting.get_client_ip). Empty (the default) turns the
     # lookup off. See docs/wallet/ip-country.md.
     WALLET_LINK_IP_COUNTRY_DB_PATH = _get_env_var("WALLET_LINK_IP_COUNTRY_DB_PATH", "") or ""
+    # Where the server downloads that file from (src/services/wallet/
+    # ip_country_fetch.py), e.g. the DB-IP Lite country file with "{month}"
+    # for YYYY-MM. Empty (the default): the file is provided some other way.
+    WALLET_LINK_IP_COUNTRY_DB_URL = _get_env_var("WALLET_LINK_IP_COUNTRY_DB_URL", "") or ""
     # GPU marketplace provider/node registry (Milestone 4 W-A1,
     # gatewayz-backend#2262). Community routing itself defaults off until
     # W-A2 ships; the registry (register/approve/add nodes) is always on.

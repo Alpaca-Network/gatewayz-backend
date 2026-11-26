@@ -30,8 +30,9 @@ openly. The attestation stays required in every case.
 
 ## Providing the database file
 
-The backend reads a local file in MaxMind DB format (`.mmdb`). It never
-downloads one. Any country database in that format works; two options:
+The backend reads a local file in MaxMind DB format (`.mmdb`). It can keep
+that file up to date itself (below), or ops can provide it. Any country
+database in that format works; two options:
 
 - **DB-IP "IP to Country Lite"** (https://db-ip.com/db/download/ip-to-country-lite),
   MMDB format. Free, no account. Licence: Creative Commons Attribution 4.0
@@ -43,7 +44,16 @@ downloads one. Any country database in that format works; two options:
 
 Where to put it:
 
-- **Railway volume** (simplest): mount a volume (for example at `/data`),
+- **Let the server download it** (what production uses): set
+  `WALLET_LINK_IP_COUNTRY_DB_URL=https://download.db-ip.com/free/dbip-country-lite-{month}.mmdb.gz`
+  and `WALLET_LINK_IP_COUNTRY_DB_PATH=/tmp/gatewayz/ip-country.mmdb`.
+  `src/services/wallet/ip_country_fetch.py` downloads it at startup (this
+  month's file, else last month's), then checks once a day and replaces it
+  when older than 30 days. A download is installed only after it parses and
+  places 8.8.8.8 in the US, so a bad download never removes a working file.
+  `/tmp` is emptied on each deploy, so each deploy downloads it again (about
+  10 MB).
+- **Railway volume**: mount a volume (for example at `/data`),
   copy the file there, and set
   `WALLET_LINK_IP_COUNTRY_DB_PATH=/data/dbip-country-lite.mmdb`.
 - **Build step**: download the file during the image build into the image (for
@@ -62,6 +72,7 @@ the new file; no restart is needed. Refresh monthly.
 | Variable | Default | Meaning |
 |---|---|---|
 | `WALLET_LINK_IP_COUNTRY_DB_PATH` | empty (off) | Path to the `.mmdb` file |
+| `WALLET_LINK_IP_COUNTRY_DB_URL` | empty (off) | Where the server downloads the file from; `{month}` becomes YYYY-MM |
 | `WALLET_LINK_COUNTRY_HEADER` | empty (off) | Trusted country header; wins over the IP lookup |
 | `WALLET_LINK_RESTRICTED_COUNTRIES` | `US,CA` | ISO 3166-1 alpha-2 codes |
 | `TRUSTED_CLIENT_IP_HEADER` | `x-forwarded-for-rightmost` | Which header carries the client IP (production: `x-real-ip`) |

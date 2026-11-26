@@ -794,6 +794,17 @@ async def lifespan(app):
         logger.warning(f"Failed to start retention cleanup scheduler: {e}")
         # Don't fail startup if retention cleanup fails to start
 
+    # Keep the IP country database for wallet linking up to date (only when
+    # WALLET_LINK_IP_COUNTRY_DB_URL and WALLET_LINK_IP_COUNTRY_DB_PATH are set).
+    try:
+        from src.services.wallet.ip_country_fetch import fetch_configured, run_forever
+
+        if all(fetch_configured()):
+            _create_background_task(run_forever(), name="ip_country_db_refresh")
+            logger.info("IP country database refresh started")
+    except Exception as e:
+        logger.warning(f"Failed to start IP country database refresh: {e}")
+
     # Start WAYZ staking on-chain sync (gatewayz-backend#2244)
     try:
         from src.services.scheduled_sync import start_wayz_staking_sync_scheduler
