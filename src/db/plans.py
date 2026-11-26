@@ -14,6 +14,14 @@ DEFAULT_DAILY_TOKEN_LIMIT = 500_000
 DEFAULT_MONTHLY_TOKEN_LIMIT = 15_000_000
 DEFAULT_TRIAL_FEATURES = ["basic_models"]
 
+# Token caps for accounts that pay: purchased credits, a subscription
+# allowance, or an active paid plan. Every token is billed from credits, so for
+# these accounts the caps only stop runaway use; the defaults above (500k a
+# day) cut an agent session off after about 25 requests. Accounts with no money
+# in them keep the defaults, which bound abuse of free models.
+PAID_ACCOUNT_DAILY_TOKEN_LIMIT = 20_000_000
+PAID_ACCOUNT_MONTHLY_TOKEN_LIMIT = 300_000_000
+
 # Admin tier constants
 ADMIN_PLAN_TYPE = "admin"
 ADMIN_BYPASS_LIMITS = True  # Flag to enable admin bypass of all checks
@@ -32,6 +40,10 @@ _user_plan_cache_ttl = 30  # 30 seconds TTL - user plans change infrequently
 # the rate limiter, the daily limiter), each an uncached user_plans query.
 _admin_tier_cache: dict[int, tuple[bool, float]] = {}
 _admin_tier_cache_ttl = 60.0
+
+# Cache for is_paid_account() (user_id -> (is_paid, monotonic timestamp)).
+_paid_account_cache: dict[int, tuple[bool, float]] = {}
+_paid_account_cache_ttl = 60.0
 
 
 def clear_usage_cache(user_id: int | None = None) -> None:
@@ -85,6 +97,7 @@ def invalidate_usage_cache(user_id: int) -> None:
 def invalidate_user_plan_cache(user_id: int) -> None:
     """Invalidate user plan cache for a specific user (e.g., after plan change)"""
     clear_user_plan_cache(user_id)
+    _paid_account_cache.pop(user_id, None)
     logger.debug(f"Invalidated user plan cache for user {user_id}")
 
 
@@ -640,6 +653,18 @@ def enforce_plan_limits(
         if environment_tag == "live" and effective_daily_token_limit < 25_000:
             effective_daily_token_limit = 25_000
 
+        # Paying accounts: raise the token caps to the agent floor (never lower
+        # a plan that already allows more). Test keys keep their 50% share.
+        if is_paid_account(user_id):
+            effective_daily_token_limit = max(
+                effective_daily_token_limit,
+                int(PAID_ACCOUNT_DAILY_TOKEN_LIMIT * env_multiplier),
+            )
+            effective_monthly_token_limit = max(
+                effective_monthly_token_limit,
+                int(PAID_ACCOUNT_MONTHLY_TOKEN_LIMIT * env_multiplier),
+            )
+
         # Check if adding this request would exceed limits
         new_daily_tokens = usage_data["usage"]["daily_tokens"] + tokens_requested
         new_monthly_tokens = usage_data["usage"]["monthly_tokens"] + tokens_requested
@@ -687,6 +712,51 @@ def get_subscription_plans() -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error getting subscription plans: {e}")
         return []
+
+
+def is_paid_account(user_id: int) -> bool:
+    """True when the account has money in it or an active paid plan.
+
+    Purchased credits or a subscription allowance above zero, or an active plan
+    with a price. Cached for a minute. On a database error the answer is False
+    (the default caps apply) and nothing is cached.
+    """
+    now = time.monotonic()
+    cached = _paid_account_cache.get(user_id)
+    if cached is not None and now - cached[1] < _paid_account_cache_ttl:
+        return cached[0]
+
+    try:
+        client = get_supabase_client()
+        user = (
+            client.table("users")
+            .select("purchased_credits, subscription_allowance")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        row = (user.data or [{}])[0]
+        paid = (float(row.get("purchased_credits") or 0) > 0) or (
+            float(row.get("subscription_allowance") or 0) > 0
+        )
+        if not paid:
+            plans = (
+                client.table("user_plans")
+                .select("plans!inner(price_per_month)")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            for plan_row in plans.data or []:
+                plan = plan_row.get("plans") or {}
+                if isinstance(plan, dict) and float(plan.get("price_per_month") or 0) > 0:
+                    paid = True
+                    break
+        _paid_account_cache[user_id] = (paid, now)
+        return paid
+    except Exception as e:
+        logger.error(f"Error checking paid status for user {user_id}: {e}")
+        return False
 
 
 def is_admin_tier_user(user_id: int) -> bool:
