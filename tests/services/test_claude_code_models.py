@@ -19,20 +19,29 @@ CATALOG = [
         "name": "GPT-5.5",
         "context_length": 128000,
         "capabilities": {"tools": True},
+        "health_status": "healthy",
     },
     {
         "id": "anthropic/claude-sonnet-5-5",
         "name": "Claude Sonnet 5.5",
         "context_length": 200000,
         "supported_parameters": ["max_tokens", "tools"],
+        "health_status": "healthy",
     },
     {
         "id": "deepseek-ai/DeepSeek-V4.1-Flash",
         "name": "DeepSeek V4.1 Flash",
         "context_length": 0,
         "capabilities": {"tools": True},
+        "health_status": "healthy",
     },
-    {"id": "tiny/model", "name": "Tiny", "context_length": 8192, "capabilities": {"tools": True}},
+    {
+        "id": "tiny/model",
+        "name": "Tiny",
+        "context_length": 8192,
+        "capabilities": {"tools": True},
+        "health_status": "healthy",
+    },
     {"id": "no/tools", "name": "No Tools", "context_length": 200000, "capabilities": {}},
     {
         "id": "off/model",
@@ -40,6 +49,7 @@ CATALOG = [
         "context_length": 200000,
         "is_active": False,
         "capabilities": {"tools": True},
+        "health_status": "healthy",
     },
 ]
 
@@ -58,6 +68,14 @@ def test_claude_ids_and_plain_ids_are_left_alone():
 
 def test_only_agent_capable_models_are_listed():
     assert [is_agent_capable(m) for m in CATALOG] == [True, True, True, False, False, False]
+
+
+def test_models_not_reported_healthy_are_left_out():
+    base = {"id": "x/y", "context_length": 200000, "capabilities": {"tools": True}}
+    assert is_agent_capable({**base, "health_status": "healthy"})
+    assert not is_agent_capable({**base, "health_status": "unknown"})
+    assert not is_agent_capable({**base, "health_status": "down"})
+    assert not is_agent_capable(base)
 
 
 def test_listing_shape_and_order():
