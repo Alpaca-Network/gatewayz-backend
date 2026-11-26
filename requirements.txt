@@ -62,4 +62,4 @@ pytest-split>=0.9.0
 pytest-timeout>=2.2.0
 pytest-mock>=3.12.0
 flask-sqlalchemy
-genlayer-py==0.18.0  # GenLayer Verify: submits VerifyJob cases (Gatewayz x GenLayer inference escrow)
+genlayer-py==0.19.1  # GenLayer Verify: submits VerifyJob cases (Gatewayz x GenLayer inference escrow)

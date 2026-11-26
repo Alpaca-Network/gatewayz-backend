@@ -29,7 +29,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 AGREE = {"AGREE", "MAJORITY_AGREE"}
-DEAD = {"UNDETERMINED", "CANCELED", "VALIDATORS_TIMEOUT"}
+DEAD = {"UNDETERMINED", "CANCELED", "VALIDATORS_TIMEOUT", "LEADER_TIMEOUT"}
+
+# genlayer-py 0.19 replaced `status_name` with a `lifecycle` object; map it back to these names.
+_DECIDED = {
+    "accepted": "ACCEPTED",
+    "undetermined": "UNDETERMINED",
+    "validators_timeout": "VALIDATORS_TIMEOUT",
+    "leader_timeout": "LEADER_TIMEOUT",
+}
+STUDIO_TOP_UP_WEI = 10 * 10**18  # Studio test GEN, minted free by sim_fundAccount
 
 
 class VerifyUnavailable(RuntimeError):
@@ -97,6 +106,7 @@ class GenLayerVerifyClient:
             chain=chains[cfg["network"]],
             account=create_account(os.environ["GENLAYER_SUBMITTER_KEY"]),
         )
+        _hex_chain_id_in_gas_estimates(self._client)
 
     def quote_fee_wei(self) -> int | None:
         """Live network fee quote in GEN wei, or None when the network cannot quote."""
@@ -114,18 +124,42 @@ class GenLayerVerifyClient:
             return None
 
     def submit_case(self, args: list) -> str:
-        return self._client.write_contract(
-            address=self.contract, function_name="submit_case", args=args
-        )
+        """Consensus v0.6: every write carries a fees distribution and the sender pays it;
+        without one the consensus contract reverts with FeesDistributionMissing."""
+        call = {"address": self.contract, "function_name": "submit_case", "args": args}
+        fees = self._write_fees(call)
+        tx = self._client.write_contract(**call, fees=fees)
+        return tx if isinstance(tx, str) else "0x" + bytes(tx).hex()
+
+    def _write_fees(self, call: dict) -> dict:
+        from genlayer_py.chains.utils import is_studio_chain
+
+        studio = is_studio_chain(self._client.chain)
+        estimate = None
+        if studio:
+            try:  # Studio simulates this exact call and returns the budget to attach
+                estimate = self._client.estimate_transaction_fees_for_write(**call)
+            except Exception as e:
+                logger.info("GenLayer write simulation unavailable, using policy fees: %s", e)
+        if estimate is None:
+            estimate = self._client.estimate_transaction_fees({})
+        fees = {"distribution": estimate["distribution"], "feeValue": int(estimate["feeValue"])}
+        if estimate.get("messageAllocations"):
+            fees["messageAllocations"] = estimate["messageAllocations"]
+        if studio:
+            address = self._client.local_account.address
+            if self._client.w3.eth.get_balance(address) < 2 * fees["feeValue"]:
+                self._client.fund_account(address, STUDIO_TOP_UP_WEI)
+        return fees
 
     def tx_state(self, tx: str) -> TxState | None:
         t = self._client.get_transaction(transaction_hash=tx)
         if t is None:
             return None
         return TxState(
-            status=str(t.get("status_name") or ""),
+            status=status_name(t),
             result=str(t["result_name"]) if t.get("result_name") is not None else None,
-            execution=t.get("tx_execution_result_name"),
+            execution=t.get("tx_execution_result_name") or _leader_rollback(t),
             recipient=str(t.get("to_address") or t.get("recipient") or "") or None,
         )
 
@@ -152,7 +186,52 @@ class GenLayerVerifyClient:
             return None
 
     def appeal(self, tx: str, bond_wei: int | None) -> str:
-        return self._client.appeal_transaction(transaction_id=tx, value=bond_wei or 0)
+        # None lets genlayer-py resolve the charge for the active decision (topUpAndSubmitAppeal).
+        return self._client.appeal_transaction(transaction_id=tx, value=bond_wei)
+
+
+def status_name(t: dict) -> str:
+    """Consensus status as PENDING .. ACCEPTED, FINALIZED, from either genlayer-py shape."""
+    if t.get("status_name"):  # genlayer-py <= 0.18
+        return str(t["status_name"])
+    lc = t.get("lifecycle")
+    if not isinstance(lc, dict):
+        return ""
+    state = lc.get("state")
+    if state == "processing":
+        phase = str(lc.get("phase") or "pending").upper()
+        return "PENDING" if phase == "UNINITIALIZED" else phase
+    if state == "decided":
+        return _DECIDED.get(str(lc.get("outcome")), "UNDETERMINED")
+    return {"finalized": "FINALIZED", "canceled": "CANCELED"}.get(str(state), "")
+
+
+def _leader_rollback(t: dict) -> str | None:
+    """Studio leaves the execution result empty when the contract refuses a call (for example
+    `submitter_not_allowed`); the refusal is only in the leader receipt. Report it as an error."""
+    try:
+        receipt = t["consensus_data"]["leader_receipt"]
+        result = (receipt[0] if isinstance(receipt, list) else receipt)["result"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if isinstance(result, dict) and result.get("status") == "rollback":
+        return "FINISHED_WITH_ERROR"
+    return None
+
+
+def _hex_chain_id_in_gas_estimates(client) -> None:
+    """genlayer-py 0.19.1 puts `chainId` into eth_estimateGas as an int. Studio accepts it;
+    Bradbury rejects every write (`cannot unmarshal non-string into ... chainId`). Send hex."""
+    make_request = client.provider.make_request
+
+    def patched(method, params, *args, **kwargs):
+        if method == "eth_estimateGas" and params and isinstance(params[0], dict):
+            chain_id = params[0].get("chainId")
+            if isinstance(chain_id, int):
+                params = [dict(params[0], chainId=hex(chain_id)), *params[1:]]
+        return make_request(method, params, *args, **kwargs)
+
+    client.provider.make_request = patched
 
 
 _client: GenLayerVerifyClient | None = None
