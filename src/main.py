@@ -503,6 +503,8 @@ def create_app() -> FastAPI:
         ("price_sheets", "Price Sheets"),
         # Opt-in, encrypted, 72 h dispute content vault for job usage lines.
         ("dispute_content", "Dispute Content Vault"),
+        # Customer cost disputes on job usage lines, judged by CostDispute on GenLayer.
+        ("job_disputes", "Job Cost Disputes"),
         ("verify", "Gatewayz Verify (GenLayer)"),
         ("webhooks", "Outbound Webhooks"),
     ]

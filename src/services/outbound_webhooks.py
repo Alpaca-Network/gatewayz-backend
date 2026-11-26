@@ -26,7 +26,7 @@ from src.utils.ssrf_guard import PinnedPublicIPTransport
 
 logger = logging.getLogger(__name__)
 
-EVENTS = frozenset({"job.closed", "verify.case.updated"})
+EVENTS = frozenset({"job.closed", "verify.case.updated", "job.dispute.updated"})
 MAX_CONSECUTIVE_FAILURES = 20
 _BACKOFF_S = (0.0, 2.0, 8.0)
 

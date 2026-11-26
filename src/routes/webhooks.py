@@ -4,7 +4,7 @@
   GET    /v1/webhooks
   DELETE /v1/webhooks/{id}
 
-Events: job.closed, verify.case.updated. Signature scheme in
+Events: job.closed, verify.case.updated, job.dispute.updated. Signature scheme in
 src/services/outbound_webhooks.py (HMAC-SHA256 over "<t>.<raw body>").
 """
 
