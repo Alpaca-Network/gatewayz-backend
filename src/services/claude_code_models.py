@@ -10,8 +10,12 @@ So the listing given to that client names each non-Claude model under
 ``/v1/messages`` strips the prefix again before anything else looks at the id.
 A model's catalog id keeps working unchanged everywhere.
 
-Only models an agent can use are listed: tool calling is required, and models
-known to have a small context window are left out.
+Only models an agent can use are listed: tool calling is required, models
+known to have a small context window are left out, and the health monitor must
+currently report the model as healthy. The catalog lists far more models than
+anyone has checked; without the health filter the picker held hundreds of
+entries, many of which fail on the first request. (Stopgap until each model
+carries an agent-ready flag from a terminal conformance run.)
 """
 
 from __future__ import annotations
@@ -52,6 +56,8 @@ def is_agent_capable(model: dict[str, Any]) -> bool:
     if not model.get("id") or model.get("is_active") is False:
         return False
     if not _supports_tools(model):
+        return False
+    if model.get("health_status") != "healthy":
         return False
     context = model.get("context_length") or 0
     # 0 means the catalog does not know the window, not that it is small.
