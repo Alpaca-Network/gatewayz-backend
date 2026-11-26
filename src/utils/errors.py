@@ -1081,8 +1081,13 @@ def get_suggestions(error_code: ErrorCode) -> list[str]:
     Returns:
         List of suggestions
     """
-    return ERROR_SUGGESTIONS.get(
-        error_code, ["Try again later", "Contact support if the issue persists"]
+    # A copy: callers add to the list (rate_limit_exceeded inserts a "Wait N
+    # seconds" line). Returning the shared list made every 429 add another
+    # copy of that line to all later responses (seen with seven of them).
+    return list(
+        ERROR_SUGGESTIONS.get(
+            error_code, ["Try again later", "Contact support if the issue persists"]
+        )
     )
 
 
