@@ -68,8 +68,9 @@ def _fixtures(folder: Path) -> None:
 SCENARIOS = {
     "tool_loop": {
         "prompt": (
-            "Read a.txt and tell me the launch code. Then fix the bug in calc.py so add "
-            "returns the sum, and run python3 calc.py to confirm it exits without errors."
+            "Read a.txt to find the launch code. Then fix the bug in calc.py so add returns "
+            "the sum, and run python3 calc.py to confirm it exits without errors. In your "
+            "final answer, state the launch code and what you changed."
         ),
         "max_turns": 10,
         "tools": ["Read", "Edit", "Write", "Bash(python3 calc.py)"],
