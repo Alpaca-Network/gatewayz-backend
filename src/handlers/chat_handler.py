@@ -996,10 +996,16 @@ class ChatInferenceHandler:
             if mapped.status_code == 400:
                 from src.services.provider_failover import ProviderRejectedRequest
 
+                # mapped.detail is "Provider 'x' rejected request for model 'y':
+                # <reason>"; the factory adds its own provider/model prefix.
+                reason = str(mapped.detail)
+                prefix = f"Provider '{provider_name}' rejected request for model '{model_id}': "
+                if reason.startswith(prefix):
+                    reason = reason[len(prefix) :]
                 error_response = DetailedErrorFactory.provider_error(
                     provider=provider_name,
                     model=model_id,
-                    provider_message=sanitize_provider_error_for_user(str(mapped.detail)),
+                    provider_message=sanitize_provider_error_for_user(reason),
                     status_code=400,
                     request_id=self.request_id,
                 )

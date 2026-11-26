@@ -130,3 +130,31 @@ def test_handler_still_returns_502_for_other_provider_errors():
         _call_with_upstream_error(_handler(), 500, "upstream exploded")
     assert not isinstance(exc.value, ProviderRejectedRequest)
     assert exc.value.status_code == 502
+
+
+def test_upstream_message_is_taken_from_the_error_body():
+    from src.services.provider_failover import _upstream_error_message
+
+    class SdkError(Exception):
+        body = {
+            "error": {
+                "message": "Unsupported parameter: 'logprobs' is not supported with this model.",
+                "type": "invalid_request_error",
+            }
+        }
+
+    assert _upstream_error_message(SdkError("Error code: 400 - {...}")) == (
+        "Unsupported parameter: 'logprobs' is not supported with this model."
+    )
+    assert _upstream_error_message(RuntimeError("plain text")) == "plain text"
+
+
+def test_handler_message_has_no_duplicated_prefix():
+    detail = (
+        "Provider 'openai' rejected request for model 'openai/gpt-5.5': Unsupported 'logprobs'."
+    )
+    with pytest.raises(ProviderRejectedRequest) as exc:
+        _call_with_upstream_error(_handler(), 400, detail)
+    message = exc.value.detail["error"]["message"]
+    assert message.count("Provider 'openai'") == 1
+    assert message.endswith("Unsupported 'logprobs'.")
