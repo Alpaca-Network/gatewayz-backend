@@ -98,6 +98,8 @@ class ProviderRejectedRequest(HTTPException):
     parameter OpenAI rejects came back as "Model 'openai/gpt-5.5' not found").
     Failover must stop on it and circuit breakers must not count it.
     """
+
+
 _OPENROUTER_SUFFIX_LOCKS = {"exacto", "free", "extended"}
 _OPENROUTER_ONLY_PREFIX_LOCKS = ("openrouter/",)  # Models that can ONLY use OpenRouter
 # Models that should try native provider first, then OpenRouter as fallback.
