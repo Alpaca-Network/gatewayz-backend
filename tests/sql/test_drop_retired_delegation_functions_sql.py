@@ -1,4 +1,4 @@
-"""Migration 20261126140000 against the real migrated schema (CI-only): the
+"""Migration 20261126190500 against the real migrated schema (CI-only): the
 retired delegation programme's last SQL functions are gone, and the tables
 are kept."""
 

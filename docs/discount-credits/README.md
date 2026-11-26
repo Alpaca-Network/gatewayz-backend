@@ -134,7 +134,7 @@ only the names are historical. That program's attribution functions
 `supabase/migrations/20261126120000_discount_credits_hardening.sql`, and its
 last functions (`delegation_account_spent`, `delegation_reserve_accrual`,
 `delegation_claim_accrual`, `delegation_release_claim`) in
-`supabase/migrations/20261126140000_drop_retired_delegation_functions.sql`.
+`supabase/migrations/20261126190500_drop_retired_delegation_functions.sql`.
 
 ## Who the switch applies to
 
