@@ -358,6 +358,7 @@ async def _stream_anthropic_events_impl(
     # open made clients keep one of several parallel tool calls.
     open_block: int | None = None
     text_block_open = False
+    thinking_block_open = False
     # Maps an OpenAI tool_call index to the Anthropic content-block index.
     tool_blocks: dict[int, int] = {}
     stop_reason = "end_turn"
@@ -423,6 +424,37 @@ async def _stream_anthropic_events_impl(
             if choice.get("finish_reason"):
                 stop_reason = finish_map.get(choice["finish_reason"], "end_turn")
 
+            # Reasoning from reasoning models (Kimi, DeepSeek-R1, ...) becomes a
+            # thinking block ahead of the answer. It used to be dropped, though
+            # it is billed as output.
+            reasoning = delta.get("reasoning_content")
+            if reasoning and not text_block_open and not tool_blocks:
+                if not thinking_block_open:
+                    if open_block is not None:
+                        yield _sse(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": open_block},
+                        )
+                    block_index += 1
+                    open_block = block_index
+                    thinking_block_open = True
+                    yield _sse(
+                        "content_block_start",
+                        {
+                            "type": "content_block_start",
+                            "index": block_index,
+                            "content_block": {"type": "thinking", "thinking": ""},
+                        },
+                    )
+                yield _sse(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": block_index,
+                        "delta": {"type": "thinking_delta", "thinking": reasoning},
+                    },
+                )
+
             content = delta.get("content")
             if content:
                 if not text_block_open:
@@ -434,6 +466,7 @@ async def _stream_anthropic_events_impl(
                     block_index += 1
                     open_block = block_index
                     text_block_open = True
+                    thinking_block_open = False
                     yield _sse(
                         "content_block_start",
                         {
@@ -464,6 +497,7 @@ async def _stream_anthropic_events_impl(
                             {"type": "content_block_stop", "index": open_block},
                         )
                     text_block_open = False
+                    thinking_block_open = False
                     block_index += 1
                     open_block = block_index
                     tool_blocks[tc_index] = block_index
