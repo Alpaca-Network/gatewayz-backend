@@ -1657,6 +1657,12 @@ class ChatInferenceHandler:
                 content = _rfield(message, "content", "")
                 finish_reason = _rfield(choice, "finish_reason", "stop")
                 tool_calls = _tool_calls_as_dicts(_rfield(message, "tool_calls"))
+                # Reasoning models (Kimi, DeepSeek-R1, ...) return their reasoning
+                # next to the answer. It is billed as output, so pass it on
+                # instead of dropping it.
+                message_reasoning = _rfield(message, "reasoning_content") or _rfield(
+                    message, "reasoning"
+                )
             else:
                 raise ValueError("Provider response missing choices")
 
@@ -1773,6 +1779,9 @@ class ChatInferenceHandler:
                 provider_used=provider_used,
                 processing_time_ms=elapsed_ms,
                 tool_calls=tool_calls,
+                reasoning_content=(
+                    message_reasoning if isinstance(message_reasoning, str) else None
+                ),
             )
 
             logger.info(
@@ -2246,6 +2255,9 @@ class ChatInferenceHandler:
                                 model=request.model,
                                 created=int(time.time()),
                                 content=content,
+                                reasoning_content=(
+                                    delta_reasoning if isinstance(delta_reasoning, str) else None
+                                ),
                                 role=role,
                                 finish_reason=chunk_finish_reason,
                                 tool_calls=tool_calls,

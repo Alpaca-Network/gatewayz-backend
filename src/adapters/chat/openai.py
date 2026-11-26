@@ -111,6 +111,11 @@ class OpenAIChatAdapter(BaseChatAdapter):
         if internal_response.tool_calls:
             choice["message"]["tool_calls"] = internal_response.tool_calls
 
+        # Reasoning returned by reasoning models, under the field name
+        # DeepSeek, Moonshot and OpenRouter use.
+        if internal_response.reasoning_content:
+            choice["message"]["reasoning_content"] = internal_response.reasoning_content
+
         # Build full response
         response = {
             "id": internal_response.id,
@@ -181,6 +186,9 @@ class OpenAIChatAdapter(BaseChatAdapter):
                 # Add content if present
                 if chunk.content is not None:
                     delta["content"] = chunk.content
+
+                if chunk.reasoning_content:
+                    delta["reasoning_content"] = chunk.reasoning_content
 
                 # Add tool calls if present
                 if chunk.tool_calls:

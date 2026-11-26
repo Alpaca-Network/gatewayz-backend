@@ -133,6 +133,9 @@ class InternalChatResponse(BaseModel):
     id: str = Field(..., description="Unique request identifier")
     model: str = Field(..., description="Model used for generation")
     content: str = Field(..., description="Main response text content")
+    reasoning_content: str | None = Field(
+        None, description="Reasoning the model returned alongside its answer, if any"
+    )
     usage: InternalUsage = Field(..., description="Token usage statistics")
 
     # Completion metadata
@@ -171,6 +174,7 @@ class InternalStreamChunk(BaseModel):
     id: str = Field(..., description="Request identifier")
     model: str = Field(..., description="Model identifier")
     content: str | None = Field(None, description="Incremental content delta")
+    reasoning_content: str | None = Field(None, description="Incremental reasoning delta")
     role: str | None = Field(None, description="Role (for first chunk)")
     finish_reason: str | None = Field(None, description="Finish reason (for last chunk)")
     tool_calls: list[dict[str, Any]] | None = Field(None, description="Incremental tool call data")

@@ -126,3 +126,37 @@ def test_final_usage_reports_input_tokens_without_cache_tokens():
         "cache_read_input_tokens": 17270,
         "cache_creation_input_tokens": 3016,
     }
+
+
+def test_reasoning_becomes_a_thinking_block_before_the_answer():
+    events = _run(
+        [
+            _chunk({"role": "assistant", "content": ""}),
+            _chunk({"reasoning_content": "17 times 23 "}),
+            _chunk({"reasoning_content": "is 391."}),
+            _chunk({"content": "391"}),
+            _chunk(finish="stop", usage={"prompt_tokens": 20, "completion_tokens": 155}),
+        ]
+    )
+    assert _assert_well_formed(events) == 2
+    starts = [e["content_block"] for e in events if e["type"] == "content_block_start"]
+    assert [b["type"] for b in starts] == ["thinking", "text"]
+    thinking = "".join(
+        e["delta"]["thinking"]
+        for e in events
+        if e["type"] == "content_block_delta" and e["delta"]["type"] == "thinking_delta"
+    )
+    assert thinking == "17 times 23 is 391."
+
+
+def test_reasoning_then_tool_call_closes_the_thinking_block():
+    events = _run(
+        [
+            _chunk({"reasoning_content": "I should read the file."}),
+            _chunk(_tool(0, "call_a", "Read", '{"file_path": "a.txt"}')),
+            _chunk(finish="tool_calls"),
+        ]
+    )
+    assert _assert_well_formed(events) == 2
+    starts = [e["content_block"]["type"] for e in events if e["type"] == "content_block_start"]
+    assert starts == ["thinking", "tool_use"]
