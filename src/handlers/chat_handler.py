@@ -987,6 +987,27 @@ class ChatInferenceHandler:
                     detail["error"]["status"] = 400
                 raise HTTPException(status_code=400, detail=detail) from e
 
+            # Upstream 400: the provider says the request itself is invalid (an
+            # unsupported parameter or value). Return that reason as a 400. It
+            # used to fall through to the 502 below, which the multi-provider
+            # selector treats as a provider failure: it failed over, the next
+            # provider answered with its own "model not found", and that is what
+            # the caller saw. ProviderRejectedRequest stops the failover.
+            if mapped.status_code == 400:
+                from src.services.provider_failover import ProviderRejectedRequest
+
+                error_response = DetailedErrorFactory.provider_error(
+                    provider=provider_name,
+                    model=model_id,
+                    provider_message=sanitize_provider_error_for_user(str(mapped.detail)),
+                    status_code=400,
+                    request_id=self.request_id,
+                )
+                raise ProviderRejectedRequest(
+                    status_code=400,
+                    detail=error_response.dict(exclude_none=True),
+                ) from e
+
             # Other provider errors keep the existing 502 provider-error contract,
             # sanitized so we never leak upstream URLs/key ids to end users.
             error_response = DetailedErrorFactory.provider_error(

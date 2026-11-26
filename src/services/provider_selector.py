@@ -242,6 +242,20 @@ class ProviderSelector:
                 }
 
             except Exception as e:
+                # The provider rejected the request itself (upstream 400): the
+                # caller's error, not the provider's. Return it as is: trying
+                # other providers only replaced it with their own "model not
+                # found", and counting it tripped the circuit breaker of a
+                # provider that was working.
+                from src.services.provider_failover import ProviderRejectedRequest
+
+                if isinstance(e, ProviderRejectedRequest):
+                    logger.info(
+                        f"{provider.name} rejected the request for {model_id} as invalid; "
+                        "not failing over"
+                    )
+                    raise
+
                 # Request failed with this provider
                 last_error = str(e)
                 attempt_info["success"] = False
