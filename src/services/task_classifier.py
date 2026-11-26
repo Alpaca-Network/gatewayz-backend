@@ -42,6 +42,8 @@ from src.services.quality_inference import TASK_TYPES
 logger = logging.getLogger(__name__)
 
 _VALID_TASK_TYPES = frozenset(TASK_TYPES)
+# The most text of the last user message sent to the classifier model.
+CLASSIFIER_MAX_INPUT_CHARS = 4000
 
 _SYSTEM_PROMPT = (
     "Classify the user's LAST message. Respond with ONLY a JSON object of the form "
@@ -80,13 +82,15 @@ class TaskClassification:
 
 
 def _last_user_text(messages: list[dict[str, Any]] | None) -> str:
-    """The most recent user message's text, flattening multi-part content."""
+    """The most recent user message's text, flattening multi-part content,
+    cut to CLASSIFIER_MAX_INPUT_CHARS (the start of a message is enough to
+    classify it, and the classifier call is paid by the gateway)."""
     for message in reversed(messages or []):
         if not isinstance(message, dict) or message.get("role") != "user":
             continue
         content = message.get("content")
         if isinstance(content, str):
-            return content
+            return content[:CLASSIFIER_MAX_INPUT_CHARS]
         if isinstance(content, list):
             parts = [
                 part.get("text", "")
@@ -94,7 +98,7 @@ def _last_user_text(messages: list[dict[str, Any]] | None) -> str:
                 if isinstance(part, dict) and isinstance(part.get("text"), str)
             ]
             if parts:
-                return " ".join(parts)
+                return " ".join(parts)[:CLASSIFIER_MAX_INPUT_CHARS]
     return ""
 
 

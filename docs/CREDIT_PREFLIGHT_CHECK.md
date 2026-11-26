@@ -420,3 +420,46 @@ Potential improvements:
 For questions or issues:
 - GitHub Issues: https://github.com/Alpaca-Network/gatewayz-backend/issues
 - Documentation: https://docs.gatewayz.ai
+
+## What the estimate counts
+
+The input estimate (`estimate_request_input_tokens` in
+`src/utils/token_estimator.py`) counts every input a request sends: message
+text, every text-bearing content part (including `tool_result`, `tool_use` and
+`thinking` blocks), assistant `tool_calls` names and arguments, `tools`
+(their JSON schemas), `tool_choice`, and `system` as a string or a list of
+blocks. Binary parts get a flat allowance: 1,600 tokens per image, and for a
+document, file or audio part its decoded size at about one token per 3 bytes,
+never less than 1,600. `/v1/messages` also estimates the client's original
+Anthropic body (before translation) and the larger estimate is used.
+
+When a provider reports no usage, billing uses the same estimate for input,
+never less than the pre-check's, and estimates output from the text,
+tool-call arguments and reasoning text that were streamed. Input usage a
+provider reports when a stream begins (Anthropic `message_start`) is billed
+if the stream ends before the final usage arrives.
+
+## Credit holds (`CREDIT_HOLDS_ENABLED`, default off)
+
+With the switch on, the pre-check reserves the request's maximum paid cost
+(after any discount credits) as a row in `credit_holds`, keyed by the billing
+request id (`credit_hold` in `supabase/migrations/20261126190000_credit_holds.sql`).
+A hold is refused when the balance less the account's other live holds cannot
+cover it, and the request gets the usual 402. Charging the request deletes its
+own hold (other holds never block a charge); a request that ends without being
+billed releases it (`credit_release`); an unreleased hold expires after
+`CREDIT_HOLD_TTL_SECONDS` (default 900). With the switch off no hold is placed
+and no extra database call is made.
+
+## Unpaid balances (`CREDIT_DEBT_ENABLED`, default off)
+
+With the switch on, when the final charge for a response that was already
+produced exceeds the balance, the balance is charged and the rest is recorded
+in `credit_debts` (`charge_with_debt`, atomic and idempotent on the request
+id). While an account has an unpaid balance, new paid requests get a 402 with
+code `outstanding_balance` ("Your account has an unpaid balance from earlier
+usage. Add credits to continue."); free models still work. Credits added
+through `atomic_add_credits` (purchases, refunds, coupons, admin grants) pay
+unpaid balances first, oldest first, in the same transaction, with a
+`debt_settlement` ledger row. With the switch off a short balance at billing
+is handled exactly as before.

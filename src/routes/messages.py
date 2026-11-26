@@ -42,6 +42,7 @@ from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
 from src.security.security import ApiKeyLookupUnavailable, validate_api_key_security
 from src.services.auth_rate_limiting import get_client_ip
+from src.services.billing.credit_precheck import INPUT_TOKENS_FLOOR_STATE
 from src.services.claude_code_models import strip_claude_code_prefix
 from src.services.job_usage import JOB_BUSY, job_lease_of
 from src.services.job_usage_v2 import CONTENT_HASH_HEADER
@@ -50,6 +51,10 @@ from src.services.providers.anthropic_transformer import (
     anthropic_input_tokens,
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
+)
+from src.utils.token_estimator import (
+    estimate_request_input_tokens,
+    request_uses_one_hour_cache,
 )
 
 logger = logging.getLogger(__name__)
@@ -794,6 +799,23 @@ async def create_message(
         # Only Anthropic understands a cache breakpoint on a tool result.
         keep_tool_result_cache_control="claude" in req.model.lower(),
     )
+
+    # The credit pre-checks run on the translated request, where documents
+    # become short placeholders: they also count every input of the client's
+    # own body (documents, images, tool definitions and results), and the
+    # larger estimate is used. A one-hour cache marker is noted for billing.
+    state = getattr(request, "state", None) if request is not None else None
+    if state is not None:
+        setattr(
+            state,
+            INPUT_TOKENS_FLOOR_STATE,
+            estimate_request_input_tokens(
+                req.messages, req.tools, req.tool_choice, system=req.system
+            ),
+        )
+        state.gatewayz_cache_ttl_1h = request_uses_one_hour_cache(
+            req.messages, req.tools, req.system
+        )
 
     # Claude models: hand the caller's original body to the native Anthropic
     # client instead of the one rebuilt from the OpenAI shape below. The

@@ -14,6 +14,7 @@ import pytest
 
 from src.handlers.chat_handler import ChatInferenceHandler
 from src.schemas.internal.chat import InternalChatRequest, InternalMessage
+from src.utils.token_estimator import count_tokens_text
 
 
 def _chunk(content=None, usage=None, finish=None):
@@ -129,7 +130,7 @@ async def test_normal_completion_bills_exactly_once():
 @pytest.mark.asyncio
 async def test_generator_close_mid_stream_bills_once_with_estimate():
     h = _handler()
-    content = "x" * 400  # ~100 tokens, no provider usage chunk ever arrives
+    content = "x" * 400  # no provider usage chunk ever arrives
     with _Env(h, [_chunk(content), _chunk("never seen")]) as env:
         agen = h.process_stream(_req())
         await agen.__anext__()  # client received first chunk...
@@ -139,12 +140,13 @@ async def test_generator_close_mid_stream_bills_once_with_estimate():
     assert env.deduct.call_count == 1
     args = env.deduct.call_args.args
     assert args[4] == "ref-1"  # idempotency key
-    assert args[3]["completion_tokens"] == 100  # estimated from streamed content
+    expected = count_tokens_text(content)  # estimated from streamed content
+    assert args[3]["completion_tokens"] == expected
     assert args[3]["prompt_tokens"] >= 1
     kwargs = env.save.call_args.kwargs
     assert kwargs["status"] == "completed"
     assert kwargs["metadata"]["cancelled"] is True
-    assert kwargs["output_tokens"] == 100
+    assert kwargs["output_tokens"] == expected
 
 
 @pytest.mark.asyncio

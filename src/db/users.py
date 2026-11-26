@@ -1,6 +1,7 @@
 import logging
 import secrets
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 from typing import Any
@@ -833,6 +834,11 @@ def add_credits_to_user(
                     sanitize_for_logging(str(user_id)),
                     sanitize_for_logging(str(atomic_result.get("new_balance"))),
                 )
+            if atomic_result.get("debt_settled_usd"):
+                # The added credits paid an unpaid balance first (in the RPC).
+                from src.services.billing.credit_holds import forget_debt_lookup
+
+                forget_debt_lookup(user_id)
             invalidate_user_cache_by_id(user_id)
             return
 
@@ -1005,6 +1011,52 @@ def log_api_usage_transaction(
 LEDGER_UNIT = Decimal("0.00000001")  # numeric(14,8) in credit_transactions / users balances
 
 
+def _charge_delivered_with_debt(
+    allow_debt: bool,
+    user_id: int,
+    amount: float,
+    description: str,
+    metadata: dict | None,
+    request_id: str | None,
+) -> bool:
+    """For a charge made after the response was delivered (``allow_debt``)
+    that the balance cannot cover: charge min(amount, balance) and record the
+    rest as an unpaid balance, atomically and idempotently on request_id
+    (supabase function charge_with_debt). True when that was done; False --
+    and the charge is refused as before -- when CREDIT_DEBT_ENABLED is off,
+    the request has no UUID request_id, or the call failed."""
+    from src.services.billing import credit_holds
+
+    if not allow_debt or not credit_holds.debt_enabled():
+        return False
+    try:
+        key = str(uuid.UUID(str(request_id))) if request_id else None
+    except (TypeError, ValueError, AttributeError):
+        key = None
+    if key is None:
+        return False
+    from src.db.credit_holds import charge_with_debt
+    from src.db.credit_transactions import TransactionType
+
+    try:
+        result = charge_with_debt(
+            user_id, amount, TransactionType.API_USAGE, description, metadata, key
+        )
+    except Exception as e:  # noqa: BLE001 - fall back to the refusal
+        logger.error("charge_with_debt failed for user %s: %s", user_id, e)
+        return False
+    debt = float(result.get("debt_usd") or 0)
+    if debt > 0:
+        credit_holds.note_unpaid_debt(user_id)
+    logger.warning(
+        "Delivered request charged beyond the balance for user %s: charged=%s, unpaid=%.8f",
+        sanitize_for_logging(str(user_id)),
+        sanitize_for_logging(str(result.get("charged_usd"))),
+        debt,
+    )
+    return True
+
+
 def quantize_cost_up(cost: float) -> Decimal:
     """Round a positive cost UP to the smallest representable ledger unit (1e-8).
 
@@ -1026,10 +1078,16 @@ def deduct_credits(
     description: str = "API usage",
     metadata: dict | None = None,
     request_id: str | None = None,
+    allow_debt: bool = False,
 ) -> None:
     """
     Deduct credits from user account by API key and log the transaction.
     Deducts from subscription_allowance first, then purchased_credits.
+
+    ``allow_debt`` is passed only for a charge made after the response was
+    produced. With it (and CREDIT_DEBT_ENABLED on), a balance too small for
+    the charge is charged in full and the rest recorded as an unpaid balance
+    (supabase function charge_with_debt) instead of the charge being refused.
 
     If a request_id is provided and a transaction with that request_id already
     exists, the deduction is skipped (idempotent behavior to prevent double-charging).
@@ -1138,9 +1196,11 @@ def deduct_credits(
                 # Not billed, so a discount hold the pre-check placed is never
                 # settled: free it (no-op unless discount credits apply here;
                 # never raises).
+                from src.services.billing.credit_holds import release_hold
                 from src.services.discount_credits.billing import release_for_request
 
                 release_for_request(user_id, request_id or (metadata or {}).get("request_id"))
+                release_hold(user_id, request_id or (metadata or {}).get("request_id"))
                 return
         except Exception as e:
             logger.warning(f"Error checking admin tier status for credit deduction: {e}")
@@ -1289,6 +1349,22 @@ def deduct_credits(
                 elif isinstance(result_data, dict):
                     # RPC returned an error result (e.g. insufficient_credits, concurrent mod)
                     rpc_error = result_data.get("error", "unknown_rpc_error")
+                    if rpc_error in (
+                        "insufficient_credits",
+                        "insufficient_allowance",
+                        "insufficient_purchased_credits",
+                    ) and _charge_delivered_with_debt(
+                        allow_debt,
+                        user_id,
+                        tokens,
+                        description,
+                        metadata,
+                        rpc_request_id,
+                    ):
+                        # Charged what the balance held; the rest is an unpaid
+                        # balance (see _charge_delivered_with_debt).
+                        invalidate_user_cache(api_key)
+                        return
                     if rpc_error == "insufficient_credits":
                         rpc_balance = result_data.get("new_balance")
                         balance_rounded = (

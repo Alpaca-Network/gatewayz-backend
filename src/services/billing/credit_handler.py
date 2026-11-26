@@ -412,9 +412,12 @@ async def handle_credits_and_usage(
         if cost <= 0 and request_id:
             # Nothing to charge (deduct_credits returns at once for 0), so
             # this request's discount hold, if any, is never settled: free it.
+            from src.services.billing.credit_holds import release_hold_async
             from src.services.discount_credits.billing import release_for_request_async
 
             await release_for_request_async((user or {}).get("id"), request_id)
+            # Likewise its credit hold (no DB call while CREDIT_HOLDS_ENABLED is off).
+            await release_hold_async((user or {}).get("id"), request_id)
 
         # Every attempt passes the SAME request_id: deduct_credits skips a
         # request already charged, and the discount draw is idempotent on it,

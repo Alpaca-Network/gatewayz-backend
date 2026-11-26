@@ -14,12 +14,27 @@ This prevents:
 import logging
 
 from src.services.pricing import calculate_cost
-from src.utils.token_estimator import estimate_message_tokens
+from src.utils.token_estimator import estimate_request_input_tokens
 
 logger = logging.getLogger(__name__)
 
 # Default max_tokens fallback when no DB or pattern match is found
 DEFAULT_MAX_TOKENS = 4096
+
+
+# Where /v1/messages leaves its input estimate made from the client's original
+# Anthropic body (request.state), for the pre-checks of the translated request.
+INPUT_TOKENS_FLOOR_STATE = "gatewayz_input_tokens_floor"
+
+
+def input_tokens_floor(request) -> int | None:
+    """The input estimate a route made from the client's original request
+    body (see INPUT_TOKENS_FLOOR_STATE), or None."""
+    state = getattr(request, "state", None) if request is not None else None
+    value = getattr(state, INPUT_TOKENS_FLOOR_STATE, None) if state is not None else None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
 
 
 def get_model_max_tokens(model_id: str) -> int:
@@ -48,24 +63,36 @@ def calculate_maximum_cost(
     model_id: str,
     messages: list[dict],
     max_tokens: int | None = None,
+    *,
+    tools: list | None = None,
+    tool_choice: object = None,
+    input_tokens_floor: int | None = None,
 ) -> tuple[float, int, int]:
     """
     Calculate the MAXIMUM possible cost for a request.
 
     This uses:
-    - Actual input tokens (estimated from messages)
+    - Every input token the request sends (messages, tool definitions, tool
+      calls and results, images and documents; see
+      ``estimate_request_input_tokens``)
     - Maximum output tokens (from request or model default)
 
     Args:
         model_id: Model to use
         messages: Chat messages
         max_tokens: Maximum output tokens (from request parameter)
+        tools: Tool definitions sent with the request
+        tool_choice: The request's tool_choice
+        input_tokens_floor: An input estimate made from the client's original
+            request body (``/v1/messages``); the larger of the two is used
 
     Returns:
         Tuple of (max_cost, input_tokens, max_output_tokens)
     """
-    # Estimate input tokens from messages
-    input_tokens = estimate_message_tokens(messages, None)
+    input_tokens = estimate_request_input_tokens(messages, tools, tool_choice)
+    if input_tokens_floor:
+        input_tokens = max(input_tokens, int(input_tokens_floor))
+    input_tokens = max(1, input_tokens)
 
     # Get effective max output tokens
     if max_tokens is not None and max_tokens > 0:
@@ -226,6 +253,10 @@ def estimate_and_check_credits(
     user_credits: float,
     max_tokens: int | None = None,
     is_trial: bool = False,
+    *,
+    tools: list | None = None,
+    tool_choice: object = None,
+    input_tokens_floor: int | None = None,
 ) -> dict[str, any]:
     """
     Complete pre-flight check: estimate maximum cost and verify sufficiency.
@@ -238,6 +269,7 @@ def estimate_and_check_credits(
         user_credits: User's current credit balance
         max_tokens: Maximum output tokens (from request)
         is_trial: Whether user is on trial
+        tools / tool_choice / input_tokens_floor: see calculate_maximum_cost
 
     Returns:
         Dictionary with check results (see check_credit_sufficiency)
@@ -254,7 +286,12 @@ def estimate_and_check_credits(
     """
     # Calculate maximum cost
     max_cost, input_tokens, max_output_tokens = calculate_maximum_cost(
-        model_id, messages, max_tokens
+        model_id,
+        messages,
+        max_tokens,
+        tools=tools,
+        tool_choice=tool_choice,
+        input_tokens_floor=input_tokens_floor,
     )
 
     # Check sufficiency (with affordability-based capping)

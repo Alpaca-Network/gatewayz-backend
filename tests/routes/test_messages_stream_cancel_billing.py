@@ -18,6 +18,7 @@ from src.handlers.chat_handler import ChatInferenceHandler
 from src.routes import messages as messages_route
 from src.routes.chat_dispatch import _aclose_quiet
 from src.schemas.internal.chat import InternalChatRequest, InternalMessage
+from src.utils.token_estimator import count_tokens_text
 
 
 def _chunk(content):
@@ -107,4 +108,5 @@ async def test_messages_stream_disconnect_bills_exactly_once():
     assert any("content_block_delta" in e for e in seen)
     assert deduct.call_count == 1
     assert deduct.call_args.args[4] == "ref-msg"
-    assert deduct.call_args.args[3]["completion_tokens"] == 50
+    # Estimated from the streamed text (no provider usage arrived).
+    assert deduct.call_args.args[3]["completion_tokens"] == count_tokens_text("z" * 200)
