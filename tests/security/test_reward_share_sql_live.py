@@ -6,6 +6,11 @@ on PATH. The test builds minimal users / user_wallets stubs, applies the v2
 and v3 delegation migrations, and checks the money invariants that only the
 database can enforce: idempotency, row locks under concurrency, the revenue
 ceiling, fail-closed pause and the never-negative balance.
+
+It applies only the three historical files below, so it tests those files as
+written. The attribution functions it calls are retired and dropped by
+supabase/migrations/20261126120000_discount_credits_hardening.sql; nothing in
+the application calls them.
 """
 
 from __future__ import annotations

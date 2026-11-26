@@ -17,9 +17,22 @@ Key features:
 import asyncio
 import logging
 import time
+import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Refunds are recorded in credit_transactions under a request_id derived from
+# the original request's id (uuid5 in this namespace), so the unique index on
+# credit_transactions.request_id lets each request be refunded at most once.
+_REFUND_KEY_NAMESPACE = uuid.UUID("5d0f3c8e-6a39-4b8e-9d0a-2f7c1e4b6a90")
+
+
+def refund_key_for(original_request_id: str) -> str:
+    """The credit_transactions.request_id a refund of this request is
+    recorded under: the same for every refund of one request, and never the
+    id of the original charge."""
+    return str(uuid.uuid5(_REFUND_KEY_NAMESPACE, f"refund:{original_request_id}"))
 
 # Retry configuration for credit deduction
 CREDIT_DEDUCTION_MAX_RETRIES = 3
@@ -395,6 +408,17 @@ async def handle_credits_and_usage(
         last_error = None
         deduction_successful = False
 
+        if cost <= 0 and request_id:
+            # Nothing to charge (deduct_credits returns at once for 0), so
+            # this request's discount hold, if any, is never settled: free it.
+            from src.services.discount_credits.billing import release_for_request_async
+
+            await release_for_request_async((user or {}).get("id"), request_id)
+
+        # Every attempt passes the SAME request_id: deduct_credits skips a
+        # request already charged, and the discount draw is idempotent on it,
+        # so a retry after a transient failure gets the first attempt's draw
+        # back and charges the same (cost - discount) once.
         for attempt in range(1, CREDIT_DEDUCTION_MAX_RETRIES + 1):
             try:
                 await _to_thread(
@@ -773,6 +797,20 @@ async def refund_credits(
     The refund is added to purchased_credits (not subscription_allowance) to
     avoid inflating subscription quotas.
 
+    Idempotent per ``original_request_id``: the refund is recorded under
+    :func:`refund_key_for` (unique in credit_transactions), and a refund
+    already recorded under it is not paid again. The atomic path
+    (atomic_add_credits) enforces this in one transaction. Remaining race:
+    if that RPC is unavailable, the legacy fallback updates the balance
+    before it writes the ledger row, so two concurrent refunds of the same
+    request could both pay before the unique index rejects the second row.
+
+    Discount credits: whether the request drew a discount is read from the
+    discount ledger, not from config. If it did, the draw is put back on the
+    discount credits balance and the paid refund is capped at what the
+    request was actually charged in paid credits, so a refund never turns
+    discount credits into paid credits.
+
     Args:
         user_id: The user's database ID.
         api_key: The user's API key (used for lookup if needed).
@@ -797,8 +835,19 @@ async def refund_credits(
         return False
 
     try:
-        from src.db.credit_transactions import TransactionType
+        from src.db.credit_transactions import TransactionType, get_transaction_by_request_id
         from src.db.users import add_credits_to_user
+
+        refund_key = refund_key_for(original_request_id) if original_request_id else None
+        if refund_key:
+            existing = await asyncio.to_thread(get_transaction_by_request_id, refund_key)
+            if existing:
+                logger.info(
+                    "CREDIT_REFUND: request %s was already refunded (transaction %s)",
+                    original_request_id,
+                    existing.get("id"),
+                )
+                return True
 
         # Build refund metadata with correlation info
         refund_metadata = {
@@ -812,19 +861,31 @@ async def refund_credits(
 
         # Discount credits (src/services/discount_credits/billing.py): a
         # discounted request paid only (cost - discount) from the paid
-        # balance. Put the discount back on the discount credits balance and
-        # refund at most what the request was actually charged (its own credit
-        # row), so a refund can never turn discount credits into paid credits -- not even
-        # when the reversal itself fails. Config-gated: no DB call while the
-        # discount is disabled or for an account outside the pilot list.
+        # balance. Whether it drew a discount is read from the discount
+        # ledger -- not from the switch or the pilot list, which may have
+        # changed since the request was billed. If it did, put the discount
+        # back on the discount credits balance and refund at most what the
+        # request was actually charged (its own credit row), so a refund can
+        # never turn discount credits into paid credits -- not even when the
+        # reversal itself fails.
         if original_request_id:
             from src.services.discount_credits.billing import (
                 charged_credits_for,
-                discount_enabled_for,
+                discount_drawn_for,
                 reverse_or_none,
             )
 
-            if discount_enabled_for(user_id):
+            drawn = await asyncio.to_thread(discount_drawn_for, original_request_id)
+            if drawn is None:
+                # Cannot tell whether the request drew a discount: refunding
+                # the list price could pay the discount out as credits. Fail
+                # closed; ops reconciles by hand.
+                logger.error(
+                    "CREDIT_REFUND_SKIPPED: discount use unknown for request %s",
+                    original_request_id,
+                )
+                return False
+            if drawn > 0:
                 restored = await asyncio.to_thread(reverse_or_none, original_request_id)
                 charged = await asyncio.to_thread(charged_credits_for, original_request_id)
                 if restored:
@@ -841,7 +902,9 @@ async def refund_credits(
                     )
                     return False
                 else:
-                    amount = max(amount - float(restored), 0.0)
+                    # The charge is unknown: refund the list price less what
+                    # the request drew from discount credits.
+                    amount = max(amount - float(drawn), 0.0)
                 if amount <= 0:
                     logger.info(
                         "CREDIT_REFUND: nothing to refund in credits for request %s "
@@ -860,6 +923,7 @@ async def refund_credits(
             transaction_type=TransactionType.REFUND,
             description=f"Auto-refund: {reason} (request: {original_request_id or 'unknown'})",
             metadata=refund_metadata,
+            request_id=refund_key,
         )
 
         # Record Prometheus metrics

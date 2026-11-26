@@ -1,10 +1,11 @@
-"""Tests for GET /discount-credits (src/routes/discount_credits.py): the
-caller's discount credits balance and recent movements. The DB is mocked."""
+"""Tests for GET /discount-credits and PUT /discount-credits/daily-cap
+(src/routes/discount_credits.py): the caller's discount credits balance,
+recent movements and daily cap. The DB is mocked."""
 
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -13,7 +14,7 @@ from fastapi.testclient import TestClient
 
 import src.routes.discount_credits as routes
 from src.main import app
-from src.security.deps import get_current_user
+from src.security.deps import get_account_owner_id, get_api_key, get_current_user
 from src.services.discount_credits import billing
 
 client = TestClient(app)
@@ -59,6 +60,8 @@ LEDGER = [
 def _user():
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_current_user] = lambda: USER
+    app.dependency_overrides[get_account_owner_id] = lambda: USER["id"]
+    app.dependency_overrides[routes.daily_cap_rl] = lambda: None
     yield
     app.dependency_overrides.clear()
     app.dependency_overrides.update(saved)
@@ -164,6 +167,7 @@ def test_disabled_shape_is_the_same_keys_with_zeros_and_no_db_read(disabled):
             "resets_at": None,
             "next_daily_cap_usd": None,
             "next_daily_cap_from": None,
+            "next_daily_cap_at": None,
         },
     }
     assert data["discount_history"] == []
@@ -329,3 +333,118 @@ def test_setting_the_cap_needs_a_signed_in_caller():
     finally:
         app.dependency_overrides.update(saved)
     assert response.status_code in (401, 403)
+
+
+def test_left_today_is_never_below_zero():
+    """A request may settle a hold placed before the cap was lowered, so use
+    can end above the cap: "left today" then reads 0, not a negative."""
+    row = {"daily_cap_usd": "5", "cap_used_usd": "11.88", "cap_day": "2026-11-25"}
+    view = _cap(row)
+    assert view["used_today_usd"] == "11.880000"
+    assert view["left_today_usd"] == "0.000000"
+
+
+def test_cap_view_applies_a_raise_24_hours_after_it_was_asked_for():
+    row = {
+        "daily_cap_usd": "50",
+        "cap_used_usd": "50",
+        "cap_day": "2026-11-25",
+        "next_daily_cap_usd": "80",
+        "next_daily_cap_from": "2026-11-26",
+        "next_daily_cap_at": "2026-11-26T15:30:00+00:00",
+    }
+    # The next UTC date has come, but 24 hours have not passed.
+    early = routes._cap_view(
+        row, today=date(2026, 11, 26), now=datetime(2026, 11, 26, 15, 29, tzinfo=UTC)
+    )
+    assert early["daily_cap_usd"] == "50.000000"
+    assert early["used_today_usd"] == "0.000000"
+    assert early["next_daily_cap_usd"] == "80.000000"
+    assert early["next_daily_cap_from"] == "2026-11-26"
+    assert early["next_daily_cap_at"] == "2026-11-26T15:30:00Z"
+
+    due = routes._cap_view(
+        row, today=date(2026, 11, 26), now=datetime(2026, 11, 26, 15, 30, tzinfo=UTC)
+    )
+    assert due["daily_cap_usd"] == "80.000000"
+    assert due["next_daily_cap_usd"] is None
+    assert due["next_daily_cap_from"] is None and due["next_daily_cap_at"] is None
+
+
+def test_cap_view_reads_a_datetime_and_an_old_style_row():
+    pending = {
+        "daily_cap_usd": "5",
+        "next_daily_cap_usd": "9",
+        "next_daily_cap_at": datetime(2026, 11, 26, 1, 0, tzinfo=UTC),
+    }
+    view = routes._cap_view(pending, today=TODAY, now=datetime(2026, 11, 25, 1, 0, tzinfo=UTC))
+    assert view["next_daily_cap_at"] == "2026-11-26T01:00:00Z"
+    assert view["next_daily_cap_from"] == "2026-11-26"
+    # A raise recorded before the timestamp existed: the date rule, no time.
+    old = {"daily_cap_usd": "5", "next_daily_cap_usd": "9", "next_daily_cap_from": "2026-11-26"}
+    assert _cap(old)["next_daily_cap_at"] is None
+    assert _cap(old)["next_daily_cap_from"] == "2026-11-26"
+
+
+def test_a_scheduled_raise_reports_when_it_applies(enabled):
+    row = {
+        "daily_cap_usd": "50",
+        "next_daily_cap_usd": "80",
+        "next_daily_cap_from": "2099-01-02",
+        "next_daily_cap_at": "2099-01-02T10:00:00+00:00",
+    }
+    with (
+        patch.object(routes, "set_daily_cap", return_value={"status": "scheduled"}),
+        patch.object(routes, "get_balance", return_value=row),
+    ):
+        response = client.put("/discount-credits/daily-cap", json={"daily_cap_usd": 80})
+    cap = response.json()["data"]["daily_cap"]
+    assert cap["daily_cap_usd"] == "50.000000"
+    assert cap["next_daily_cap_at"] == "2099-01-02T10:00:00Z"
+
+
+def test_setting_the_cap_refuses_an_inference_key(enabled):
+    """Only the account's own sign-in key may change the cap: an ordinary API
+    key (which may sit in a third-party tool) gets 403."""
+    app.dependency_overrides.pop(get_account_owner_id)
+    app.dependency_overrides[get_api_key] = lambda: "gw_live_inference"
+    app.dependency_overrides[get_current_user] = lambda: {**USER, "is_primary": False}
+    with patch.object(routes, "set_daily_cap") as set_cap:
+        response = client.put("/discount-credits/daily-cap", json={"daily_cap_usd": 10})
+    assert response.status_code == 403
+    assert "account_key_required" in response.text
+    set_cap.assert_not_called()
+
+
+def test_setting_the_cap_accepts_the_account_sign_in_key(enabled):
+    app.dependency_overrides.pop(get_account_owner_id)
+    app.dependency_overrides[get_api_key] = lambda: "gw_live_primary"
+    app.dependency_overrides[get_current_user] = lambda: {**USER, "is_primary": True}
+    with (
+        patch.object(routes, "set_daily_cap", return_value={"status": "set"}) as set_cap,
+        patch.object(routes, "get_balance", return_value={"daily_cap_usd": "10"}),
+    ):
+        response = client.put("/discount-credits/daily-cap", json={"daily_cap_usd": 10})
+    assert response.status_code == 200
+    set_cap.assert_called_once_with(42, Decimal("10"))
+
+
+def test_setting_the_cap_is_owner_only_and_rate_limited():
+    """The route depends on get_account_owner_id and on its own rate limit
+    (10 a minute)."""
+    from fastapi.routing import APIRoute
+
+    route = next(
+        r
+        for r in app.routes
+        if isinstance(r, APIRoute) and r.path == "/discount-credits/daily-cap"
+    )
+    calls = set()
+    stack = list(route.dependant.dependencies)
+    while stack:
+        dep = stack.pop()
+        calls.add(dep.call)
+        stack.extend(dep.dependencies)
+    assert get_account_owner_id in calls
+    assert routes.daily_cap_rl in calls
+

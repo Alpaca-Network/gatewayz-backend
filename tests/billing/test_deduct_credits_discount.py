@@ -8,10 +8,12 @@ Invariants:
   at all;
 * on -> d x cost comes out of the discount balance (discount_apply, keyed on
   the billing request_id) and only cost - applied is charged in credits;
-* any discount error -> full price, the request never fails because of it;
+* a discount error -> the draw is retried once, then reversed, then the list
+  price is charged; the request never fails because of it;
 * a retry with the same request_id never draws again or re-charges;
 * a refused charge puts the discount back; a refund returns the discount to
-  the discount balance and only the credits part as credits.
+  the discount balance and only the credits part as credits, decided from the
+  discount ledger (not the switch), and pays at most once per request.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.db import inference_discount as discount_db
 from src.services.discount_credits import billing as discount
 
 REQ = "6f9b1f0e-3c2a-4d5e-9b8a-1c2d3e4f5a6b"
@@ -189,7 +192,7 @@ class TestFlagOn:
         flags()
 
         def handler(name, params):
-            if name == "discount_apply":
+            if name in ("discount_apply", "discount_reverse"):
                 raise ConnectionError("https://secret.supabase.co?apikey=sk_live boom")
             return _ok_deduct(name, params)
 
@@ -197,8 +200,79 @@ class TestFlagOn:
         with patch("src.services.discount_credits.billing.logger") as log:
             _deduct(client, cost=2.0)
         assert _atomic(client)[0]["p_tokens_amount"] == 2.0
-        logged = " ".join(str(a) for c in log.warning.call_args_list for a in c.args)
+        logged = " ".join(
+            str(a) for c in log.warning.call_args_list + log.error.call_args_list for a in c.args
+        )
         assert "secret" not in logged and "sk_live" not in logged
+
+    def test_a_failed_draw_is_retried_once_then_reversed_before_the_list_price(self, flags):
+        """The draw is idempotent, so it is tried twice. A call that failed may
+        still have drawn, so the request's draw is reversed before 0 is
+        returned: never discounted and charged in full."""
+        flags()
+
+        def handler(name, params):
+            if name == "discount_apply":
+                raise ConnectionError("down")
+            if name == "discount_reverse":
+                assert params == {"p_request_id": REQ}
+                return "1.98"  # the first call had drawn after all
+            return _ok_deduct(name, params)
+
+        client = _client(handler)
+        _deduct(client, cost=2.0)
+        assert [n for n, _ in client.calls] == [
+            "discount_apply",
+            "discount_apply",
+            "discount_reverse",
+            "atomic_deduct_credits",
+        ]
+        assert _atomic(client)[0]["p_tokens_amount"] == 2.0
+        assert "discount_usd" in _atomic(client)[0]["p_metadata"]
+        assert _atomic(client)[0]["p_metadata"]["discount_usd"] == "0"
+
+    def test_a_draw_that_succeeds_on_the_second_try_is_used(self, flags):
+        flags()
+        calls = {"n": 0}
+
+        def handler(name, params):
+            if name == "discount_apply":
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise ConnectionError("blip")
+                return "1.98"
+            return _ok_deduct(name, params)
+
+        client = _client(handler)
+        _deduct(client, cost=2.0)
+        assert [n for n, _ in client.calls] == [
+            "discount_apply",
+            "discount_apply",
+            "atomic_deduct_credits",
+        ]
+        assert _atomic(client)[0]["p_tokens_amount"] == pytest.approx(0.02)
+
+    def test_the_reversal_runs_before_the_draw_returns_zero(self):
+        """Unit level: apply_for_request calls the reversal for the same
+        request id, and only then returns 0."""
+        order: list[str] = []
+
+        def apply(*args, **kwargs):
+            order.append("apply")
+            raise discount_db.DiscountUnavailableError("discount_apply failed: X")
+
+        def reverse(key):
+            order.append(f"reverse:{key}")
+            return Decimal(0)
+
+        with (
+            patch.object(discount.Config, "VAULT_DISCOUNT_BILLING_ENABLED", True),
+            patch.object(discount.Config, "VAULT_DISCOUNT_ALL_ACCOUNTS", True),
+            patch.object(discount_db, "apply_discount", side_effect=apply),
+            patch.object(discount_db, "reverse_discount", side_effect=reverse),
+        ):
+            assert discount.apply_for_request(7, Decimal("2"), REQ) == Decimal(0)
+        assert order == ["apply", "apply", f"reverse:{REQ}"]
 
     @pytest.mark.parametrize("bad", [None, "", "not-a-number", {"a": 1, "b": 2}, -1, True])
     def test_unreadable_rpc_result_charges_full_price(self, flags, bad):
@@ -353,6 +427,70 @@ class TestFlagOn:
         ]
 
 
+class TestCreditHandlerRetry:
+    """credit_handler.handle_credits_and_usage retries a failed deduction.
+    Every attempt must pass the same request id, so the idempotent draw hands
+    back the first attempt's discount and the user is charged once."""
+
+    def _run(self, client, request_id=REQ):
+        from src.services.billing import credit_handler
+
+        with (
+            patch("src.db.users.get_supabase_client", return_value=client),
+            patch("src.db.inference_discount.get_supabase_client", return_value=client),
+            patch("src.db.plans.is_admin_tier_user", return_value=False),
+            patch("src.services.daily_usage_limiter.enforce_daily_usage_limit"),
+            patch("src.db.users.invalidate_user_cache"),
+            patch("src.db.credit_transactions.get_supabase_client", return_value=client),
+            patch("src.db.credit_transactions.log_credit_transaction", return_value=None),
+            patch("src.services.pricing.calculate_cost_async", return_value=2.0),
+            patch("src.db.users.record_usage"),
+            patch("src.db.rate_limits.update_rate_limit_usage"),
+            patch.object(credit_handler, "_record_credit_metrics"),
+            patch.object(credit_handler.asyncio, "sleep"),
+        ):
+            return asyncio.run(
+                credit_handler.handle_credits_and_usage(
+                    api_key="key",
+                    user={"id": 7, "tier": "pro"},
+                    model="m",
+                    trial={"is_trial": False},
+                    total_tokens=10,
+                    prompt_tokens=5,
+                    completion_tokens=5,
+                    elapsed_ms=1,
+                    request_id=request_id,
+                )
+            )
+
+    def test_each_attempt_reuses_the_request_id_and_the_first_draw(self, flags):
+        flags()
+        drawn: dict[str, str] = {}
+        apply_keys: list[str] = []
+        deduct_keys: list[str] = []
+        state = {"failures": 2}
+
+        def handler(name, params):
+            if name == "discount_apply":
+                key = params["p_request_id"]
+                apply_keys.append(key)
+                # Mirror the SQL: the first call draws, a repeat returns it.
+                return drawn.setdefault(key, "1.980000")
+            if name == "atomic_deduct_credits":
+                deduct_keys.append(params.get("p_request_id"))
+                if state["failures"]:
+                    state["failures"] -= 1
+                    raise ConnectionError("transient")
+            return _ok_deduct(name, params)
+
+        client = _client(handler)
+        assert self._run(client) == 2.0
+        assert apply_keys == [REQ, REQ, REQ]
+        assert deduct_keys == [REQ, REQ, REQ]
+        assert "discount_reverse" not in [n for n, _ in client.calls]
+        assert _atomic(client)[-1]["p_tokens_amount"] == pytest.approx(0.02)
+
+
 class TestCapacity:
     """The pre-check counts this request's HOLD, never the whole balance."""
 
@@ -419,15 +557,17 @@ class TestCapacity:
 
 
 class TestRefund:
-    def _refund(self, amount, restored, charged_tx=None):
+    def _refund(self, amount, restored, charged_tx=None, drawn=Decimal("1.98")):
         from src.services.billing import credit_handler
 
+        def lookup(request_id):
+            # Only the original charge exists; no refund is recorded yet.
+            return charged_tx if request_id == REQ else None
+
         with (
+            patch("src.services.discount_credits.billing.discount_drawn_for", return_value=drawn),
             patch("src.services.discount_credits.billing.reverse_or_none", return_value=restored),
-            patch(
-                "src.db.credit_transactions.get_transaction_by_request_id",
-                return_value=charged_tx,
-            ),
+            patch("src.db.credit_transactions.get_transaction_by_request_id", side_effect=lookup),
             patch("src.db.users.add_credits_to_user") as add,
         ):
             ok = asyncio.run(
@@ -463,7 +603,7 @@ class TestRefund:
         assert ok is False
         add.assert_not_called()
 
-    def test_charge_unknown_falls_back_to_list_minus_restored(self, flags):
+    def test_charge_unknown_falls_back_to_list_minus_drawn(self, flags):
         flags()
         ok, add = self._refund(2.0, Decimal("1.98"), None)
         assert ok is True
@@ -471,17 +611,50 @@ class TestRefund:
 
     def test_refund_never_goes_negative(self, flags):
         flags()
-        ok, add = self._refund(2.0, Decimal("5"), None)
+        ok, add = self._refund(2.0, Decimal("5"), None, drawn=Decimal("5"))
         assert ok is True
         add.assert_not_called()
 
-    def test_flag_off_refund_unchanged(self, flags):
+    def test_discount_use_unknown_refunds_nothing(self, flags):
+        """When the discount ledger cannot be read, a list-price refund could
+        pay a discount out as credits: the refund is refused for review."""
+        flags()
+        ok, add = self._refund(2.0, Decimal("1.98"), {"amount": -0.02}, drawn=None)
+        assert ok is False
+        add.assert_not_called()
+
+    def test_switch_off_refund_without_a_discount_use_is_unchanged(self, flags):
+        """Replaces the old "flag off -> refund unchanged" test. Whether a
+        refund touches discount credits is now decided from the data (a
+        `use` row for the request), not from the switch: with no use row the
+        refund is exactly as before -- no reversal, the full amount."""
+        flags(enabled=False)
+        ok, add = self._refund(2.0, Decimal("0"), {"amount": -2.0}, drawn=Decimal(0))
+        assert ok is True
+        assert add.call_args.kwargs["credits"] == 2.0
+        assert "discount_restored_usd" not in add.call_args.kwargs["metadata"]
+
+    def test_switch_off_refund_with_a_discount_use_reverses_it_and_caps_the_paid_part(self, flags):
+        """The switch (or the pilot list) changed after the request drew a
+        discount: the refund still puts the discount back and pays only what
+        was charged in paid credits."""
         flags(enabled=False)
         with patch("src.services.discount_credits.billing.reverse_or_none") as reverse:
+            reverse.return_value = Decimal("1.98")
             from src.services.billing import credit_handler
 
-            with patch("src.db.users.add_credits_to_user") as add:
-                asyncio.run(
+            with (
+                patch(
+                    "src.services.discount_credits.billing.discount_drawn_for",
+                    return_value=Decimal("1.98"),
+                ),
+                patch(
+                    "src.db.credit_transactions.get_transaction_by_request_id",
+                    side_effect=lambda rid: {"amount": -0.02} if rid == REQ else None,
+                ),
+                patch("src.db.users.add_credits_to_user") as add,
+            ):
+                ok = asyncio.run(
                     credit_handler.refund_credits(
                         user_id=7,
                         api_key="k",
@@ -490,5 +663,54 @@ class TestRefund:
                         original_request_id=REQ,
                     )
                 )
-        reverse.assert_not_called()
-        assert add.call_args.kwargs["credits"] == 2.0
+        assert ok is True
+        reverse.assert_called_once_with(REQ)
+        assert add.call_args.kwargs["credits"] == pytest.approx(0.02)
+
+    def test_a_refund_is_recorded_under_a_key_derived_from_the_request(self, flags):
+        from src.services.billing import credit_handler
+
+        flags()
+        ok, add = self._refund(2.0, Decimal("1.98"), {"amount": -0.02})
+        assert ok is True
+        key = add.call_args.kwargs["request_id"]
+        assert key == credit_handler.refund_key_for(REQ)
+        assert key != REQ and uuid.UUID(key)
+        assert credit_handler.refund_key_for(REQ) == key  # stable
+
+    def test_a_second_refund_of_the_same_request_pays_nothing(self, flags):
+        from src.services.billing import credit_handler
+
+        flags()
+        recorded: dict[str, dict] = {REQ: {"id": 1, "amount": -0.02}}
+
+        def add_credits(**kwargs):
+            recorded[kwargs["request_id"]] = {"id": 2, "amount": kwargs["credits"]}
+
+        with (
+            patch(
+                "src.services.discount_credits.billing.discount_drawn_for",
+                return_value=Decimal("1.98"),
+            ),
+            patch(
+                "src.services.discount_credits.billing.reverse_or_none",
+                return_value=Decimal("1.98"),
+            ),
+            patch(
+                "src.db.credit_transactions.get_transaction_by_request_id",
+                side_effect=lambda rid: recorded.get(rid),
+            ),
+            patch("src.db.users.add_credits_to_user", side_effect=add_credits) as add,
+        ):
+            for _ in range(2):
+                ok = asyncio.run(
+                    credit_handler.refund_credits(
+                        user_id=7,
+                        api_key="k",
+                        amount=2.0,
+                        reason="provider_error",
+                        original_request_id=REQ,
+                    )
+                )
+                assert ok is True
+        assert add.call_count == 1

@@ -2,8 +2,9 @@
 
 With the switch on, billing draws on discount credits only for the accounts
 the setting names ("*" for every account). Every other account must take
-exactly the switch-off path, with no discount DB call at all: on the charge,
-on the pre-request check, and on a refund."""
+exactly the switch-off path, with no discount DB call at all: on the charge
+and on the pre-request check. A refund is decided from the data instead (did
+the request draw a discount?), so it is the same for every account."""
 
 from __future__ import annotations
 
@@ -93,12 +94,16 @@ class TestOutsideThePilot:
             assert via_async == 5.0
         hold.assert_not_called()
 
-    def test_a_refund_makes_no_discount_call(self, pilot_only):
+    def test_a_refund_without_a_discount_use_puts_nothing_back(self, pilot_only):
+        """A refund no longer asks the pilot list: it looks for the request's
+        discount use. None found -> no reversal and the refund is as before."""
         from src.services.billing import credit_handler
 
         with (
+            patch.object(billing, "discount_drawn_for", return_value=Decimal(0)) as drawn,
             patch.object(billing, "reverse_or_none") as reverse,
             patch.object(billing, "charged_credits_for") as charged,
+            patch("src.db.credit_transactions.get_transaction_by_request_id", return_value=None),
             patch("src.db.users.add_credits_to_user") as add,
         ):
             asyncio.run(
@@ -110,9 +115,34 @@ class TestOutsideThePilot:
                     original_request_id=REQ,
                 )
             )
+        drawn.assert_called_once_with(REQ)
         reverse.assert_not_called()
         charged.assert_not_called()
-        assert add.called
+        assert add.call_args.kwargs["credits"] == 1.0
+
+    def test_a_refund_of_a_discounted_request_reverses_it_off_the_list(self, pilot_only):
+        """The account left the list after a request drew a discount: the
+        refund still puts the discount back and pays only the paid part."""
+        from src.services.billing import credit_handler
+
+        with (
+            patch.object(billing, "discount_drawn_for", return_value=Decimal("0.99")),
+            patch.object(billing, "reverse_or_none", return_value=Decimal("0.99")) as reverse,
+            patch.object(billing, "charged_credits_for", return_value=Decimal("0.01")),
+            patch("src.db.credit_transactions.get_transaction_by_request_id", return_value=None),
+            patch("src.db.users.add_credits_to_user") as add,
+        ):
+            asyncio.run(
+                credit_handler.refund_credits(
+                    user_id=OTHER,
+                    api_key="gw_test_key",
+                    amount=1.0,
+                    reason=sorted(credit_handler.REFUNDABLE_ERROR_TYPES)[0],
+                    original_request_id=REQ,
+                )
+            )
+        reverse.assert_called_once_with(REQ)
+        assert add.call_args.kwargs["credits"] == 0.01
 
     @pytest.mark.parametrize(
         "path",
@@ -120,7 +150,6 @@ class TestOutsideThePilot:
             "src/db/users.py",
             "src/routes/chat.py",
             "src/handlers/chat_handler.py",
-            "src/services/billing/credit_handler.py",
         ],
     )
     def test_no_billing_call_site_checks_the_switch_alone(self, path):
@@ -128,6 +157,15 @@ class TestOutsideThePilot:
         source = (ROOT / path).read_text()
         assert "discount_enabled_for(" in source
         assert "discount_enabled()" not in source
+
+    def test_refunds_ask_neither_the_switch_nor_the_list(self):
+        """credit_handler decides refunds from the discount ledger
+        (discount_drawn_for) and releases holds through release_for_request,
+        which asks about the account itself."""
+        source = (ROOT / "src/services/billing/credit_handler.py").read_text()
+        assert "discount_drawn_for" in source
+        assert "discount_enabled()" not in source
+        assert "discount_enabled_for(" not in source
 
 
 class TestInsideThePilot:
@@ -145,8 +183,11 @@ class TestInsideThePilot:
         from src.services.billing import credit_handler
 
         with (
+            # The request's discount use, read from the ledger.
+            patch.object(billing, "discount_drawn_for", return_value=Decimal("0.99")),
             patch.object(billing, "reverse_or_none", return_value=Decimal("0.99")) as reverse,
             patch.object(billing, "charged_credits_for", return_value=Decimal("0.01")),
+            patch("src.db.credit_transactions.get_transaction_by_request_id", return_value=None),
             patch("src.db.users.add_credits_to_user"),
         ):
             asyncio.run(

@@ -767,6 +767,11 @@ class TestEnabledProvidersRoster:
         ("12a", frozenset(), False),  # a typo admits nobody, not everybody
         ("10,*", frozenset({10}), False),  # "*" counts only when it stands alone
         ("0,-3,4.5", frozenset(), False),
+        # Only ASCII digits count: other Unicode digits are ignored, never an
+        # import error.
+        ("²", frozenset(), False),
+        ("１０", frozenset(), False),
+        ("7,²,１０", frozenset({7}), False),
     ],
 )
 def test_discount_pilot_setting_is_parsed_strictly(monkeypatch, raw, ids, everyone):
