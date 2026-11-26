@@ -144,6 +144,12 @@ def _build_model_pk_map(model_ids: list[str]) -> dict[str, int]:
     The catalog id is ``provider_model_id`` (falling back to ``model_name``), so we
     look up both columns. Tolerant of misses — unresolved ids are simply absent
     from the returned map.
+
+    Only active rows are considered. One catalog id can sit in several rows
+    (``openai/gpt-5`` exists as an inactive OpenRouter row, an inactive Vercel
+    row and the live OpenAI row), and the first row returned was usually an
+    inactive one: verdicts landed there and the live row stayed "unknown"
+    (found 2026-11-26; 9 of 12 GPT-5 models passed the sweep but kept "unknown").
     """
     mapping: dict[str, int] = {}
     unique_ids = [mid for mid in dict.fromkeys(model_ids) if mid]
@@ -168,6 +174,7 @@ def _build_model_pk_map(model_ids: list[str]) -> dict[str, int]:
                     supabase.table("models")
                     .select("id, model_name, provider_model_id")
                     .in_(column, chunk)
+                    .eq("is_active", True)
                     .execute()
                 )
             except Exception as exc:
