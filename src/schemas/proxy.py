@@ -69,6 +69,57 @@ class Message(BaseModel):
         return self
 
 
+EMPTY_TOOL_RESULT_PLACEHOLDER = "(no output)"
+
+
+def _content_is_empty(content: Any) -> bool:
+    if content is None:
+        return True
+    if isinstance(content, str):
+        return not content.strip()
+    if isinstance(content, list):
+        return len(content) == 0
+    return False
+
+
+def drop_empty_messages(messages: Any) -> Any:
+    """Remove messages that carry nothing, before they are validated.
+
+    Agent clients produce them routinely: a translation layer that strips a
+    thinking-only assistant turn leaves ``{"role": "assistant", "content": ""}``,
+    and a command with no output becomes a tool message with empty content.
+    Rejecting the whole request for those ended real sessions with a 422.
+
+    - user / assistant / system / developer messages with no content (and, for
+      assistant, no tool calls) are dropped: they say nothing;
+    - an empty tool or function result is kept, because the call it answers
+      must be answered, with a short placeholder as its content.
+
+    If nothing would be left, the list is returned untouched so the normal
+    validation error is raised.
+    """
+    if not isinstance(messages, list):
+        return messages
+    kept: list[Any] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            kept.append(message)
+            continue
+        if not _content_is_empty(message.get("content")):
+            kept.append(message)
+            continue
+        role = message.get("role")
+        if role in ("tool", "function"):
+            kept.append({**message, "content": EMPTY_TOOL_RESULT_PLACEHOLDER})
+        elif role == "assistant" and message.get("tool_calls"):
+            kept.append(message)
+        elif role in ("user", "assistant", "system", "developer"):
+            continue
+        else:
+            kept.append(message)
+    return kept if kept else messages
+
+
 class StreamOptions(BaseModel):
     """Options for streaming response."""
 
@@ -227,6 +278,11 @@ class ProxyRequest(BaseModel):
 
     class Config:
         extra = "allow"
+
+    @field_validator("messages", mode="before")
+    @classmethod
+    def remove_empty_messages(cls, messages: Any) -> Any:
+        return drop_empty_messages(messages)
 
     @field_validator("messages")
     @classmethod
