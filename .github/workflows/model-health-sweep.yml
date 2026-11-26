@@ -26,9 +26,14 @@ jobs:
             exit 1
           fi
           # --max-time bounds the whole request; the sweep itself is bounded server-side.
+          # limit: the endpoint tests only the first 50 catalog models by default,
+          # so models later in the catalog (most OpenAI models) were never checked
+          # and stayed health "unknown". 300 covers the catalog with room to grow;
+          # at concurrency 15 and the 60 s per-model timeout the worst case is
+          # 20 rounds x 60 s = 1200 s, inside --max-time. Each test is 5 tokens.
           http_code=$(curl -sS -o /tmp/sweep_response.json -w "%{http_code}" \
             --max-time 2100 \
-            -X POST "https://api.gatewayz.ai/admin/live-test/run?persist=true" \
+            -X POST "https://api.gatewayz.ai/admin/live-test/run?persist=true&limit=300&concurrency=15" \
             -H "Authorization: Bearer ${ADMIN_API_KEY}" \
             -H "Content-Type: application/json")
           echo "HTTP status: ${http_code}"
