@@ -11,8 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.routes.discount_credits as discount_routes
-from src.main import app
 import src.routes.wallet_auth_cardano as cardano_routes
+from src.main import app
 from src.security.deps import get_account_owner_id, get_current_user
 from src.services.wallet import eligibility
 
