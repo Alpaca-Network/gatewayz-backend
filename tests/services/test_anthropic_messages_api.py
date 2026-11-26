@@ -13,11 +13,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from src.routes.messages import (
-    AnthropicMessagesRequest,
-    _resolve_api_key,
-    _stream_anthropic_events,
-)
+from src.routes.messages import AnthropicMessagesRequest, _resolve_api_key
+from src.services.anthropic_messages.stream import translate_stream
 from src.services.providers.anthropic_transformer import transform_anthropic_to_openai
 
 
@@ -139,7 +136,7 @@ class TestStreamTranslation:
                 yield c
 
         events = []
-        async for e in _stream_anthropic_events(_fake_stream(), model, "msg_1"):
+        async for e in translate_stream(_fake_stream(), model, "msg_1"):
             events.append(e)
         return events
 
@@ -271,7 +268,7 @@ class TestStreamErrorPropagation:
                 yield c
 
         events = []
-        async for e in _stream_anthropic_events(_fake_stream(), model, "msg_1"):
+        async for e in translate_stream(_fake_stream(), model, "msg_1"):
             events.append(e)
         return events
 
@@ -357,7 +354,7 @@ class TestStreamErrorPropagationNonFatal:
                 yield c
 
         events = []
-        async for e in _stream_anthropic_events(_fake_stream(), model, "msg_1"):
+        async for e in translate_stream(_fake_stream(), model, "msg_1"):
             events.append(e)
         return events
 
@@ -408,7 +405,7 @@ class TestStreamErrorPropagationNonFatal:
                 closed["value"] = True
 
         events = []
-        async for e in _stream_anthropic_events(_FakeStream(), "m", "msg_1"):
+        async for e in translate_stream(_FakeStream(), "m", "msg_1"):
             events.append(e)
         assert any(e.startswith("event: error") for e in events)
         assert closed["value"], "fatal error must aclose() the inner stream"
@@ -474,7 +471,7 @@ class TestStreamUpstreamRaisesMidFlight:
 
     async def _collect(self, stream, model="claude-sonnet-4"):
         events = []
-        async for e in _stream_anthropic_events(stream, model, "msg_1"):
+        async for e in translate_stream(stream, model, "msg_1"):
             events.append(e)
         return events
 

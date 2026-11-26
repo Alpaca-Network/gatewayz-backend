@@ -9,26 +9,28 @@ Gatewayz is to install a third-party translation proxy (Claude Code Router),
 which adds an install step to the funnel and puts a dependency we do not
 control on the critical path.
 
-Implementation
---------------
-The request is translated to the gateway's internal OpenAI shape and handed to
-the existing ``chat_completions`` pipeline, so billing, rate limiting, provider
-failover, credit checks and analytics all behave identically to the OpenAI
-route -- there is exactly one inference path in this service, and this endpoint
-does not fork it. The response is translated back to Anthropic shape.
+How a request flows
+-------------------
+1. The Anthropic request is translated to the gateway's internal OpenAI shape
+   (``anthropic_transformer``) and handed to the one ``chat_completions``
+   pipeline, so auth, credit checks, rate limits, failover and billing behave
+   exactly as on the OpenAI route.
+2. Claude models are additionally *passed through*: the native Anthropic client
+   sends the caller's original body and the caller gets Anthropic's own events
+   back (``anthropic_passthrough``), so thinking, cache breakpoints and beta
+   features survive. Other models get the pipeline's output translated back.
+3. Errors leave in Anthropic's envelope (``anthropic_messages.errors``);
+   streams are produced by ``anthropic_messages.stream``.
 
-``cache_control`` markers survive the round trip (see ``anthropic_transformer``
-and ``anthropic_native_client``), which is what makes Claude Code's large
-static prefix cheap to replay.
+Helpers live in ``src/services/anthropic_messages/``; this module only wires
+them to the HTTP endpoints.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
-import re
 import time
 import uuid
 from typing import Any
@@ -41,6 +43,12 @@ from src.schemas.proxy import ProxyRequest
 from src.security.deps import get_optional_api_key_strict
 from src.security.identity import get_request_identity
 from src.security.security import ApiKeyLookupUnavailable, validate_api_key_security
+from src.services.anthropic_messages.errors import anthropic_error, to_anthropic_error
+from src.services.anthropic_messages.stream import relay_passthrough_stream, translate_stream
+from src.services.anthropic_messages.tokens import (
+    AnthropicCountTokensRequest,
+    estimate_input_tokens,
+)
 from src.services.auth_rate_limiting import get_client_ip
 from src.services.billing.credit_precheck import INPUT_TOKENS_FLOOR_STATE
 from src.services.claude_code_models import strip_claude_code_prefix
@@ -48,7 +56,6 @@ from src.services.job_usage import JOB_BUSY, job_lease_of
 from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.providers import anthropic_passthrough
 from src.services.providers.anthropic_transformer import (
-    anthropic_input_tokens,
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
 )
@@ -65,10 +72,6 @@ def _trusted_ip(request: Request | None) -> str | None:
         return None
     ip = get_client_ip(request)
     return None if not ip or ip == "unknown" else ip
-
-
-# Job keys: the usage line's content hash, emitted by chat_dispatch before [DONE].
-_CONTENT_HASH_COMMENT = f": {CONTENT_HASH_HEADER.lower()}: "
 
 router = APIRouter(tags=["messages"])
 
@@ -110,7 +113,7 @@ SAFEGUARDS_FIELD = "safeguards"
 
 
 def _safeguards_unsupported() -> HTTPException:
-    return _anthropic_error(
+    return anthropic_error(
         400,
         "invalid_request_error",
         f"`{SAFEGUARDS_FIELD}` is not supported for this model on this gateway; "
@@ -133,615 +136,6 @@ def _resolve_api_key(request: Request, api_key: str | None) -> str | None:
     return header_key.strip() if header_key else None
 
 
-def _anthropic_error(status_code: int, error_type: str, message: str) -> HTTPException:
-    """Errors in Anthropic's envelope, so Anthropic SDKs parse them correctly."""
-    return HTTPException(
-        status_code=status_code,
-        detail={"type": "error", "error": {"type": error_type, "message": message}},
-    )
-
-
-def _detail_message(exc: HTTPException) -> str:
-    """The human-readable string out of an HTTPException detail.
-
-    Our gates raise `detail={"error": {"message": ..., "code": ...}}`. Passing
-    that dict through `json.dumps` put a JSON blob inside the Anthropic
-    envelope's own `message` field — unreadable in an SDK traceback.
-    """
-    detail = exc.detail
-    if isinstance(detail, dict):
-        inner = detail.get("error")
-        if isinstance(inner, dict) and inner.get("message"):
-            return str(inner["message"])
-        if detail.get("message"):
-            return str(detail["message"])
-        return json.dumps(detail)
-    return str(detail) if detail else "request failed"
-
-
-# Any URL except our own: a top-up or docs link in a gateway message is kept.
-_URL_RE = re.compile(r"https?://(?![\w.-]*gatewayz\.ai)\S+")
-_GENERIC_UPSTREAM_ERROR = "The model provider returned an error."
-_GENERIC_GATEWAY_ERROR = "The gateway could not process the provider's response."
-
-
-def _safe_error_message(message: Any) -> str:
-    """An error message with internal details removed.
-
-    Provider and library errors reach this route as raw exception text: the
-    upstream URL from an HTTP client error, or a validation dump naming our
-    internal classes. Neither helps the caller and both describe our internals.
-    """
-    text = str(message or "").strip()
-    if not text:
-        return _GENERIC_UPSTREAM_ERROR
-    if "validation error" in text and " for " in text:
-        return _GENERIC_GATEWAY_ERROR
-    lines = [
-        line
-        for line in text.splitlines()
-        if not line.strip().lower().startswith("for more information")
-    ]
-    text = _URL_RE.sub("", " ".join(lines))
-    text = re.sub(r"\s+for url\s*'?'?", " ", text)
-    text = re.sub(r"\s{2,}", " ", text).strip(" :'")
-    if not text:
-        return _GENERIC_UPSTREAM_ERROR
-    return text[:500]
-
-
-_PLAN_LIMIT_PREFIX = "Plan limit exceeded:"
-
-
-def _is_plan_period_limit(status_code: int, message: str) -> bool:
-    """True for a spent daily or monthly plan allowance.
-
-    These arrive as 429, which Anthropic clients retry with backoff. Retrying
-    cannot help before the period resets, so the caller is told once instead of
-    waiting through minutes of retries. Per-minute limits stay 429.
-    """
-    if status_code != 429 or not message.startswith(_PLAN_LIMIT_PREFIX):
-        return False
-    lowered = message.lower()
-    return "daily" in lowered or "monthly" in lowered
-
-
-def _plan_limit_message(message: str) -> str:
-    reason = message[len(_PLAN_LIMIT_PREFIX) :].strip()
-    return (
-        f"Gatewayz plan limit reached: {reason}. Retrying will not help until the "
-        "limit resets or the plan is raised."
-    )
-
-
-def _detail_code(exc: HTTPException) -> str | None:
-    """The gateway error code (`model_not_found`, ...) when the detail carries one."""
-    detail = exc.detail
-    if isinstance(detail, dict):
-        inner = detail.get("error")
-        if isinstance(inner, dict):
-            return inner.get("code")
-    return None
-
-
-def _anthropic_error_type(status_code: int, code: str | None) -> str:
-    """Map our status + error code onto an Anthropic error type."""
-    base = {
-        400: "invalid_request_error",
-        401: "authentication_error",
-        403: "permission_error",
-        404: "not_found_error",
-        429: "rate_limit_error",
-        # Provider budget exhaustion is 402 and terminal: an SDK must not
-        # retry it, and an operator must be told to top up rather than wait.
-        402: "invalid_request_error",
-        # 503 stays overloaded_error for GENUINE upstream capacity, which is
-        # the one case where retrying is the right advice.
-        503: "overloaded_error",
-    }.get(status_code, "api_error")
-    # A 503 for missing pricing config is deterministic, not transient —
-    # don't invite SDK retries on it.
-    if base == "overloaded_error" and code == "pricing_not_configured":
-        return "api_error"
-    return base
-
-
-def _sse(event: str, data: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
-
-
-# Gateway/stream error types -> Anthropic SSE error types
-# (https://docs.anthropic.com/en/api/errors). Anything unmapped is an api_error.
-_STREAM_ERROR_TYPE_MAP = {
-    "rate_limit_error": "rate_limit_error",
-    "plan_limit_exceeded": "rate_limit_error",
-    "auth_error": "authentication_error",
-    "not_found_error": "not_found_error",
-    # NOT overloaded_error. `capacity_error` is emitted from exactly one place --
-    # chat_streaming's is_provider_budget_error() branch -- so it always means a
-    # spending limit on OUR provider account, never genuine upstream capacity.
-    # overloaded_error is the one Anthropic type whose documented advice is to
-    # back off and retry, which is the advice this condition can never satisfy.
-    #
-    # This is #2355's defect coming through the streaming door: that PR moved the
-    # non-stream path from 503 to a terminal 402, and the mid-stream event for the
-    # identical cause kept telling the SDK to retry.
-    "capacity_error": "invalid_request_error",
-}
-
-# Error-shaped chunks that are advisories emitted AFTER content was fully
-# delivered (chat_streaming continues to [DONE] after them). Terminating on
-# these would discard a delivered-and-billed response.
-#
-# plan_limit_exceeded is the post-usage check in chat_streaming: this response
-# crossed the plan allowance, and it was already delivered and billed. The NEXT
-# request is refused before it starts; this one must end normally.
-_NON_FATAL_STREAM_ERROR_TYPES = frozenset({"stream_normalization_warning", "plan_limit_exceeded"})
-
-
-async def _aclose_stream(openai_stream) -> None:
-    """Close the inner generator so its finally blocks (provider connection
-    release, cleanup) run now, not at GC time."""
-    if hasattr(openai_stream, "aclose"):
-        try:
-            await openai_stream.aclose()
-        except Exception:
-            pass
-
-
-async def _stream_anthropic_events(
-    openai_stream,
-    model: str,
-    message_id: str,
-):
-    """Re-emit an OpenAI SSE stream as Anthropic events, closing the inner
-    stream on every exit path.
-
-    The inner stream is the chat pipeline's generator, which bills after it
-    finishes -- and, on a client abort, in its own cleanup. A client
-    disconnect (CancelledError/GeneratorExit at our ``yield``) never reaches
-    the inner generator on its own, so without this close it would sit
-    suspended and the tokens already generated upstream would go uncharged
-    until garbage collection (or forever).
-    """
-    events = _stream_anthropic_events_impl(openai_stream, model, message_id)
-    try:
-        async for event in events:
-            yield event
-    finally:
-        # Close the inner stream first: that is what triggers its billing.
-        try:
-            await _aclose_stream(openai_stream)
-        except BaseException:  # noqa: BLE001 - never mask the cancellation
-            pass
-        try:
-            await events.aclose()
-        except BaseException:  # noqa: BLE001
-            pass
-
-
-async def _stream_anthropic_events_impl(
-    openai_stream,
-    model: str,
-    message_id: str,
-):
-    """Re-emit an OpenAI SSE stream as Anthropic Messages stream events.
-
-    Anthropic's event sequence is:
-        message_start -> content_block_start -> content_block_delta*
-        -> content_block_stop -> message_delta -> message_stop
-
-    Text and tool-call deltas map onto separate content blocks; the block index
-    advances when the stream switches between them.
-    """
-    yield _sse(
-        "message_start",
-        {
-            "type": "message_start",
-            "message": {
-                "id": message_id,
-                "type": "message",
-                "role": "assistant",
-                "model": model,
-                "content": [],
-                "stop_reason": None,
-                "stop_sequence": None,
-                "usage": {"input_tokens": 0, "output_tokens": 0},
-            },
-        },
-    )
-
-    block_index = -1
-    # Index of the block that is currently open (text or tool_use), or None.
-    # Anthropic clients finish a block only on its content_block_stop, so every
-    # block is closed before the next one opens. Leaving earlier tool blocks
-    # open made clients keep one of several parallel tool calls.
-    open_block: int | None = None
-    text_block_open = False
-    thinking_block_open = False
-    # Maps an OpenAI tool_call index to the Anthropic content-block index.
-    tool_blocks: dict[int, int] = {}
-    stop_reason = "end_turn"
-    usage: dict[str, Any] = {}
-
-    finish_map = {
-        "stop": "end_turn",
-        "length": "max_tokens",
-        "tool_calls": "tool_use",
-        "function_call": "tool_use",
-        "content_filter": "refusal",
-    }
-
-    try:
-        async for raw in openai_stream:
-            # The OpenAI adapter yields fully-formed SSE lines.
-            if raw and raw.startswith(_CONTENT_HASH_COMMENT):
-                yield raw  # job keys: the usage line's content hash, as an SSE comment
-                continue
-            if not raw or not raw.startswith("data: "):
-                continue
-            payload = raw[len("data: ") :].strip()
-            if not payload or payload == "[DONE]":
-                continue
-            try:
-                chunk = json.loads(payload)
-            except json.JSONDecodeError:
-                continue
-
-            # A provider failure travels through the inner stream as an error chunk
-            # (see stream_normalizer.create_error_sse_chunk). Before this check it
-            # fell into the no-choices `continue` below and the stream ended with a
-            # clean zero-usage message_stop — a fabricated success (issue #2236).
-            # Surface it as Anthropic's own SSE error event and stop.
-            if chunk.get("error"):
-                err = chunk["error"] if isinstance(chunk["error"], dict) else {}
-                if err.get("type") in _NON_FATAL_STREAM_ERROR_TYPES:
-                    continue
-                yield _sse(
-                    "error",
-                    {
-                        "type": "error",
-                        "error": {
-                            "type": _STREAM_ERROR_TYPE_MAP.get(err.get("type"), "api_error"),
-                            # Never fall back to repr-ing the raw error object —
-                            # it may carry internal fields (provider, request_id).
-                            "message": _safe_error_message(err.get("message")),
-                        },
-                    },
-                )
-                await _aclose_stream(openai_stream)
-                return
-
-            if chunk.get("usage"):
-                usage = chunk["usage"]
-
-            choices = chunk.get("choices") or []
-            if not choices:
-                continue
-            choice = choices[0]
-            delta = choice.get("delta") or {}
-
-            if choice.get("finish_reason"):
-                stop_reason = finish_map.get(choice["finish_reason"], "end_turn")
-
-            # Reasoning from reasoning models (Kimi, DeepSeek-R1, ...) becomes a
-            # thinking block ahead of the answer. It used to be dropped, though
-            # it is billed as output.
-            reasoning = delta.get("reasoning_content")
-            if reasoning and not text_block_open and not tool_blocks:
-                if not thinking_block_open:
-                    if open_block is not None:
-                        yield _sse(
-                            "content_block_stop",
-                            {"type": "content_block_stop", "index": open_block},
-                        )
-                    block_index += 1
-                    open_block = block_index
-                    thinking_block_open = True
-                    yield _sse(
-                        "content_block_start",
-                        {
-                            "type": "content_block_start",
-                            "index": block_index,
-                            "content_block": {"type": "thinking", "thinking": ""},
-                        },
-                    )
-                yield _sse(
-                    "content_block_delta",
-                    {
-                        "type": "content_block_delta",
-                        "index": block_index,
-                        "delta": {"type": "thinking_delta", "thinking": reasoning},
-                    },
-                )
-
-            content = delta.get("content")
-            if content:
-                if not text_block_open:
-                    if open_block is not None:
-                        yield _sse(
-                            "content_block_stop",
-                            {"type": "content_block_stop", "index": open_block},
-                        )
-                    block_index += 1
-                    open_block = block_index
-                    text_block_open = True
-                    thinking_block_open = False
-                    yield _sse(
-                        "content_block_start",
-                        {
-                            "type": "content_block_start",
-                            "index": block_index,
-                            "content_block": {"type": "text", "text": ""},
-                        },
-                    )
-                yield _sse(
-                    "content_block_delta",
-                    {
-                        "type": "content_block_delta",
-                        "index": block_index,
-                        "delta": {"type": "text_delta", "text": content},
-                    },
-                )
-
-            for tool_call in delta.get("tool_calls") or []:
-                tc_index = tool_call.get("index", 0)
-                fn = tool_call.get("function") or {}
-
-                if tc_index not in tool_blocks:
-                    # A tool call starting means the open block is finished,
-                    # whether that is text or an earlier tool call.
-                    if open_block is not None:
-                        yield _sse(
-                            "content_block_stop",
-                            {"type": "content_block_stop", "index": open_block},
-                        )
-                    text_block_open = False
-                    thinking_block_open = False
-                    block_index += 1
-                    open_block = block_index
-                    tool_blocks[tc_index] = block_index
-                    yield _sse(
-                        "content_block_start",
-                        {
-                            "type": "content_block_start",
-                            "index": block_index,
-                            "content_block": {
-                                "type": "tool_use",
-                                "id": tool_call.get("id") or f"toolu_{uuid.uuid4().hex[:24]}",
-                                "name": fn.get("name", ""),
-                                "input": {},
-                            },
-                        },
-                    )
-
-                arguments = fn.get("arguments")
-                if arguments:
-                    yield _sse(
-                        "content_block_delta",
-                        {
-                            "type": "content_block_delta",
-                            "index": tool_blocks[tc_index],
-                            "delta": {"type": "input_json_delta", "partial_json": arguments},
-                        },
-                    )
-    except Exception:
-        # An upstream failure reaches us either as an error-shaped chunk
-        # (handled above) or as a raised exception on the inner iterator —
-        # a reset provider connection, a read timeout, a transport error.
-        # StreamingResponse has already flushed 200 and possibly content, so
-        # an escaping exception cannot become an HTTP error: the client just
-        # sees the stream stop, which is indistinguishable from a short
-        # successful answer. Same fabricated success as #2236, other door.
-        # CancelledError/GeneratorExit are BaseException and deliberately
-        # excluded — those mean the CLIENT went away, not the provider.
-        logger.exception("Upstream stream raised mid-flight for model %s", model)
-        yield _sse(
-            "error",
-            {
-                "type": "error",
-                # Never surface the exception text — it can carry DSNs,
-                # provider hostnames and request ids.
-                "error": {
-                    "type": "api_error",
-                    "message": "The upstream provider connection failed mid-stream. The response is incomplete.",
-                },
-            },
-        )
-        await _aclose_stream(openai_stream)
-        return
-
-    # Close whichever block is still open.
-    if open_block is not None:
-        yield _sse("content_block_stop", {"type": "content_block_stop", "index": open_block})
-    if tool_blocks:
-        # A turn that made tool calls ends with tool_use, whatever finish_reason
-        # the provider reported.
-        stop_reason = "tool_use"
-
-    anthropic_usage = {
-        "input_tokens": anthropic_input_tokens(usage),
-        "output_tokens": usage.get("completion_tokens", 0),
-    }
-    if usage.get("cache_read_input_tokens"):
-        anthropic_usage["cache_read_input_tokens"] = usage["cache_read_input_tokens"]
-    if usage.get("cache_creation_input_tokens"):
-        anthropic_usage["cache_creation_input_tokens"] = usage["cache_creation_input_tokens"]
-
-    yield _sse(
-        "message_delta",
-        {
-            "type": "message_delta",
-            "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-            "usage": anthropic_usage,
-        },
-    )
-    yield _sse("message_stop", {"type": "message_stop"})
-
-
-def _relay_event(name: str | None, data: str, model: str) -> tuple[str, str | None]:
-    """One raw Anthropic event as an SSE frame, and its type.
-
-    Sent on as received. The one edit: ``message_start`` reports the model id
-    the caller asked for rather than the provider's own id for it.
-    """
-    event_type = name
-    if name in (None, "message_start"):
-        try:
-            parsed = json.loads(data)
-        except ValueError:
-            parsed = None
-        if isinstance(parsed, dict):
-            event_type = name or parsed.get("type")
-            message = parsed.get("message")
-            if parsed.get("type") == "message_start" and isinstance(message, dict):
-                message["model"] = model
-                data = json.dumps(parsed)
-    if event_type:
-        return f"event: {event_type}\ndata: {data}\n\n", event_type
-    return f"data: {data}\n\n", None
-
-
-def _inner_error(raw: str) -> dict[str, Any] | None:
-    """The fatal error carried by a pipeline SSE line, if it carries one."""
-    if not raw or not raw.startswith("data: "):
-        return None
-    payload = raw[len("data: ") :].strip()
-    if not payload or payload == "[DONE]":
-        return None
-    try:
-        chunk = json.loads(payload)
-    except json.JSONDecodeError:
-        return None
-    err = chunk.get("error") if isinstance(chunk, dict) else None
-    if not err:
-        return None
-    err = err if isinstance(err, dict) else {}
-    if err.get("type") in _NON_FATAL_STREAM_ERROR_TYPES:
-        return None
-    return err
-
-
-async def _stream_with_passthrough(
-    openai_stream,
-    model: str,
-    message_id: str,
-    passthrough: anthropic_passthrough.Passthrough,
-):
-    """Stream a /v1/messages response for a request that may be passed through.
-
-    The pipeline's stream is always consumed to the end: that is what runs its
-    usage recording and billing. What the caller receives depends on whether
-    the native Anthropic client served the request:
-
-    - it did (``passthrough.used``): Anthropic's own events, as received;
-    - it did not (another provider, or a failover): the pipeline's OpenAI
-      chunks translated to Anthropic events, exactly as without pass-through.
-    """
-    queue = passthrough.queue
-    done = anthropic_passthrough.STREAM_DONE
-
-    async def pump():
-        try:
-            async for raw in openai_stream:
-                queue.put_nowait(("inner", raw))
-        except Exception:
-            logger.exception("Pipeline stream raised mid-flight for model %s", model)
-            queue.put_nowait(("inner_failed",))
-        finally:
-            queue.put_nowait((done,))
-
-    pump_task = asyncio.create_task(pump())
-
-    def error_event(message: str, error_type: str = "api_error") -> str:
-        return _sse("error", {"type": "error", "error": {"type": error_type, "message": message}})
-
-    try:
-        # Decide the mode from the first item that settles it. Pipeline lines
-        # seen before that are kept, in case they have to be translated.
-        held: list[tuple] = []
-        relay = False
-        while True:
-            item = await queue.get()
-            if item[0] == "event" or (item[0] == "inner" and passthrough.used):
-                relay = True
-                held.append(item)
-                break
-            held.append(item)
-            if item[0] is done or item[0] == "inner_failed":
-                break
-            if item[0] == "inner" and item[1] and item[1].startswith("data: "):
-                break
-
-        if not relay:
-
-            async def replay():
-                for early in held:
-                    if early[0] is done:
-                        return
-                    if early[0] == "inner_failed":
-                        raise RuntimeError("pipeline stream failed")
-                    if early[0] == "inner":
-                        yield early[1]
-                while True:
-                    later = await queue.get()
-                    if later[0] is done:
-                        return
-                    if later[0] == "inner_failed":
-                        raise RuntimeError("pipeline stream failed")
-                    if later[0] == "inner":
-                        yield later[1]
-
-            async for event in _stream_anthropic_events_impl(replay(), model, message_id):
-                yield event
-            return
-
-        finished = False  # a message_stop or error event has gone out
-        pending = held
-        while True:
-            for item in pending:
-                kind = item[0]
-                if kind is done:
-                    if not finished:
-                        yield error_event(
-                            "The upstream provider connection ended before the response was "
-                            "complete."
-                        )
-                    return
-                if kind == "event":
-                    frame, event_type = _relay_event(item[1], item[2], model)
-                    yield frame
-                    if event_type in ("message_stop", "error"):
-                        finished = True
-                elif kind == "inner":
-                    raw = item[1]
-                    if raw and raw.startswith(_CONTENT_HASH_COMMENT):
-                        yield raw
-                    elif not finished:
-                        err = _inner_error(raw)
-                        if err is not None:
-                            yield error_event(
-                                _safe_error_message(err.get("message")),
-                                _STREAM_ERROR_TYPE_MAP.get(err.get("type"), "api_error"),
-                            )
-                            finished = True
-                elif kind == "inner_failed" and not finished:
-                    yield error_event(
-                        "The upstream provider connection failed mid-stream. The response is "
-                        "incomplete."
-                    )
-                    finished = True
-            pending = [await queue.get()]
-    finally:
-        # Stop the pump first: cancelling it unwinds the pipeline's generator,
-        # which is what bills a response the client walked away from.
-        pump_task.cancel()
-        with contextlib.suppress(BaseException):
-            await pump_task
-        with contextlib.suppress(BaseException):
-            await _aclose_stream(openai_stream)
-
-
 def _unwrap_chat_result(result):
     """Normalize chat_completions' return value to the response dict.
 
@@ -757,12 +151,12 @@ def _unwrap_chat_result(result):
         try:
             decoded = json.loads(body.decode())
         except (ValueError, UnicodeDecodeError):
-            raise _anthropic_error(500, "api_error", "unexpected upstream response shape")
+            raise anthropic_error(500, "api_error", "unexpected upstream response shape")
         if isinstance(decoded, dict):
             return decoded
     elif isinstance(body, dict):
         return body
-    raise _anthropic_error(500, "api_error", "unexpected upstream response shape")
+    raise anthropic_error(500, "api_error", "unexpected upstream response shape")
 
 
 def _resolve_checked_api_key(request: Request, api_key: str | None) -> str | None:
@@ -784,18 +178,47 @@ def _resolve_checked_api_key(request: Request, api_key: str | None) -> str | Non
                 lease_sink=lease_sink,
             )
         except ApiKeyLookupUnavailable as e:
-            raise _anthropic_error(
+            raise anthropic_error(
                 503, "api_error", "Authentication temporarily unavailable"
             ) from e
         except ValueError as e:
             if JOB_BUSY in str(e):
-                raise _anthropic_error(429, "rate_limit_error", str(e)) from e
-            raise _anthropic_error(401, "authentication_error", str(e)) from e
+                raise anthropic_error(429, "rate_limit_error", str(e)) from e
+            raise anthropic_error(401, "authentication_error", str(e)) from e
         finally:
             # Released by JobLeaseMiddleware when the response finishes.
             if lease_sink:
                 request.state.job_lease = lease_sink[0]
     return resolved_key
+
+
+def _start_passthrough(
+    req: AnthropicMessagesRequest, request: Request | None
+) -> anthropic_passthrough.Passthrough | None:
+    """Set up pass-through for a Claude request, or return None.
+
+    The caller's original body goes to the native Anthropic client instead of
+    the one rebuilt from the OpenAI shape; the pipeline still runs on the
+    translated request (credit check, limits, billing).
+    """
+    opt_in = request.headers.get(anthropic_passthrough.OPT_IN_HEADER) if request else None
+    if not (
+        anthropic_passthrough.is_claude_model(req.model)
+        and anthropic_passthrough.passthrough_enabled(opt_in)
+    ):
+        return None
+    original = req.model_dump(exclude_unset=True)
+    passthrough = anthropic_passthrough.Passthrough(
+        body=original,
+        requested_model=req.model,
+        beta=request.headers.get("anthropic-beta") if request else None,
+        version=request.headers.get("anthropic-version") if request else None,
+        loop=asyncio.get_running_loop(),
+        queue=asyncio.Queue() if req.stream else None,
+        dropped_tools=anthropic_passthrough.strip_billed_server_tools(original),
+    )
+    passthrough.binding = anthropic_passthrough.bind(passthrough)
+    return passthrough
 
 
 @router.post("/messages", tags=["messages"])
@@ -816,7 +239,7 @@ async def create_message(
     req.model = strip_claude_code_prefix(req.model)
 
     if not req.messages:
-        raise _anthropic_error(400, "invalid_request_error", "messages must not be empty")
+        raise anthropic_error(400, "invalid_request_error", "messages must not be empty")
 
     # Anthropic -> OpenAI (internal shape). cache_control markers are preserved
     # by the transformer.
@@ -851,29 +274,8 @@ async def create_message(
             req.messages, req.tools, req.system
         )
 
-    # Claude models: hand the caller's original body to the native Anthropic
-    # client instead of the one rebuilt from the OpenAI shape below. The
-    # pipeline still runs on the translated request (credit check, limits,
-    # billing); see anthropic_passthrough.
-    passthrough: anthropic_passthrough.Passthrough | None = None
-    passthrough_token = None
-    opt_in = request.headers.get(anthropic_passthrough.OPT_IN_HEADER) if request else None
-    if anthropic_passthrough.is_claude_model(
-        req.model
-    ) and anthropic_passthrough.passthrough_enabled(opt_in):
-        original = req.model_dump(exclude_unset=True)
-        dropped_tools = anthropic_passthrough.strip_billed_server_tools(original)
-        passthrough = anthropic_passthrough.Passthrough(
-            body=original,
-            requested_model=req.model,
-            beta=request.headers.get("anthropic-beta") if request else None,
-            version=request.headers.get("anthropic-version") if request else None,
-            loop=asyncio.get_running_loop(),
-            queue=asyncio.Queue() if req.stream else None,
-            dropped_tools=dropped_tools,
-        )
-        passthrough_token = anthropic_passthrough.bind(passthrough)
-    elif SAFEGUARDS_FIELD in (req.model_extra or {}):
+    passthrough = _start_passthrough(req, request)
+    if passthrough is None and SAFEGUARDS_FIELD in (req.model_extra or {}):
         # Refused before the pipeline runs, so nothing is billed for it.
         raise _safeguards_unsupported()
     extra_headers = (
@@ -919,34 +321,22 @@ async def create_message(
             identity=identity,
         )
     except HTTPException as exc:
-        # Re-wrap gateway errors in Anthropic's envelope so Anthropic SDKs
-        # surface a useful message instead of "unknown error shape".
-        message = _detail_message(exc)
-        if _is_plan_period_limit(exc.status_code, message):
-            # 402 like the other "pay or wait" conditions: not retried by SDKs.
-            raise _anthropic_error(
-                402, "invalid_request_error", _plan_limit_message(message)
-            ) from exc
-        raise _anthropic_error(
-            exc.status_code,
-            _anthropic_error_type(exc.status_code, _detail_code(exc)),
-            _safe_error_message(message),
-        ) from exc
+        raise to_anthropic_error(exc) from exc
     finally:
         # A streaming response may reach the provider only once its body is
         # iterated, so the binding stays for the life of this request's context.
-        if passthrough_token is not None and not req.stream:
-            anthropic_passthrough.unbind(passthrough_token)
+        if passthrough is not None and not req.stream:
+            anthropic_passthrough.unbind(passthrough.binding)
 
     if req.stream:
         if not isinstance(result, StreamingResponse):
-            raise _anthropic_error(
+            raise anthropic_error(
                 500, "api_error", "upstream did not return a stream for a streaming request"
             )
         events = (
-            _stream_with_passthrough(result.body_iterator, req.model, message_id, passthrough)
+            relay_passthrough_stream(result.body_iterator, req.model, message_id, passthrough)
             if passthrough is not None
-            else _stream_anthropic_events(result.body_iterator, req.model, message_id)
+            else translate_stream(result.body_iterator, req.model, message_id)
         )
         return StreamingResponse(
             events,
@@ -983,59 +373,6 @@ async def create_message(
     return anthropic_response
 
 
-class AnthropicCountTokensRequest(BaseModel):
-    """Body of ``POST /v1/messages/count_tokens``. Same shape as a message request,
-    without ``max_tokens``."""
-
-    model: str = Field(..., description="Model identifier")
-    messages: list[dict[str, Any]] = Field(..., description="Conversation turns")
-    system: str | list[dict[str, Any]] | None = None
-    tools: list[dict[str, Any]] | None = None
-
-    class Config:
-        extra = "allow"
-
-
-def _count_block_tokens(value: Any) -> int:
-    """Tokens in one piece of Anthropic content: text, or any JSON-shaped block."""
-    from src.utils.token_estimator import count_tokens_text
-
-    if value is None:
-        return 0
-    if isinstance(value, str):
-        return count_tokens_text(value)
-    if isinstance(value, list):
-        return sum(_count_block_tokens(item) for item in value)
-    if isinstance(value, dict):
-        block_type = value.get("type")
-        if block_type == "text":
-            return count_tokens_text(value.get("text", ""))
-        if block_type in ("image", "document"):
-            # Binary payloads are not text. A flat allowance keeps a base64 blob
-            # from being counted as hundreds of thousands of tokens.
-            return 1500
-        if block_type == "tool_result":
-            return 4 + _count_block_tokens(value.get("content"))
-        if block_type in ("thinking", "redacted_thinking"):
-            return count_tokens_text(value.get("thinking", ""))
-        return count_tokens_text(json.dumps(value, separators=(",", ":")))
-    return count_tokens_text(str(value))
-
-
-def estimate_input_tokens(body: AnthropicCountTokensRequest) -> int:
-    """Estimated input tokens for a message request.
-
-    An estimate from the gateway's tokenizer, not the provider's count: close
-    enough for a client's context meter, and it costs no upstream call.
-    """
-    total = _count_block_tokens(body.system)
-    for message in body.messages:
-        total += 4 + _count_block_tokens(message.get("content"))
-    for tool in body.tools or []:
-        total += _count_block_tokens(tool)
-    return max(total, 1)
-
-
 @router.post("/messages/count_tokens", tags=["messages"])
 async def count_message_tokens(
     body: AnthropicCountTokensRequest,
@@ -1049,7 +386,7 @@ async def count_message_tokens(
     """
     resolved_key = _resolve_checked_api_key(request, api_key)
     if not resolved_key:
-        raise _anthropic_error(401, "authentication_error", "An API key is required")
+        raise anthropic_error(401, "authentication_error", "An API key is required")
     return {"input_tokens": estimate_input_tokens(body)}
 
 
@@ -1063,3 +400,4 @@ async def messages_health():
         "supports": ["streaming", "tools", "prompt_caching", "vision"],
         "timestamp": int(time.time()),
     }
+

@@ -120,6 +120,8 @@ class Passthrough:
     # Non-streaming: Anthropic's response body, as received.
     response_json: dict[str, Any] | None = None
     dropped_tools: list[str] = field(default_factory=list)
+    # Context-variable token from bind(); the route passes it to unbind().
+    binding: Any = None
 
     def upstream_body(self, model: str, *, stream: bool, max_tokens: int | None) -> dict[str, Any]:
         """The body to send to Anthropic: the caller's, with the provider's model id.

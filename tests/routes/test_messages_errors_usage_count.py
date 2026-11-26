@@ -8,10 +8,10 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.main import app
-from src.routes.messages import (
+from src.services.anthropic_messages.errors import safe_error_message
+from src.services.anthropic_messages.stream import translate_stream
+from src.services.anthropic_messages.tokens import (
     AnthropicCountTokensRequest,
-    _safe_error_message,
-    _stream_anthropic_events,
     estimate_input_tokens,
 )
 from src.security.identity import RequestIdentity
@@ -90,7 +90,7 @@ def test_upstream_url_is_removed_from_error_text():
         "Client error '400 Bad Request' for url 'https://api.anthropic.com/v1/messages'\n"
         "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400"
     )
-    cleaned = _safe_error_message(raw)
+    cleaned = safe_error_message(raw)
     assert "http" not in cleaned
     assert "anthropic.com" not in cleaned
     assert "400 Bad Request" in cleaned
@@ -101,17 +101,17 @@ def test_internal_validation_dump_is_replaced():
         "1 validation error for InternalStreamChunk\ntool_calls.0\n"
         "  Input should be a valid dictionary [type=dict_type, input_value=ChoiceDeltaToolCall]"
     )
-    cleaned = _safe_error_message(raw)
+    cleaned = safe_error_message(raw)
     assert "Internal" not in cleaned
     assert "pydantic" not in cleaned
     assert cleaned == "The gateway could not process the provider's response."
 
 
 def test_our_own_links_and_plain_messages_are_kept():
-    assert _safe_error_message("Model 'x/y' not found") == "Model 'x/y' not found"
-    kept = _safe_error_message("Out of credits. Top up at https://gatewayz.ai/settings/credits")
+    assert safe_error_message("Model 'x/y' not found") == "Model 'x/y' not found"
+    kept = safe_error_message("Out of credits. Top up at https://gatewayz.ai/settings/credits")
     assert "https://gatewayz.ai/settings/credits" in kept
-    assert _safe_error_message(None) == "The model provider returned an error."
+    assert safe_error_message(None) == "The model provider returned an error."
 
 
 # --- stream ------------------------------------------------------------------
@@ -123,14 +123,14 @@ async def _collect(chunks):
             yield chunk
 
     events = []
-    async for raw in _stream_anthropic_events(source(), "m", "msg_1"):
+    async for raw in translate_stream(source(), "m", "msg_1"):
         for line in raw.splitlines():
             if line.startswith("data: "):
                 events.append(json.loads(line[len("data: ") :]))
     return events
 
 
-def _sse(body):
+def sse(body):
     return f"data: {json.dumps(body)}\n\n"
 
 
@@ -138,9 +138,9 @@ def test_plan_limit_after_a_delivered_answer_does_not_fail_the_stream():
     events = asyncio.run(
         _collect(
             [
-                _sse({"choices": [{"index": 0, "delta": {"content": "done"}}]}),
-                _sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
-                _sse({"error": {"type": "plan_limit_exceeded", "message": "Plan limit exceeded"}}),
+                sse({"choices": [{"index": 0, "delta": {"content": "done"}}]}),
+                sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
+                sse({"error": {"type": "plan_limit_exceeded", "message": "Plan limit exceeded"}}),
                 "data: [DONE]\n\n",
             ]
         )
@@ -154,7 +154,7 @@ def test_stream_error_text_is_cleaned():
     events = asyncio.run(
         _collect(
             [
-                _sse(
+                sse(
                     {
                         "error": {
                             "type": "internal_error",
@@ -173,9 +173,9 @@ def test_usage_only_chunk_reaches_the_final_event():
     events = asyncio.run(
         _collect(
             [
-                _sse({"choices": [{"index": 0, "delta": {"content": "hi"}}]}),
-                _sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
-                _sse({"choices": [], "usage": {"prompt_tokens": 10473, "completion_tokens": 150}}),
+                sse({"choices": [{"index": 0, "delta": {"content": "hi"}}]}),
+                sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
+                sse({"choices": [], "usage": {"prompt_tokens": 10473, "completion_tokens": 150}}),
                 "data: [DONE]\n\n",
             ]
         )

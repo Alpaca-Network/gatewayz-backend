@@ -15,7 +15,7 @@ import pytest
 from src.adapters.chat.openai import OpenAIChatAdapter
 from src.handlers import chat_handler
 from src.handlers.chat_handler import ChatInferenceHandler
-from src.routes import messages as messages_route
+from src.services.anthropic_messages import stream as anthropic_stream
 from src.routes.chat_dispatch import _aclose_quiet
 from src.schemas.internal.chat import InternalChatRequest, InternalMessage
 from src.utils.token_estimator import count_tokens_text
@@ -96,7 +96,7 @@ async def test_messages_stream_disconnect_bills_exactly_once():
         patch("src.handlers.chat_handler.record_usage"),
         patch("src.handlers.chat_handler.save_chat_completion_request_with_cost"),
     ):
-        events = messages_route._stream_anthropic_events(_build_chain(h), "openai/gpt-4o", "msg_1")
+        events = anthropic_stream.translate_stream(_build_chain(h), "openai/gpt-4o", "msg_1")
         seen = []
         async for ev in events:
             seen.append(ev)
