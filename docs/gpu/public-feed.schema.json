@@ -109,7 +109,7 @@
           "type": "object"
         },
         "GpuPublicEmission": {
-          "description": "Aggregate-only WAYZ emission info (Chutes-style WAYZ emission\nrewards, gatewayz-backend tokenomics) -- config + the most recent\nepoch_date, nothing per-provider or per-user. See\ndocs/tokenomics/EMISSION.md.",
+          "description": "Aggregate-only WAYZ emission info -- config + the most recent\nepoch_date, nothing per-provider or per-user. The emission is split\nbetween GPU providers and the treasury. See\ndocs/tokenomics/EMISSION.md.",
           "properties": {
             "daily_emission_wayz": {
               "title": "Daily Emission Wayz",
@@ -148,10 +148,6 @@
               "title": "Providers Bps",
               "type": "integer"
             },
-            "stakers_bps": {
-              "title": "Stakers Bps",
-              "type": "integer"
-            },
             "treasury_bps": {
               "title": "Treasury Bps",
               "type": "integer"
@@ -161,7 +157,6 @@
             "mode",
             "daily_emission_wayz",
             "providers_bps",
-            "stakers_bps",
             "treasury_bps",
             "last_epoch"
           ],

@@ -57,7 +57,6 @@ src/db/roles.py
 src/db/routing_policies.py
 src/db/shared_chats.py
 src/db/staff.py
-src/db/staking_rewards.py
 src/db/subscription_products.py
 src/db/system_config.py
 src/db/user_provider_keys.py
@@ -280,7 +279,6 @@ src/services/secrets_registry.py
 src/services/simple_health_cache.py
 src/services/smart_router.py
 src/services/smart_router_bridge.py
-src/services/staking_rewards.py
 src/services/startup.py
 src/services/stream_normalizer.py
 src/services/tag_budget.py

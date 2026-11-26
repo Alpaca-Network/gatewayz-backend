@@ -1,50 +1,43 @@
-"""Daily emission_epoch job -- Chutes-style WAYZ emission rewards
-(gatewayz-backend tokenomics -- boss asks: split WAYZ rewards between
-stakers and GPU providers the way Chutes/Bittensor does). See
-docs/tokenomics/EMISSION.md for the full design and worked example.
+"""Daily emission_epoch job -- score-based GPU provider emission rewards.
+See docs/tokenomics/EMISSION.md for the full design and worked example.
+
+The emission is split between GPU providers and the treasury. A staker
+share existed in an earlier design and was removed on 2026-11-25.
 
 Only takes effect once Config.REWARDS_MODE == 'emission' (default
 'per_unit' -- ships dark). While in emission mode, provider payouts move
 from src/services/gpu/earnings.py's per-verified-work accrual to this
-job's daily per-provider share, and stakers are paid this job's daily
-pro-rata share (the per_unit rate-table staking rewards job is retired, so
-stakers earn nothing outside emission mode). The provider switch is
-enforced by a REWARDS_MODE check at the top of that other path, not here,
-so the two provider payout modes can never both be live for the same day.
+job's daily per-provider share. The provider switch is enforced by a
+REWARDS_MODE check at the top of that other path, not here, so the two
+provider payout modes can never both be live for the same day.
 
 Idempotent: emission_epochs.epoch_date (PRIMARY KEY) plus
 provider_earnings' idx_provider_earnings_emission (UNIQUE(provider_id,
-epoch_date) WHERE source='emission') and staking_reward_accruals' existing
-UNIQUE(wallet_address, reward_date) together make a re-run of the same
+epoch_date) WHERE source='emission') together make a re-run of the same
 epoch_date safe: get_epoch() is checked first (the primary,
-application-level guard, same convention as the get_accrual() check in
-the staker path below), and the two
-per-row unique indexes are the DB-level backstop -- letting a crash
-mid-run recover cleanly on retry (whatever was already written is a
-no-op 'duplicate'/'skipped' outcome, and whatever wasn't gets created).
+application-level guard), and the per-row unique index is the DB-level
+backstop -- letting a crash mid-run recover cleanly on retry (whatever
+was already written is a no-op 'duplicate' outcome, and whatever wasn't
+gets created).
 
 **Provider payouts are USD, paid in ETH (2026-09-22):** WAYZ is not
-going public for now, so providers no longer receive the 41% WAYZ
-providers leg. Instead Config.PROVIDER_EMISSION_USD_PER_DAY (integer USD
-micro-dollars internally) is allocated by the SAME 7-day score, written
-as provider_earnings.amount_usd_micros, and paid in native ETH on Base by
-src/services/gpu/settlement.py. The WAYZ 41/41/18 split itself is
-unchanged (stakers still receive their 41% as inference credits); the
-unpaid WAYZ providers leg is recorded as providers_wei=0 and folded into
-treasury_wei, so providers + stakers + treasury == emission_wei still
-holds exactly.
+going public for now, so providers do not receive the WAYZ providers
+leg. Instead Config.PROVIDER_EMISSION_USD_PER_DAY (integer USD
+micro-dollars internally) is allocated by the 7-day score, written as
+provider_earnings.amount_usd_micros, and paid in native ETH on Base by
+src/services/gpu/settlement.py. The unpaid WAYZ providers leg is
+recorded as providers_wei=0 and folded into treasury_wei, so
+providers + treasury == emission_wei holds exactly.
 
 Amounts are Decimal end-to-end via src.services.emission.scoring's pure
-functions; float only appears at the add_credits_to_user() call boundary
-for the staker credits path (same boundary staking_rewards.py already
-crosses).
+functions.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import UTC, date, datetime, timedelta
-from decimal import ROUND_DOWN, Decimal
+from decimal import Decimal
 from typing import Any
 
 from src.config.config import Config
@@ -59,9 +52,6 @@ from src.db.emission import (
 )
 from src.db.gpu import list_active_nodes
 from src.db.gpu_payouts import create_emission_earning, get_payout_tiers, list_approved_providers
-from src.db.staking_rewards import create_accrual, get_accrual
-from src.db.user_wallets import get_wallet
-from src.db.wallet_stakes import list_wallets_with_stake
 from src.services.emission.scoring import (
     ProviderMetricsInput,
     median,
@@ -69,17 +59,11 @@ from src.services.emission.scoring import (
     split_emission,
 )
 from src.services.gpu.earnings import effective_model_class, tier_multiplier_bps
-from src.services.staking_rewards import (
-    StakingRewardsStaleError,
-    is_stake_sync_stale,
-    pay_pending_accrual,
-)
 
 logger = logging.getLogger(__name__)
 
 _WEI_PER_WAYZ = Decimal(10) ** 18
 _USD_MICROS = Decimal(1_000_000)
-_CREDITS_DP = Decimal("0.000001")  # 6 dp, matches staking_reward_accruals.credits numeric(18,6)
 _WINDOW_DAYS = 7
 _WINDOW_HOURS = _WINDOW_DAYS * 24
 
@@ -104,18 +88,14 @@ def check_emission_config() -> None:
     src/db/gpu_payouts.py::check_payout_tiers_seeded's "loud warning, not
     a crash" convention for a startup-time config sanity check."""
     global _config_disabled_reason
-    reward_sum = (
-        Config.EMISSION_SPLIT_PROVIDERS_BPS
-        + Config.EMISSION_SPLIT_STAKERS_BPS
-        + Config.EMISSION_SPLIT_TREASURY_BPS
-    )
+    reward_sum = Config.EMISSION_SPLIT_PROVIDERS_BPS + Config.EMISSION_SPLIT_TREASURY_BPS
     weight_sum = sum(Config.emission_score_weights_bps().values())
 
     problems = []
     if reward_sum != 10000:
         problems.append(
-            f"EMISSION_SPLIT_PROVIDERS_BPS + EMISSION_SPLIT_STAKERS_BPS + "
-            f"EMISSION_SPLIT_TREASURY_BPS = {reward_sum}, not 10000"
+            f"EMISSION_SPLIT_PROVIDERS_BPS + EMISSION_SPLIT_TREASURY_BPS = "
+            f"{reward_sum}, not 10000"
         )
     if weight_sum != 10000:
         problems.append(
@@ -308,185 +288,13 @@ def _score_and_persist_providers(
 
 
 # ---------------------------------------------------------------------------
-# Staker payout (pro-rata to stake, out of the day's stakers_wei)
-# ---------------------------------------------------------------------------
-
-
-def _process_emission_wallet(
-    wallet_address: str,
-    epoch_date_str: str,
-    staked_amount_wei: int,
-    wayz_amount_wei: int,
-    credit_rate: Decimal,
-) -> tuple[str, bool, Decimal]:
-    """One wallet's emission-mode payout for one epoch. Insert-before-pay
-    idempotency: a 'pending' accrual row is written FIRST, then paid via
-    src/services/staking_rewards.py::pay_pending_accrual(). Returns
-    (outcome, was_capped, credits_paid)."""
-    existing = get_accrual(wallet_address, epoch_date_str)
-    if existing is not None and existing["status"] != "pending":
-        return existing["status"], False, Decimal(0)
-
-    was_capped = False
-
-    if existing is None:
-        if Config.STAKER_REWARD_ASSET == "wayz":
-            # No payout rail for raw WAYZ yet -- record the accrual as a
-            # documented, visible limitation rather than silently dropping
-            # it or crediting the wrong asset. See docs/tokenomics/EMISSION.md.
-            create_accrual(
-                wallet_address,
-                epoch_date_str,
-                str(staked_amount_wei),
-                rate_id=None,
-                credits="0",
-                status="pending",
-                source="emission",
-                wayz_amount_wei=str(wayz_amount_wei),
-                skip_reason="wayz_payout_not_implemented",
-            )
-            return "pending", False, Decimal(0)
-
-        credits = (Decimal(wayz_amount_wei) / _WEI_PER_WAYZ * credit_rate).quantize(
-            _CREDITS_DP, rounding=ROUND_DOWN
-        )
-
-        cap = Decimal(str(Config.STAKING_REWARDS_DAILY_CAP_CREDITS))
-        if credits > cap:
-            credits = cap.quantize(_CREDITS_DP, rounding=ROUND_DOWN)
-            was_capped = True
-
-        if credits < Decimal(str(Config.STAKING_REWARDS_MIN_CREDITS)):
-            create_accrual(
-                wallet_address,
-                epoch_date_str,
-                str(staked_amount_wei),
-                rate_id=None,
-                credits=str(credits),
-                status="skipped",
-                skip_reason="below_min",
-                source="emission",
-                wayz_amount_wei=str(wayz_amount_wei),
-            )
-            return "skipped", False, Decimal(0)
-
-        wallet_row = get_wallet(wallet_address)
-        user_id = None
-        if wallet_row is not None and wallet_row.get("is_active") is not False:
-            user_id = wallet_row["user_id"]
-
-        created = create_accrual(
-            wallet_address,
-            epoch_date_str,
-            str(staked_amount_wei),
-            rate_id=None,
-            credits=str(credits),
-            status="pending",
-            user_id=user_id,
-            source="emission",
-            wayz_amount_wei=str(wayz_amount_wei),
-        )
-        if created is None:
-            # Lost a race with a concurrent run -- re-read rather than
-            # assume anything about what the winner did.
-            existing = get_accrual(wallet_address, epoch_date_str)
-            if existing is None:
-                return "skipped", False, Decimal(0)
-            if existing["status"] != "pending":
-                return existing["status"], False, Decimal(0)
-        else:
-            existing = created
-
-    if existing.get("user_id") is None:
-        return "pending", was_capped, Decimal(0)
-
-    outcome, paid_credits = pay_pending_accrual(existing, capped=was_capped)
-    return outcome, was_capped, paid_credits
-
-
-def _pay_stakers(epoch_date_str: str, stakers_wei: int) -> dict[str, Any]:
-    """Pay stakers_wei out pro-rata to each wallet's share of total staked
-    WAYZ. Unlinked wallets fall to 'pending' (accrual row written with
-    user_id=NULL); a pending row is retried only when this job is re-run
-    for the same epoch_date.
-
-    Returns a `dust_wei` field alongside the usual counts: the wei left
-    over after every wallet's floor(stakers_wei * share) allocation --
-    same floor-division dust concept as `score_providers()`'s return value
-    -- so the caller can fold it into `treasury_wei` and keep the
-    (providers + stakers + treasury == emission_wei) invariant exact. When
-    there's no stake to pay against at all (no wallets, or stakers_wei
-    itself is 0), the ENTIRE stakers_wei is unallocated dust -- mirrors
-    `_score_and_persist_providers`' "no eligible providers -> the whole
-    pool is dust" handling."""
-    wallets = list_wallets_with_stake()
-    total_staked_wei = sum(int(w["staked_amount"]) for w in wallets)
-
-    counts = {"paid": 0, "pending": 0, "skipped": 0}
-    credits_paid = Decimal(0)
-    capped = 0
-
-    if total_staked_wei <= 0 or stakers_wei <= 0:
-        return {
-            "paid": 0,
-            "pending": 0,
-            "skipped": 0,
-            "credits_paid": "0",
-            "capped": 0,
-            "asset": Config.STAKER_REWARD_ASSET,
-            "dust_wei": stakers_wei,
-        }
-
-    credit_rate = Decimal(str(Config.WAYZ_CREDIT_RATE))
-    allocated_wei = 0
-
-    for wallet in wallets:
-        address = wallet["wallet_address"]
-        staked_wei = int(wallet["staked_amount"])
-        if staked_wei <= 0:
-            continue
-        share = Decimal(staked_wei) / Decimal(total_staked_wei)
-        wayz_amount_wei = int((Decimal(stakers_wei) * share).to_integral_value(rounding=ROUND_DOWN))
-        allocated_wei += wayz_amount_wei
-
-        try:
-            outcome, was_capped, paid_credits = _process_emission_wallet(
-                address, epoch_date_str, staked_wei, wayz_amount_wei, credit_rate
-            )
-        except Exception as e:
-            logger.warning("emission_epoch: staker wallet %s failed: %s", address, e)
-            outcome, was_capped, paid_credits = "pending", False, Decimal(0)
-
-        counts[outcome] = counts.get(outcome, 0) + 1
-        if was_capped:
-            capped += 1
-        if outcome == "paid":
-            credits_paid += paid_credits
-
-    return {
-        "paid": counts["paid"],
-        "pending": counts["pending"],
-        "skipped": counts["skipped"],
-        "credits_paid": str(credits_paid),
-        "capped": capped,
-        "asset": Config.STAKER_REWARD_ASSET,
-        "dust_wei": stakers_wei - allocated_wei,
-    }
-
-
-# ---------------------------------------------------------------------------
 # The job
 # ---------------------------------------------------------------------------
 
 
 def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
     """Run one pass of the daily emission_epoch job for `epoch_date`
-    (default: yesterday UTC). Idempotent -- see module docstring. Raises
-    StakingRewardsStaleError if the on-chain stake sync is too stale to
-    trust today's staker split (src/services/staking_rewards.py::
-    is_stake_sync_stale -- the staker path reads the wallet_stakes
-    table); callers turn that into a failed job run / a 409,
-    never a crash."""
+    (default: yesterday UTC). Idempotent -- see module docstring."""
     if Config.REWARDS_MODE != "emission":
         return {"skipped": "disabled"}
     if _config_disabled_reason is not None:
@@ -499,13 +307,9 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
     if existing is not None:
         return {"skipped": "already_run", "epoch_date": epoch_date_str, "epoch": existing}
 
-    if is_stake_sync_stale():
-        raise StakingRewardsStaleError("stake_sync_stale")
-
     split = split_emission(
         Config.WAYZ_DAILY_EMISSION,
         Config.EMISSION_SPLIT_PROVIDERS_BPS,
-        Config.EMISSION_SPLIT_STAKERS_BPS,
         Config.EMISSION_SPLIT_TREASURY_BPS,
     )
 
@@ -519,19 +323,14 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
         epoch_date_str, window_start.isoformat(), window_end.isoformat(), provider_pool_usd_micros
     )
     providers_usd_micros = provider_pool_usd_micros - provider_dust_usd_micros
-    staker_summary = _pay_stakers(epoch_date_str, split.stakers_wei)
-    staker_dust_wei = staker_summary["dust_wei"]
 
     # Persist the ACTUAL allocated WAYZ amounts. Providers are paid from the
     # USD pool above, so the WAYZ providers leg is not emitted to anyone:
-    # it's recorded as providers_wei=0 and lands in treasury, alongside the
-    # stakers' floor-division dust, so providers_wei + stakers_wei +
-    # treasury_wei always sums to exactly emission_wei.
+    # it's recorded as providers_wei=0 and lands in treasury, so
+    # providers_wei + treasury_wei always sums to exactly emission_wei.
     provider_dust_wei = split.providers_wei
     providers_wei = 0
-    stakers_wei = split.stakers_wei - staker_dust_wei
-    treasury_wei = split.treasury_wei + provider_dust_wei + staker_dust_wei
-    total_dust_wei = provider_dust_wei + staker_dust_wei
+    treasury_wei = split.treasury_wei + provider_dust_wei
     top_share = max((r.share for r in provider_results), default=Decimal(0))
 
     summary = {
@@ -540,19 +339,12 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
         "emission_wei": str(split.emission_wei),
         "split": {
             "providers_wei": str(providers_wei),
-            "stakers_wei": str(stakers_wei),
             "treasury_wei": str(treasury_wei),
         },
         "providers_scored": len(provider_results),
         "top_share": str(top_share),
-        "stakers_paid": staker_summary["paid"],
-        "stakers_pending": staker_summary["pending"],
-        "stakers_skipped": staker_summary["skipped"],
-        "credits_paid": staker_summary["credits_paid"],
-        "staker_asset": staker_summary["asset"],
-        "dust_wei": str(total_dust_wei),
+        "dust_wei": str(provider_dust_wei),
         "provider_dust_wei": str(provider_dust_wei),
-        "staker_dust_wei": str(staker_dust_wei),
         "provider_payout_asset": "ETH",
         "provider_pool_usd": str(Config.PROVIDER_EMISSION_USD_PER_DAY),
         "providers_usd_micros": providers_usd_micros,
@@ -563,10 +355,8 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
         epoch_date_str,
         split.emission_wei,
         providers_wei,
-        stakers_wei,
         treasury_wei,
         len(provider_results),
-        staker_summary["paid"],
         status="allocated",
         summary=summary,
         providers_usd_micros=providers_usd_micros,
@@ -574,7 +364,7 @@ def run_emission_epoch(epoch_date: date | None = None) -> dict[str, Any]:
     if epoch_row is None:
         logger.warning(
             "emission_epoch: failed to persist the emission_epochs summary row for %s -- "
-            "providers/stakers were still allocated (see this run's summary); a retry will "
+            "providers were still allocated (see this run's summary); a retry will "
             "attempt the write again since get_epoch() found nothing for this date",
             epoch_date_str,
         )
@@ -639,44 +429,6 @@ def get_provider_emission_view(provider_id: int) -> dict[str, Any] | None:
     }
 
 
-def get_staker_emission_view(total_staked_wei: int) -> dict[str, Any] | None:
-    """A staker's `emission` view block, or None if the feature is off
-    (mode != 'emission') or no epoch has run yet. No route serves it today:
-    its only caller, GET /staking/rewards, was removed with the retired
-    rate-table staking rewards program.
-    `total_staked_wei` is the caller's own linked-wallet total (0 if none)
-    -- this function has no user/wallet-link lookups of its own."""
-    if Config.REWARDS_MODE != "emission":
-        return None
-    latest = get_latest_epoch()
-    if latest is None:
-        return None
-
-    stakers_wei = int(latest["stakers_wei"])
-    wallets = list_wallets_with_stake()
-    network_staked_wei = sum(int(w["staked_amount"]) for w in wallets)
-
-    your_share = Decimal(0)
-    estimated_credits_per_day = Decimal(0)
-    if network_staked_wei > 0 and total_staked_wei > 0:
-        your_share = Decimal(total_staked_wei) / Decimal(network_staked_wei)
-        your_wayz_wei = int(
-            (Decimal(stakers_wei) * your_share).to_integral_value(rounding=ROUND_DOWN)
-        )
-        if Config.STAKER_REWARD_ASSET == "credits":
-            credit_rate = Decimal(str(Config.WAYZ_CREDIT_RATE))
-            estimated_credits_per_day = (
-                Decimal(your_wayz_wei) / _WEI_PER_WAYZ * credit_rate
-            ).quantize(_CREDITS_DP, rounding=ROUND_DOWN)
-
-    return {
-        "daily_emission_wayz": str(Config.WAYZ_DAILY_EMISSION),
-        "stakers_share_bps": Config.EMISSION_SPLIT_STAKERS_BPS,
-        "your_share": str(your_share),
-        "estimated_credits_per_day": str(estimated_credits_per_day),
-    }
-
-
 def get_public_emission_summary() -> dict[str, Any]:
     """The `emission` block for GET /gpu/public/summary -- aggregate-only,
     no per-provider or per-user data (mode/split config + the most recent
@@ -688,7 +440,6 @@ def get_public_emission_summary() -> dict[str, Any]:
         "provider_pool_usd_per_day": str(Config.PROVIDER_EMISSION_USD_PER_DAY),
         "provider_payout_asset": "ETH",
         "providers_bps": Config.EMISSION_SPLIT_PROVIDERS_BPS,
-        "stakers_bps": Config.EMISSION_SPLIT_STAKERS_BPS,
         "treasury_bps": Config.EMISSION_SPLIT_TREASURY_BPS,
         "last_epoch": latest["epoch_date"] if latest else None,
     }

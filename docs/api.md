@@ -1209,9 +1209,10 @@ GET /gpu/public/summary
   "emission": {
     "mode": "per_unit",
     "daily_emission_wayz": "100000",
+    "provider_pool_usd_per_day": "100",
+    "provider_payout_asset": "ETH",
     "providers_bps": 4100,
-    "stakers_bps": 4100,
-    "treasury_bps": 1800,
+    "treasury_bps": 5900,
     "last_epoch": null
   }
 }
@@ -1221,7 +1222,9 @@ GET /gpu/public/summary
 tokenomics — see `docs/tokenomics/EMISSION.md`) is aggregate config only —
 no per-provider or per-user data, keeping this endpoint's aggregate-only
 guarantee. `last_epoch` is the most recent `emission_epochs.epoch_date`,
-or `null` if the mode has never run.
+or `null` if the mode has never run. The emission is split between GPU
+providers and the treasury. A staker share existed in an earlier design
+and was removed on 2026-11-25 (the `stakers_bps` field went with it).
 
 ### Get Nodes
 
@@ -1371,8 +1374,9 @@ workstream) plus two dedicated docs. Starting points:
 ## Admin — Emission Rewards
 
 Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics) — the
-daily job that splits `WAYZ_DAILY_EMISSION` 41/41/18 between providers (by
-7-day rolling score), stakers (pro-rata to stake), and treasury. See
+daily job that splits `WAYZ_DAILY_EMISSION` between GPU providers (by
+7-day rolling score) and the treasury. A staker share existed in an
+earlier design and was removed on 2026-11-25. See
 `docs/tokenomics/EMISSION.md` for the full design and worked example.
 Envelope is `{success, data}`; error reasons are
 `error.context.parameter_value`.
@@ -1406,22 +1410,18 @@ Returns the run summary:
   "data": {
     "epoch_date": "2026-09-12",
     "emission_wei": "100000000000000000000000",
-    "split": { "providers_wei": "...", "stakers_wei": "...", "treasury_wei": "..." },
+    "emission_wayz": "100000",
+    "split": { "providers_wei": "0", "treasury_wei": "100000000000000000000000" },
     "providers_scored": 3,
     "top_share": "0.558",
-    "stakers_paid": 2,
-    "stakers_pending": 1,
-    "stakers_skipped": 0,
-    "credits_paid": "0.410000",
-    "staker_asset": "credits",
-    "dust_wei": "1000000000000000000"
+    "dust_wei": "41000000000000000000000",
+    "provider_dust_wei": "41000000000000000000000",
+    "provider_payout_asset": "ETH",
+    "provider_pool_usd": "100",
+    "providers_usd_micros": 99999999,
+    "provider_dust_usd_micros": 1
   }
 }
-```
-
-A stale on-chain stake sync returns `409`:
-```json
-{ "error": { "code": "stake_sync_stale", "context": { "parameter_value": "stake_sync_stale" } } }
 ```
 
 ```http

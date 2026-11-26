@@ -92,6 +92,36 @@ def test_summary_is_cached_across_requests():
     mock_summary.assert_called_once()
 
 
+def test_summary_emission_block_has_no_staker_field():
+    """The emission is split between GPU providers and the treasury; the
+    staker share (and its `stakers_bps` field) was removed on 2026-11-25."""
+    with patch("src.routes.gpu_public.get_summary", return_value=dict(_SUMMARY)):
+        response = client.get("/gpu/public/summary")
+
+    assert response.status_code == 200
+    emission = response.json()["emission"]
+    assert set(emission) == {
+        "mode",
+        "daily_emission_wayz",
+        "provider_pool_usd_per_day",
+        "provider_payout_asset",
+        "providers_bps",
+        "treasury_bps",
+        "last_epoch",
+    }
+    assert "stakers_bps" not in emission
+    assert "staker" not in response.text.lower()
+    assert emission["providers_bps"] + emission["treasury_bps"] == 10000
+
+
+def test_summary_schema_has_no_staker_field():
+    from src.schemas.gpu_public import GpuPublicEmission
+
+    assert not [name for name in GpuPublicEmission.model_fields if "staker" in name]
+    schema = client.get("/gpu/public/schema").text
+    assert "staker" not in schema.lower()
+
+
 # --- /gpu/public/nodes --------------------------------------------------------
 
 

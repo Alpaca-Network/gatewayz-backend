@@ -227,14 +227,6 @@ class Config:
     USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES = int(
         _get_env_var("USAGE_ANCHOR_SWEEP_INTERVAL_MINUTES", "10")
     )
-    # Per-wallet daily cap and minimum for staker credits paid by the
-    # emission epoch job (src/services/emission/epoch.py). The rate-table
-    # staking rewards program these were introduced for is retired.
-    STAKING_REWARDS_DAILY_CAP_CREDITS = float(
-        _get_env_var("STAKING_REWARDS_DAILY_CAP_CREDITS", "50.0")
-    )
-    STAKING_REWARDS_MIN_CREDITS = float(_get_env_var("STAKING_REWARDS_MIN_CREDITS", "0.0001"))
-
     # v2 job usage lines for cost disputes (src/services/job_usage_v2.py). Ships
     # dark: migration 20261023000000 must be applied BEFORE this is turned on, or
     # the new append_job_usage arguments fail and job usage lines are lost.
@@ -394,7 +386,7 @@ class Config:
         _get_env_var("PROVIDER_PAYOUT_GAS_RESERVE_WEI", str(10**15))  # 0.001 ETH
     )
     # Emission mode: USD/day paid to providers by 7-day score (replaces the
-    # providers' 41% WAYZ share -- stakers' credits are unchanged).
+    # providers' WAYZ share of the emission split).
     PROVIDER_EMISSION_USD_PER_DAY = _get_env_var("PROVIDER_EMISSION_USD_PER_DAY", "100")
     COMMUNITY_SETTLEMENT_INTERVAL_HOURS = int(
         _get_env_var("COMMUNITY_SETTLEMENT_INTERVAL_HOURS", "24")
@@ -439,38 +431,31 @@ class Config:
         _get_env_var("COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS", "48")
     )
 
-    # Chutes-style WAYZ emission rewards (gatewayz-backend tokenomics --
-    # boss asks: split WAYZ rewards between stakers and GPU providers the
-    # way Chutes/Bittensor does). See docs/tokenomics/EMISSION.md.
+    # Score-based GPU provider emission rewards. See
+    # docs/tokenomics/EMISSION.md. The emission is split between GPU
+    # providers and the treasury. A staker share existed in an earlier
+    # design and was removed on 2026-11-25.
     #
-    # REWARDS_MODE gates two mutually-exclusive payout paths:
+    # REWARDS_MODE gates two mutually-exclusive provider payout paths:
     #   'per_unit' (default) -- today's behaviour: providers earn per
-    #     verified work item (src/services/gpu/earnings.py); stakers earn
-    #     nothing (the rate-table staking rewards program is retired).
-    #     Ships dark; nothing below takes effect until this flips.
+    #     verified work item (src/services/gpu/earnings.py). Ships dark;
+    #     nothing below takes effect until this flips.
     #   'emission' -- providers earn a daily share of
     #     PROVIDER_EMISSION_USD_PER_DAY (paid in ETH) by 7-day rolling
-    #     score (src/services/emission/), stakers earn
-    #     pro-rata to stake off the SAME emission pool. record_earning_for_verified_work() checks this flag and
-    #     stops creating per_unit earnings once it's 'emission' -- the two
-    #     paths are never both live for the same day.
+    #     score (src/services/emission/).
+    #     record_earning_for_verified_work() checks this flag and stops
+    #     creating per_unit earnings once it's 'emission' -- the two paths
+    #     are never both live for the same day.
     REWARDS_MODE = _get_env_var("REWARDS_MODE", "per_unit")
-    # Decimal WAYZ/day the emission_epoch job splits 41/41/18. Deliberately
-    # NOT wei-scaled here -- src/services/emission/scoring.py converts to
-    # wei once, at the top of the split, so every downstream number is an
-    # integer.
+    # Decimal WAYZ/day the emission_epoch job splits between providers and
+    # the treasury. Deliberately NOT wei-scaled here --
+    # src/services/emission/scoring.py converts to wei once, at the top of
+    # the split, so every downstream number is an integer.
     WAYZ_DAILY_EMISSION = _get_env_var("WAYZ_DAILY_EMISSION", "100000")
+    # Must sum to 10000 (validated at startup by check_emission_config).
+    # The treasury default (5900) absorbed the removed staker share (4100).
     EMISSION_SPLIT_PROVIDERS_BPS = int(_get_env_var("EMISSION_SPLIT_PROVIDERS_BPS", "4100"))
-    EMISSION_SPLIT_STAKERS_BPS = int(_get_env_var("EMISSION_SPLIT_STAKERS_BPS", "4100"))
-    EMISSION_SPLIT_TREASURY_BPS = int(_get_env_var("EMISSION_SPLIT_TREASURY_BPS", "1800"))
-    # 'credits' (default, boss's standing rule for stakers) pays the staker
-    # share through staking_reward_accruals + add_credits_to_user
-    # (src/services/staking_rewards.py), converted at WAYZ_CREDIT_RATE.
-    # 'wayz' has no payout rail yet (see src/services/emission/epoch.py's
-    # _pay_stakers_wayz docstring) -- accruals are recorded 'pending' with
-    # skip_reason='wayz_payout_not_implemented' until one exists.
-    STAKER_REWARD_ASSET = _get_env_var("STAKER_REWARD_ASSET", "credits")
-    WAYZ_CREDIT_RATE = _get_env_var("WAYZ_CREDIT_RATE", "0.001")
+    EMISSION_SPLIT_TREASURY_BPS = int(_get_env_var("EMISSION_SPLIT_TREASURY_BPS", "5900"))
     # Provider 7-day rolling score weights (must sum to 10000 -- validated
     # at startup by check_emission_config, which never raises: a bad sum
     # is logged and the job is marked disabled rather than crashing boot).

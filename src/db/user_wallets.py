@@ -38,16 +38,6 @@ def wallet_namespace(row: dict[str, Any]) -> str:
     return str(row.get("chain_namespace") or EVM_NAMESPACE)
 
 
-def is_evm_wallet(row: dict[str, Any]) -> bool:
-    """True for an EVM (0x...) wallet. Jobs that read EVM balances must skip
-    every other namespace: a Cardano stake address is not an EVM address."""
-    return wallet_namespace(row) == EVM_NAMESPACE
-
-
-def is_cardano_wallet(row: dict[str, Any]) -> bool:
-    return wallet_namespace(row) == CARDANO_NAMESPACE
-
-
 def get_wallets_for_user(user_id: int) -> list[dict[str, Any]]:
     """All wallets linked to a user, most-recently-linked first. Empty list
     on any lookup error."""

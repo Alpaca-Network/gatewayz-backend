@@ -31,9 +31,9 @@ class GpuLastHourStats(BaseModel):
 
 
 class GpuPublicEmission(BaseModel):
-    """Aggregate-only WAYZ emission info (Chutes-style WAYZ emission
-    rewards, gatewayz-backend tokenomics) -- config + the most recent
-    epoch_date, nothing per-provider or per-user. See
+    """Aggregate-only WAYZ emission info -- config + the most recent
+    epoch_date, nothing per-provider or per-user. The emission is split
+    between GPU providers and the treasury. See
     docs/tokenomics/EMISSION.md."""
 
     mode: str = Field(description="'per_unit' or 'emission' -- Config.REWARDS_MODE")
@@ -43,7 +43,6 @@ class GpuPublicEmission(BaseModel):
     )
     provider_payout_asset: str = Field(default="ETH", description="Provider payout asset")
     providers_bps: int
-    stakers_bps: int
     treasury_bps: int
     last_epoch: str | None = Field(
         description="ISO-8601 date of the most recent emission_epochs row, or null if none has run yet"

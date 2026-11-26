@@ -1,9 +1,9 @@
 """DB access for emission_epochs, provider_scores, and the trailing-7-day
 provider_work window the emission_epoch job scores providers over
-(Chutes-style WAYZ emission rewards, gatewayz-backend tokenomics -- boss
-asks: split WAYZ rewards between stakers and GPU providers the way Chutes
-does; see docs/tokenomics/EMISSION.md and
-supabase/migrations/20260913120000_emission_rewards.sql).
+(score-based GPU provider emission rewards; see docs/tokenomics/EMISSION.md
+and supabase/migrations/20260913120000_emission_rewards.sql). The emission
+is split between GPU providers and the treasury. A staker share existed in
+an earlier design and was removed on 2026-11-25.
 
 Mirrors src/db/gpu_payouts.py's try/except + logger.warning + safe-default
 convention exactly -- callers (src/services/emission/epoch.py, the
@@ -60,10 +60,8 @@ def create_epoch(
     epoch_date: str,
     emission_wei: int,
     providers_wei: int,
-    stakers_wei: int,
     treasury_wei: int,
     providers_scored: int,
-    stakers_paid: int,
     status: str,
     summary: dict[str, Any],
     providers_usd_micros: int | None = None,
@@ -71,8 +69,7 @@ def create_epoch(
     """Insert the emission_epochs row for one day. Returns the created row,
     or None on any failure -- including the epoch_date PK conflict (a
     concurrent run got there first; the caller re-reads via get_epoch()
-    rather than treating None as a hard failure, same pattern as
-    src/db/staking_rewards.py::create_accrual)."""
+    rather than treating None as a hard failure)."""
     try:
         client = get_supabase_client()
         result = (
@@ -82,10 +79,12 @@ def create_epoch(
                     "epoch_date": epoch_date,
                     "emission_wei": str(emission_wei),
                     "providers_wei": str(providers_wei),
-                    "stakers_wei": str(stakers_wei),
+                    # column kept; the staker share was removed 2026-11-25
+                    "stakers_wei": "0",
                     "treasury_wei": str(treasury_wei),
                     "providers_scored": providers_scored,
-                    "stakers_paid": stakers_paid,
+                    # column kept; the staker share was removed 2026-11-25
+                    "stakers_paid": 0,
                     "status": status,
                     "summary": summary,
                     "providers_usd_micros": providers_usd_micros,

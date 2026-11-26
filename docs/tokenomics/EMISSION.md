@@ -1,14 +1,15 @@
-# WAYZ emission rewards (Chutes-style)
+# WAYZ emission rewards (score-based, for GPU providers)
 
-**Boss asks:** split WAYZ rewards between stakers and GPU providers the
-way [Chutes](https://chutes.ai/docs/miner-resources/scoring) (a
-[Bittensor](https://docs.learnbittensor.org/learn/emissions) subnet)
-does. This doc is the binding design, a worked example, and the operator
+The emission is split between GPU providers and the treasury. A staker
+share existed in an earlier design and was removed on 2026-11-25.
+
+Provider scoring follows
+[Chutes](https://chutes.ai/docs/miner-resources/scoring) (a
+[Bittensor](https://docs.learnbittensor.org/learn/emissions) subnet).
+This doc is the binding design, a worked example, and the operator
 tuning guide. See also `docs/gpu/VERIFICATION_AND_PAYOUTS.md` (per_unit
 vs emission for providers) -- the already-shipped system this mode replaces
-for the day it's live. (The rate-table staking rewards program this mode
-was also designed to replace is retired and removed; outside emission mode
-stakers earn nothing.)
+for the day it's live.
 
 > **Providers are paid in USD → ETH on Base, not WAYZ (2026-09-22).** WAYZ
 > is not going public for now. In emission mode the providers' share is a
@@ -16,28 +17,24 @@ stakers earn nothing.)
 > `100`), allocated by the same 7-day score below and written as
 > `provider_earnings.amount_usd_micros`; settlement pays it in native ETH
 > on Base at the Chainlink ETH/USD price (see
-> `docs/gpu/VERIFICATION_AND_PAYOUTS.md`). The WAYZ 41/41/18 split is
-> unchanged and still drives the stakers' 41% (inference credits); the
-> WAYZ **providers** leg is no longer emitted to anyone -- it's recorded
-> as `providers_wei=0` and folded into `treasury_wei`, so
-> `providers_wei + stakers_wei + treasury_wei == emission_wei` still holds.
-> The USD-denominated sections below (`allocation_usd_micros`,
-> `providers_usd_micros`) supersede the `allocation_wei`/`providers_wei`
-> wording for providers.
+> `docs/gpu/VERIFICATION_AND_PAYOUTS.md`). The WAYZ **providers** leg is
+> not emitted to anyone -- it's recorded as `providers_wei=0` and folded
+> into `treasury_wei`, so `providers_wei + treasury_wei == emission_wei`
+> holds exactly. The USD-denominated sections below
+> (`allocation_usd_micros`, `providers_usd_micros`) supersede the
+> `allocation_wei`/`providers_wei` wording for providers.
 
 ## Chutes/Bittensor facts this mirrors
 
-Per tempo, a Bittensor subnet's emission splits **41% miners (providers),
-41% validators+stakers, 18% subnet owner** (treasury). Miners are ranked
-by a rolling **7-day score = 55% compute + 20% response speed + 20%
-availability + 5% bounties** (Chutes' unique-chute/bounty count metric);
-entries at or above the median get raised to the **1.3 exponent**.
-Stakers earn pro-rata to stake. We mirror the split and the score formula
-exactly; the "bounties" metric becomes **unique models served** (the
-closest Gatewayz analogue -- there is no bounty/chute-uniqueness concept
-here, but "serves more distinct models" is the same "breadth of useful
-work" signal), and "validators" collapses to "stakers" (Gatewayz has no
-separate validator role).
+Chutes ranks miners (providers) by a rolling **7-day score = 55% compute
++ 20% response speed + 20% availability + 5% bounties** (Chutes'
+unique-chute/bounty count metric); entries at or above the median get
+raised to the **1.3 exponent**. We mirror the score formula exactly; the
+"bounties" metric becomes **unique models served** (the closest Gatewayz
+analogue -- there is no bounty/chute-uniqueness concept here, but "serves
+more distinct models" is the same "breadth of useful work" signal). The
+Bittensor reward split itself (miners / validators+stakers / subnet owner)
+is not mirrored: Gatewayz has no validator or staker leg.
 
 ## Turning it on
 
@@ -46,15 +43,11 @@ separate validator role).
 
 - `record_earning_for_verified_work` keeps accruing per-unit provider
   earnings exactly as before (`docs/gpu/VERIFICATION_AND_PAYOUTS.md`).
-- Stakers are paid nothing (the rate-table staking rewards job is retired).
 - The `emission_epoch` job runs on schedule but immediately returns
   `{"skipped": "disabled"}` (recorded on the ops job page like any other
   run).
 
-Flipping `REWARDS_MODE=emission` switches BOTH provider and staker
-payouts to this design simultaneously -- there is no way to run "emission
-for providers, rate-table for stakers" or vice versa, by design (the boss
-asked for one consistent split, not two independently-tuned systems).
+Flipping `REWARDS_MODE=emission` switches provider payouts to this design.
 
 ## The daily split
 
@@ -64,11 +57,15 @@ placeholder, **not** a production number) is split by basis points:
 | Leg | Config | Default |
 |---|---|---:|
 | Providers | `EMISSION_SPLIT_PROVIDERS_BPS` | 4100 (41%) |
-| Stakers | `EMISSION_SPLIT_STAKERS_BPS` | 4100 (41%) |
-| Treasury | `EMISSION_SPLIT_TREASURY_BPS` | 1800 (18%) |
+| Treasury | `EMISSION_SPLIT_TREASURY_BPS` | 5900 (59%) |
+
+(Until 2026-11-25 there was a third, staker leg of 4100 bps and the
+treasury default was 1800; the treasury default absorbed it. An
+environment that sets `EMISSION_SPLIT_TREASURY_BPS` explicitly must be
+updated so the two sum to 10000.)
 
 Validated at startup (`src/services/emission/epoch.py::check_emission_config`,
-called from `src/services/startup.py`'s lifespan): the three **must** sum
+called from `src/services/startup.py`'s lifespan): the two **must** sum
 to 10000, and so must the four score weights below. A bad sum never
 crashes boot -- it logs at `ERROR` and disables the `emission_epoch` job
 (`run_emission_epoch` returns `{"skipped": "bad_config", "reason": ...}`)
@@ -76,13 +73,12 @@ until the env vars are fixed and the app restarts. `GET
 /admin/emission/config` surfaces `disabled_reason` for exactly this case.
 
 The split itself (`src/services/emission/scoring.py::split_emission`) is
-integer wei math: `providers_wei`/`stakers_wei` are each
-`floor(emission_wei * bps / 10000)`; `treasury_wei` is whatever's left
-over (`emission_wei - providers_wei - stakers_wei`), so the three always
-sum to exactly `emission_wei` regardless of floor-division dust. Treasury
-also absorbs the provider-scoring pass's own floor-division dust (below)
--- WAYZ is never created or destroyed by rounding, it only ever rounds
-*toward* the treasury.
+integer wei math: `providers_wei` is `floor(emission_wei * bps / 10000)`;
+`treasury_wei` is whatever's left over (`emission_wei - providers_wei`),
+so the two always sum to exactly `emission_wei` regardless of
+floor-division dust. Treasury also absorbs the provider-scoring pass's own
+floor-division dust (below) -- WAYZ is never created or destroyed by
+rounding, it only ever rounds *toward* the treasury.
 
 ## Provider scoring (trailing 7 days, ending the epoch date)
 
@@ -140,9 +136,11 @@ one-off node, exactly like today.
 Every provider's `allocation_wei` floors, so `Σ(allocation_wei) <=
 providers_wei`; the remainder ("dust") is folded into `treasury_wei` for
 that epoch, never lost and never given to any one provider arbitrarily. The
-persisted `emission_epochs.providers_wei` / `stakers_wei` are the amounts
-**actually allocated** (nominal split minus dust), so the three columns always
-sum to exactly `emission_wei`.
+persisted `emission_epochs.providers_wei` is the amount **actually
+allocated** (nominal split minus dust), so `providers_wei + treasury_wei`
+always sums to exactly `emission_wei`. The `emission_epochs.stakers_wei` and
+`stakers_paid` columns are kept in the table and written as `0`; rows from
+before 2026-11-25 may carry other values.
 
 **Persistence:** one `provider_scores` row per (epoch_date, provider_id)
 (all four raw metrics, `raw_score`, `adjusted_score`, `share`,
@@ -157,48 +155,14 @@ pays this identically to a per_unit earning (see
 `docs/gpu/VERIFICATION_AND_PAYOUTS.md`'s Settlement section) -- no
 settlement code needed to change for the nullable `work_id`.
 
-## Staker payout (pro-rata to stake)
-
-`stakers_wei` is split pro-rata to each linked-or-unlinked wallet's share
-of total staked WAYZ (`wallet_stakes.staked_amount`) -- an unlinked
-wallet accrues a row written with `user_id=NULL`. **Known gap:** the
-pay-on-wallet-link hook and the retry sweep belonged to the retired
-rate-table program and were removed with it, so a pending accrual is only
-retried when the job is re-run for the same `epoch_date`; build a
-pay-on-link / retry path before turning emission mode on. Stale-chain guard
-(`src/services/staking_rewards.py::is_stake_sync_stale`) -- if
-`wallet_stakes` hasn't synced recently enough to trust, the **entire**
-`emission_epoch` run raises rather than pay off stale numbers.
-
-`STAKER_REWARD_ASSET` (default `credits`) picks the payout asset:
-
-- **`credits`** (default): `credits = wayz_amount × WAYZ_CREDIT_RATE`
-  (default `0.001` credits per WAYZ), paid through the
-  `staking_reward_accruals` + `add_credits_to_user` insert-before-pay path
-  in `src/services/staking_rewards.py` (`source='emission'`, `wayz_amount_wei`
-  recorded, `rate_id=NULL` since there's no rate-table row behind it).
-  Same per-user daily cap (`STAKING_REWARDS_DAILY_CAP_CREDITS`) and
-  minimum (`STAKING_REWARDS_MIN_CREDITS`, below which the day is
-  `skipped` with `skip_reason='below_min'`).
-- **`wayz`**: **not implemented** -- there is no on-chain payout rail for
-  raw WAYZ to a staker's wallet yet (providers are paid in ETH on Base
-  via `provider_settlements`). An accrual row
-  is still written (`status='pending'`, `skip_reason=
-  'wayz_payout_not_implemented'`, `wayz_amount_wei` recorded) so the
-  amount owed is never lost -- it's just visibly unpaid until a WAYZ
-  payout rail for stakers exists. The job's summary reports this
-  explicitly (`staker_asset: "wayz"`, `stakers_paid: 0`) rather than
-  silently dropping it.
-
 ## Worked example
 
-`WAYZ_DAILY_EMISSION=100000`, default 41/41/18 split:
+`WAYZ_DAILY_EMISSION=100000`, default 41/59 split:
 
 ```
 emission_wei   = 100000 WAYZ
 providers_wei  =  41000 WAYZ  (41%)
-stakers_wei    =  41000 WAYZ  (41%)
-treasury_wei   =  18000 WAYZ  (18%, + any floor dust from below)
+treasury_wei   =  59000 WAYZ  (59%, + any floor dust from below)
 ```
 
 Three providers scored this epoch (weights 55/20/20/5, all at the 1.0x
@@ -229,11 +193,6 @@ Applied to `providers_wei = 41000`: A ≈ 22,888 WAYZ, B ≈ 12,644 WAYZ,
 C ≈ 5,467 WAYZ (floor-to-wei; the small remainder from rounding these
 three shares lands in `treasury_wei`, not any provider).
 
-**Staker side:** network-wide 500,000 WAYZ staked; a staker holding 5,000
-WAYZ (1% of the network) gets `1% × 41000 = 410` WAYZ/day worth of
-credits: `410 × WAYZ_CREDIT_RATE (0.001) = 0.41` credits/day, capped at
-`STAKING_REWARDS_DAILY_CAP_CREDITS` like any other accrual.
-
 ## Tuning
 
 All of the above are env vars, no code changes needed to retune:
@@ -241,15 +200,13 @@ All of the above are env vars, no code changes needed to retune:
 - `WAYZ_DAILY_EMISSION` -- the whole pool. Start conservative; this is a
   testnet placeholder (`100000`), not a production number the boss has
   confirmed.
-- `EMISSION_SPLIT_{PROVIDERS,STAKERS,TREASURY}_BPS` -- must sum to 10000.
+- `EMISSION_SPLIT_{PROVIDERS,TREASURY}_BPS` -- must sum to 10000.
 - `PROVIDER_SCORE_WEIGHT_{COMPUTE,SPEED,AVAILABILITY,UNIQUE_MODELS}_BPS`
   -- must also sum to 10000. Shifting weight toward `compute` rewards raw
   throughput more; toward `availability` rewards uptime/reliability more.
 - `PROVIDER_SCORE_EXPONENT_ABOVE_MEDIAN` -- how much more the top half is
   rewarded relative to the bottom half. `1.0` disables the effect
   entirely (everyone's raw_score passes through unchanged).
-- `STAKER_REWARD_ASSET` / `WAYZ_CREDIT_RATE` -- the staker payout asset
-  and conversion rate.
 - `EMISSION_EPOCH_CRON_HOUR_UTC` / `_MINUTE_UTC` (default `00:40` UTC) --
   when the daily job runs. Kept after
   `gpu_spot_check` so the trailing-7d verification data it scores against
@@ -263,13 +220,9 @@ All of the above are env vars, no code changes needed to retune:
   provider has been
   scored at least once (absent entirely before that, or while the
   feature is off).
-- There is no staker-facing endpoint today: `GET /staking/rewards` (which
-  carried `mode` and an `emission` block) was removed with the retired
-  rate-table program. `get_staker_emission_view` still computes the block.
 - `GET /gpu/public/summary` gains an aggregate-only `emission: {mode,
   daily_emission_wayz, provider_pool_usd_per_day, provider_payout_asset,
-  providers_bps, stakers_bps, treasury_bps,
-  last_epoch}` -- no per-provider or per-user data, keeping the endpoint's
+  providers_bps, treasury_bps, last_epoch}` -- no per-provider or per-user data, keeping the endpoint's
   no-envelope, aggregate-only guarantee
   (`tests/security/test_gpu_public_aggregate_only.py`).
 - Admin (`src/routes/admin_emission.py`):
@@ -278,8 +231,7 @@ All of the above are env vars, no code changes needed to retune:
     highest share first.
   - `POST /admin/emission/run {epoch_date}` -- superadmin, audited
     (`emission.epoch.run`). Runs the job right now, same idempotency as
-    the scheduled run; `409` with `error.context.parameter_value =
-    "stake_sync_stale"` if the stake sync is too stale.
+    the scheduled run.
   - `GET /admin/emission/config` -- the effective env-derived config plus
     `disabled_reason` (non-null iff the startup bps-sum check failed).
   - `PUT /admin/emission/config` -- `501 Not Implemented`. Config is
@@ -291,18 +243,16 @@ All of the above are env vars, no code changes needed to retune:
 
 `emission_epochs.epoch_date` (PRIMARY KEY) is checked first
 (`get_epoch()`) -- a re-run for an already-`'computed'`/`'allocated'`
-date is a pure no-op. The per-row unique indexes are the DB-level
+date is a pure no-op. The per-row unique index is the DB-level
 backstop for a crash mid-run: `provider_earnings`'
 `idx_provider_earnings_emission` (`UNIQUE(provider_id, epoch_date) WHERE
-source='emission'`) and `staking_reward_accruals`' existing
-`UNIQUE(wallet_address, reward_date)` mean a retry after a partial
-failure only creates what's missing -- whatever was already written comes
-back as a 'duplicate'/'skipped' no-op, never a double-pay.
+source='emission'`) means a retry after a partial failure only creates
+what's missing -- whatever was already written comes back as a
+'duplicate' no-op, never a double-pay.
 
 ## Future work (explicitly out of scope this round)
 
-- A `wayz` payout rail for stakers (see `STAKER_REWARD_ASSET=wayz` above).
 - A `kv`-store-backed runtime override for `PUT /admin/emission/config`
   (env-only for now).
 - Frontend: `/gpu` public "Emission" strip, `/gpu/provider` "Your score"
-  card, `/staking` Earnings-card emission block (gatewayz-frontend).
+  card (gatewayz-frontend).

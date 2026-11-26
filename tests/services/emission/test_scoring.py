@@ -1,10 +1,12 @@
-"""Tests for src.services.emission.scoring (Chutes-style WAYZ emission
-rewards, gatewayz-backend tokenomics). Pure functions, no DB/mocking
-needed."""
+"""Tests for src.services.emission.scoring (score-based GPU provider
+emission rewards; the emission is split between GPU providers and the
+treasury). Pure functions, no DB/mocking needed."""
 
 from __future__ import annotations
 
 from decimal import Decimal
+
+import pytest
 
 from src.services.emission.scoring import (
     EmissionSplit,
@@ -41,25 +43,59 @@ def test_wayz_to_wei_floors_fractional_wayz():
 
 
 def test_split_emission_sums_to_exactly_emission_wei():
-    split = split_emission("100000", 4100, 4100, 1800)
+    split = split_emission("100000", 4100, 5900)
     assert isinstance(split, EmissionSplit)
-    assert split.providers_wei + split.stakers_wei + split.treasury_wei == split.emission_wei
+    assert split.providers_wei + split.treasury_wei == split.emission_wei
     assert split.emission_wei == 100000 * 10**18
+    assert split.providers_wei == 41000 * 10**18
+    assert split.treasury_wei == 59000 * 10**18
+
+
+def test_split_emission_has_no_staker_leg():
+    split = split_emission("100000", 4100, 5900)
+    assert not [name for name in vars(split) if "staker" in name]
+    assert set(vars(split)) == {"emission_wei", "providers_wei", "treasury_wei"}
+
+
+@pytest.mark.parametrize(
+    "emission_wayz",
+    [
+        "0",
+        "1",
+        "3",
+        "100000",
+        "99999.999999999999999999",
+        "0.000000000000000001",  # 1 wei
+        "0.000000000000000007",  # 7 wei -- 7 * 4100 // 10000 floors to 2
+        "123456789.123456789123456789",
+        Decimal(10) ** 12 + Decimal("0.000000000000000001"),
+    ],
+)
+@pytest.mark.parametrize("providers_bps", [0, 1, 3333, 4100, 9999, 10000])
+def test_split_emission_two_legs_sum_exactly_including_dust(emission_wayz, providers_bps):
+    """providers + treasury == emission_wei exactly, for every input: the
+    providers leg floors and the remainder (dust included) is the
+    treasury leg."""
+    split = split_emission(emission_wayz, providers_bps, 10000 - providers_bps)
+    assert split.providers_wei + split.treasury_wei == split.emission_wei
+    assert split.providers_wei == split.emission_wei * providers_bps // 10000
+    assert split.providers_wei >= 0
+    assert split.treasury_wei >= 0
 
 
 def test_split_emission_routes_bps_floor_dust_to_treasury():
-    # 3 WAYZ emission at 41/41/18 -- floor division on the providers/staker
-    # legs leaves a remainder that must land in treasury, not vanish.
-    split = split_emission("3", 4100, 4100, 1800)
-    assert split.providers_wei + split.stakers_wei + split.treasury_wei == split.emission_wei
-    # 3e18 * 4100 // 10000 = 1230000000000000000 exactly divisible here,
-    # so use an emission amount that does NOT divide evenly to prove dust
-    # routing: 1 wei of emission split 41/41/18 can't divide evenly.
-    split_tiny = split_emission(Decimal(1) / Decimal(10**18), 4100, 4100, 1800)
+    # 1 wei of emission can't divide 41/59 -- the providers leg floors to
+    # 0 and the whole wei lands in treasury, not nowhere.
+    split_tiny = split_emission(Decimal(1) / Decimal(10**18), 4100, 5900)
     assert split_tiny.emission_wei == 1
     assert split_tiny.providers_wei == 0
-    assert split_tiny.stakers_wei == 0
     assert split_tiny.treasury_wei == 1
+
+    # 7 wei: floor(7 * 0.41) = 2 to providers, the other 5 (4.13 nominal
+    # + the 0.87 floor remainder) to treasury.
+    split_seven = split_emission(Decimal(7) / Decimal(10**18), 4100, 5900)
+    assert split_seven.providers_wei == 2
+    assert split_seven.treasury_wei == 5
 
 
 def test_split_emission_tolerates_a_bps_sum_that_is_not_10000():
@@ -67,8 +103,8 @@ def test_split_emission_tolerates_a_bps_sum_that_is_not_10000():
     separate, non-fatal guard (see src/services/emission/epoch.py::
     check_emission_config); this function just floors what it's given and
     always balances to emission_wei."""
-    split = split_emission("100", 5000, 5000, 5000)
-    assert split.providers_wei + split.stakers_wei + split.treasury_wei == split.emission_wei
+    split = split_emission("100", 5000, 9000)
+    assert split.providers_wei + split.treasury_wei == split.emission_wei
 
 
 # ---------------------------------------------------------------------------

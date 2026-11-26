@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 from src.main import app
 from src.security.deps import require_admin_or_env_key, require_superadmin
-from src.services.staking_rewards import StakingRewardsStaleError
 
 client = TestClient(app)
 
@@ -109,14 +108,27 @@ class TestRunEmissionEpoch:
         mock_audit.assert_called_once()
         assert mock_audit.call_args.kwargs["action"] == "emission.epoch.run"
 
+    @patch("src.routes.admin_emission.record_audit")
     @patch("src.routes.admin_emission.run_emission_epoch")
-    def test_stale_sync_returns_409(self, mock_run, superadmin_override):
-        mock_run.side_effect = StakingRewardsStaleError("stake_sync_stale")
-        response = client.post("/admin/emission/run", json={})
-        assert response.status_code == 409
-        body = response.json()
-        assert body["error"]["code"] == "stake_sync_stale"
-        assert body["error"]["context"]["parameter_value"] == "stake_sync_stale"
+    def test_returns_the_two_way_summary_unchanged(self, mock_run, mock_audit, superadmin_override):
+        summary = {
+            "epoch_date": "2026-09-12",
+            "emission_wei": "100000000000000000000000",
+            "split": {"providers_wei": "0", "treasury_wei": "100000000000000000000000"},
+            "providers_scored": 3,
+        }
+        mock_run.return_value = summary
+        response = client.post("/admin/emission/run", json={"epoch_date": "2026-09-12"})
+        assert response.status_code == 200
+        assert response.json() == {"success": True, "data": summary}
+        assert "staker" not in response.text
+
+    def test_run_route_has_no_stale_stake_sync_guard(self):
+        """The 409 stake_sync_stale path existed only for the staker split."""
+        import src.routes.admin_emission as admin_emission
+
+        assert not hasattr(admin_emission, "StakingRewardsStaleError")
+        assert not hasattr(admin_emission, "_conflict")
 
 
 class TestConfig:
@@ -128,6 +140,24 @@ class TestConfig:
         assert data["disabled_reason"] == "bad sum"
         assert "rewards_mode" in data
         assert "split_bps" in data
+
+    def test_get_config_is_a_two_way_split_with_no_staker_fields(self, admin_or_env_override):
+        response = client.get("/admin/emission/config")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert set(data) == {
+            "rewards_mode",
+            "daily_emission_wayz",
+            "split_bps",
+            "score_weights_bps",
+            "exponent_above_median",
+            "provider_pool_usd_per_day",
+            "provider_payout_asset",
+            "cron_utc",
+            "disabled_reason",
+        }
+        assert set(data["split_bps"]) == {"providers", "treasury"}
+        assert "staker" not in response.text
 
     def test_put_config_returns_501(self, superadmin_override):
         with patch("src.routes.admin_emission.record_audit") as mock_audit:
