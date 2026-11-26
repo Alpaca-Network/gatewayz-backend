@@ -443,7 +443,7 @@ if the stream ends before the final usage arrives.
 
 With the switch on, the pre-check reserves the request's maximum paid cost
 (after any discount credits) as a row in `credit_holds`, keyed by the billing
-request id (`credit_hold` in `supabase/migrations/20261126130000_credit_holds.sql`).
+request id (`credit_hold` in `supabase/migrations/20261126190000_credit_holds.sql`).
 A hold is refused when the balance less the account's other live holds cannot
 cover it, and the request gets the usual 402. Charging the request deletes its
 own hold (other holds never block a charge); a request that ends without being

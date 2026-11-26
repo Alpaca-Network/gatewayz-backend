@@ -1,5 +1,5 @@
 """Credit holds and unpaid balances against the real migrated schema
-(CI-only). Migration 20261126130000.
+(CI-only). Migration 20261126190000.
 
 * credit_hold refuses when the balance less the account's other live holds
   cannot cover the amount; expired holds do not count; a repeat for the same

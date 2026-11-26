@@ -1,5 +1,5 @@
 """DB access for credit holds and unpaid balances -- credit_holds and
-credit_debts (supabase/migrations/20261126130000_credit_holds.sql).
+credit_debts (supabase/migrations/20261126190000_credit_holds.sql).
 
 Every change goes through one of the SQL functions (credit_hold,
 credit_release, charge_with_debt), each of which takes the account's users
