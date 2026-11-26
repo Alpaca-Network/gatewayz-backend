@@ -89,6 +89,23 @@ FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 FAILOVER_STATUS_CODES = {401, 402, 403, 404, 502, 503, 504}
 
 
+def _upstream_error_message(exc: Exception) -> str:
+    """The provider's own error text, without the SDK's wrapping.
+
+    OpenAI-compatible SDK errors keep the parsed body in ``exc.body``; its
+    ``error.message`` is the sentence the caller needs ("Unsupported parameter:
+    'logprobs' is not supported with this model."). ``str(exc)`` instead gives
+    "Error code: 400 - {'error': {...}}", a Python dict dump.
+    """
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        inner = body.get("error") if isinstance(body.get("error"), dict) else body
+        message = inner.get("message") if isinstance(inner, dict) else None
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    return getattr(exc, "message", None) or str(exc)
+
+
 class ProviderRejectedRequest(HTTPException):
     """The provider answered that the request itself is invalid (upstream 400).
 
@@ -739,7 +756,7 @@ def _map_provider_error_impl(
             # Extract actual error message from BadRequestError. The raw
             # response body is logged server-side only — provider bodies can
             # embed key ids, internal URLs, and infra details.
-            error_msg = getattr(exc, "message", None) or str(exc)
+            error_msg = _upstream_error_message(exc)
             try:
                 if hasattr(exc, "response") and exc.response:
                     response_text = getattr(exc.response, "text", None)
@@ -819,7 +836,7 @@ def _map_provider_error_impl(
             # Extract actual error message from BadRequestError. The raw
             # response body is logged server-side only — provider bodies can
             # embed key ids, internal URLs, and infra details.
-            error_msg = getattr(exc, "message", None) or str(exc)
+            error_msg = _upstream_error_message(exc)
             try:
                 if hasattr(exc, "response") and exc.response:
                     response_text = getattr(exc.response, "text", None)
