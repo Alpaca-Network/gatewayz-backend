@@ -282,6 +282,35 @@ class Config:
         for part in (p.strip() for p in _VAULT_DISCOUNT_PILOT_RAW.split(","))
         if part.isascii() and part.isdigit() and int(part) > 0
     )
+    # Credit holds (src/services/billing/credit_holds.py,
+    # docs/CREDIT_PREFLIGHT_CHECK.md): the pre-check reserves each request's maximum
+    # paid cost, so concurrent requests cannot all count the same balance.
+    # Off (default) -> no hold is placed and no extra DB call is made.
+    CREDIT_HOLDS_ENABLED = _get_env_var("CREDIT_HOLDS_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # How long an unbilled request's hold lives (60..3600 s). Billing or a
+    # release removes it at once.
+    CREDIT_HOLD_TTL_SECONDS = _int_env("CREDIT_HOLD_TTL_SECONDS", 900)
+    # Unpaid balance: when a request's final charge after delivery exceeds the
+    # balance, the balance is charged and the rest is recorded as debt; an
+    # account with unpaid debt is refused new paid requests until credits are
+    # added. Off (default) -> a short balance at billing is handled as before.
+    CREDIT_DEBT_ENABLED = _get_env_var("CREDIT_DEBT_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # Count streamed requests against their API key's request counter and
+    # rate-limit token usage, as non-streamed requests already are. Off by
+    # default: switching it on can make keys reach limits they never reached.
+    STREAM_KEY_USAGE_ENABLED = _get_env_var("STREAM_KEY_USAGE_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     # Cardano wallet linking (src/routes/wallet_auth_cardano.py,
     # src/services/wallet/). Accept stake_test1... addresses when linking
     # (testnet demos). Never on in production: a testnet stake key proves

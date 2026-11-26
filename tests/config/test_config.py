@@ -68,6 +68,19 @@ class TestConfigEnvironmentDetection:
         importlib.reload(config)
         assert config.Config.WALLET_LINK_ALLOW_CARDANO_TESTNET is True
 
+    def test_credit_holds_and_unpaid_balances_are_off_by_default(self, monkeypatch):
+        """Holds and unpaid balances change billing only once switched on."""
+        import importlib
+
+        from src.config import config
+
+        for name in ("CREDIT_HOLDS_ENABLED", "CREDIT_DEBT_ENABLED", "CREDIT_HOLD_TTL_SECONDS"):
+            monkeypatch.delenv(name, raising=False)
+        importlib.reload(config)
+        assert config.Config.CREDIT_HOLDS_ENABLED is False
+        assert config.Config.CREDIT_DEBT_ENABLED is False
+        assert config.Config.CREDIT_HOLD_TTL_SECONDS == 900
+
     def test_discount_credits_billing_is_off_by_default(self, monkeypatch):
         """Billing must not draw on discount credits unless explicitly enabled,
         and the retired flag names switch nothing on."""

@@ -38,22 +38,32 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class CacheMultipliers:
-    """Cache rates expressed as multiples of the base input (prompt) rate."""
+    """Cache rates expressed as multiples of the base input (prompt) rate.
+
+    ``write`` is the default (five-minute) cache write; ``write_1h`` the
+    one-hour cache write where the provider prices it differently (None:
+    same as ``write``)."""
 
     read: float
     write: float
+    write_1h: float | None = None
+
+    @property
+    def one_hour_write(self) -> float:
+        return self.write if self.write_1h is None else self.write_1h
 
 
 # Provider defaults. Keys are matched against the model ID and the resolved
 # provider slug, longest match first.
 #
-# anthropic: cache reads are 0.1x base input; 5-minute cache writes are 1.25x.
+# anthropic: cache reads are 0.1x base input; 5-minute cache writes are 1.25x,
+#            1-hour cache writes are 2x.
 # openai:    cached input is billed at 0.5x; there is no separate write charge,
 #            so the write multiplier is 1.0 (write turns cost normal input).
 # google:    implicit/explicit context caching lands at ~0.25x reads.
 # deepseek:  context caching reads are ~0.1x.
 PROVIDER_CACHE_MULTIPLIERS: dict[str, CacheMultipliers] = {
-    "anthropic": CacheMultipliers(read=0.1, write=1.25),
+    "anthropic": CacheMultipliers(read=0.1, write=1.25, write_1h=2.0),
     "openai": CacheMultipliers(read=0.5, write=1.0),
     "google": CacheMultipliers(read=0.25, write=1.0),
     "google-vertex": CacheMultipliers(read=0.25, write=1.0),
@@ -122,8 +132,13 @@ def calculate_cost_with_cache(
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
     provider: str | None = None,
+    cache_write_1h_tokens: int = 0,
 ) -> dict[str, float]:
     """Cost a completion, pricing cached input at its own rate.
+
+    ``cache_write_1h_tokens`` is the part of ``cache_write_tokens`` written
+    with a one-hour TTL, priced at the provider's one-hour write rate (2x
+    input for Anthropic) instead of the five-minute one (1.25x).
 
     Returns a breakdown rather than a bare float so callers can persist the
     components -- the per-request cache hit rate is the metric that proves the
@@ -175,14 +190,22 @@ def calculate_cost_with_cache(
     # Explicit per-model rates from the catalog win over provider multipliers.
     read_rate = float(pricing.get("cache_read") or prompt_rate * multipliers.read)
     write_rate = float(pricing.get("cache_write") or prompt_rate * multipliers.write)
+    # A catalog cache_write price is the five-minute rate; the one-hour rate
+    # keeps the provider's ratio between the two.
+    write_1h_rate = (
+        write_rate * multipliers.one_hour_write / multipliers.write
+        if multipliers.write
+        else prompt_rate * multipliers.one_hour_write
+    )
 
     uncached, cache_write_n, cache_read_n = split_prompt_tokens(
         prompt_tokens, cache_read, cache_write
     )
+    write_1h_n = min(max(0, cache_write_1h_tokens or 0), cache_write_n)
 
     uncached_cost = uncached * prompt_rate
     cache_read_cost = cache_read_n * read_rate
-    cache_write_cost = cache_write_n * write_rate
+    cache_write_cost = (cache_write_n - write_1h_n) * write_rate + write_1h_n * write_1h_rate
     output_cost = completion_tokens * completion_rate
 
     subtotal = uncached_cost + cache_read_cost + cache_write_cost + output_cost
@@ -222,6 +245,37 @@ def calculate_cost_with_cache(
         "cache_read_tokens": cache_read_n,
         "cache_write_tokens": cache_write_n,
     }
+
+
+def cache_write_split(
+    usage: dict | object | None, cache_write_tokens: int, one_hour_hint: bool = False
+) -> tuple[int, int]:
+    """``(cache_write_tokens, cache_write_1h_tokens)`` for billing.
+
+    When the usage block carries Anthropic's per-TTL breakdown
+    (``cache_creation.ephemeral_5m_input_tokens`` /
+    ``ephemeral_1h_input_tokens``), the one-hour part is taken from it (and
+    the total is at least the sum of the two). Otherwise, when the request set
+    a one-hour ``cache_control`` TTL anywhere (``one_hour_hint``), every
+    cache write is treated as one-hour; else none is.
+    """
+
+    def _get(obj, name, default=None):
+        if isinstance(obj, dict):
+            return obj.get(name, default)
+        return getattr(obj, name, default)
+
+    total = max(0, int(cache_write_tokens or 0))
+    breakdown = _get(usage, "cache_creation") if usage is not None else None
+    if breakdown is not None and not isinstance(breakdown, (int, float, str)):
+        try:
+            five = max(0, int(_get(breakdown, "ephemeral_5m_input_tokens") or 0))
+            hour = max(0, int(_get(breakdown, "ephemeral_1h_input_tokens") or 0))
+        except (TypeError, ValueError):
+            five = hour = 0
+        if five or hour:
+            return max(total, five + hour), hour
+    return total, (total if one_hour_hint else 0)
 
 
 def extract_cache_tokens(usage: dict | object | None) -> tuple[int, int]:

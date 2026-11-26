@@ -74,3 +74,11 @@ def billed_completion_tokens(usage: Any, prompt_tokens: int, completion_tokens: 
 
 def client_wants_usage(stream_options: Any) -> bool:
     return bool(_get(stream_options, "include_usage"))
+
+
+# A stream chunk field carrying the input usage a provider reported at the
+# START of a stream (Anthropic's message_start), in the same shape as an
+# OpenAI usage block. A provider client emits it on a chunk with no choices,
+# so nothing reaches the caller; the chat handler bills it when the stream
+# ends before the provider's final usage arrives (client disconnect, error).
+EARLY_INPUT_USAGE_FIELD = "gatewayz_input_usage"

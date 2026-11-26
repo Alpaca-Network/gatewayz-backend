@@ -33,6 +33,8 @@ from src.services.anonymous_rate_limiter import (
     validate_anonymous_request,
 )
 from src.services.auth_rate_limiting import get_client_ip
+from src.services.billing import credit_holds
+from src.services.billing.credit_precheck import input_tokens_floor
 from src.services.discount_credits.billing import release_for_request_async
 from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.key_purpose import enforce_no_routing_alias, is_validator_key
@@ -340,7 +342,11 @@ def _fallback_get_user(api_key: str):
 
 from src.routes.chat_context import inject_conversation_history, persist_conversation_turn
 from src.routes.chat_request import prepare_upstream_request
-from src.routes.chat_routing import resolve_auto_routed_model, resolve_model_routing
+from src.routes.chat_routing import (
+    enforce_balance_before_auto_routing,
+    resolve_auto_routed_model,
+    resolve_model_routing,
+)
 from src.routes.chat_streaming import stream_generator  # noqa: F401
 from src.services.provider_failover import restrict_chain_for_zero_balance_free_model
 
@@ -479,6 +485,10 @@ async def chat_completions(
     # 400 -- never a router's pick. Checked before the alias resolver below.
     enforce_no_routing_alias(identity.user, req.model)
 
+    # The auto-routing classifier below is itself a model call, so it runs only
+    # for a caller who passes the basic credit check (a positive balance).
+    enforce_balance_before_auto_routing(req.model, is_anonymous, identity.user)
+
     # Resolve `auto`/`router:*` aliases to a real model BEFORE the pricing gate
     # below, which treats req.model as a real catalog/pricing model and 400s
     # otherwise. No-op for explicit models and for anonymous requests (see
@@ -513,6 +523,8 @@ async def chat_completions(
     # pre-check below (None when none was). The hold is keyed by request_id
     # and settled by billing; an exit that never reaches billing releases it.
     discount_hold_user_id = None
+    # Same for a credit hold (CREDIT_HOLDS_ENABLED).
+    credit_hold_user_id = None
 
     try:
         # === 1) User + plan/trial prechecks (OPTIMIZED: parallelized DB calls) ===
@@ -740,12 +752,23 @@ async def chat_completions(
             )
             if _user_credits <= 0:
                 raise APIExceptions.payment_required(credits=_user_credits)
+            # An unpaid balance from earlier usage blocks new paid requests
+            # (CREDIT_DEBT_ENABLED; no DB call while off).
+            if await credit_holds.has_unpaid_debt_async(user.get("id")):
+                raise credit_holds.outstanding_balance_error()
             from src.services.discount_credits.billing import (
                 discount_aware_credits_async,
                 discount_enabled_for,
             )
 
-            _msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+            # Every input counts: tool calls and results, images, documents
+            # and tool definitions as well as message text.
+            _msgs = [m.model_dump(exclude_none=True) for m in req.messages]
+            _estimate_inputs = {
+                "tools": req.tools,
+                "tool_choice": req.tool_choice,
+                "input_tokens_floor": input_tokens_floor(request),
+            }
             # List-price capacity incl. this request's held discount credits
             # (identity, no DB call, while disabled).
             _credit_capacity = _user_credits
@@ -753,7 +776,7 @@ async def chat_completions(
                 from src.services.billing.credit_precheck import calculate_maximum_cost
 
                 _max_cost, _, _ = calculate_maximum_cost(
-                    req.model, _msgs, getattr(req, "max_tokens", None)
+                    req.model, _msgs, getattr(req, "max_tokens", None), **_estimate_inputs
                 )
                 discount_hold_user_id = user.get("id")
                 _credit_capacity = await discount_aware_credits_async(
@@ -764,9 +787,22 @@ async def chat_completions(
                 messages=_msgs,
                 user_credits=_credit_capacity,
                 max_tokens=getattr(req, "max_tokens", None),
+                **_estimate_inputs,
             )
             if not _precheck["allowed"] and _precheck.get("capped_max_tokens") is None:
                 raise APIExceptions.payment_required(credits=_user_credits)
+            # Reserve this request's maximum paid cost so concurrent requests
+            # cannot all count the same balance (CREDIT_HOLDS_ENABLED; no DB
+            # call while off). Settled by billing, released on failure.
+            if credit_holds.holds_enabled():
+                credit_hold_user_id = user.get("id")
+                _hold_amount = credit_holds.paid_part(
+                    _precheck["max_cost"], _user_credits, _credit_capacity
+                )
+                if not await credit_holds.place_hold_async(
+                    user.get("id"), _hold_amount, request_id
+                ):
+                    raise APIExceptions.payment_required(credits=_user_credits)
 
         # Daily usage limit: refuse BEFORE any upstream spend. Done once here (not in
         # the per-provider handler) so provider failover doesn't repeat the lookup.
@@ -1304,6 +1340,8 @@ async def chat_completions(
             # Free the discount hold if billing did not settle it (a no-op
             # when it did).
             await release_for_request_async(discount_hold_user_id, request_id)
+        if credit_hold_user_id is not None:
+            await credit_holds.release_hold_async(credit_hold_user_id, request_id)
 
         # Save failed request for HTTPException errors (rate limits, auth errors, etc.)
         await save_failed_request(
@@ -1339,6 +1377,8 @@ async def chat_completions(
             # Free the discount hold if billing did not settle it (a no-op
             # when it did).
             await release_for_request_async(discount_hold_user_id, request_id)
+        if credit_hold_user_id is not None:
+            await credit_holds.release_hold_async(credit_hold_user_id, request_id)
 
         # Save failed request for unexpected errors
         await save_failed_request(

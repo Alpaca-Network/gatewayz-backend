@@ -41,6 +41,7 @@ import httpx
 from src.config import Config
 from src.services.connection_pool import get_http_client
 from src.services.providers import anthropic_passthrough
+from src.services.usage_normalization import EARLY_INPUT_USAGE_FIELD
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -310,6 +311,23 @@ def build_anthropic_payload(
 # --------------------------------------------------------------------------
 
 
+def _cache_creation_breakdown(usage: dict[str, Any]) -> dict[str, int] | None:
+    """Anthropic's per-TTL cache write counts (``cache_creation``:
+    ``ephemeral_5m_input_tokens`` / ``ephemeral_1h_input_tokens``), or None
+    when the usage block does not carry them. One-hour cache writes are
+    priced higher than five-minute ones, so billing needs the split."""
+    breakdown = usage.get("cache_creation")
+    if not isinstance(breakdown, dict):
+        return None
+    out = {}
+    for key in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"):
+        try:
+            out[key] = max(0, int(breakdown.get(key) or 0))
+        except (TypeError, ValueError):
+            out[key] = 0
+    return out
+
+
 def anthropic_response_to_openai(data: dict[str, Any], model: str) -> dict[str, Any]:
     """Convert a native Anthropic Messages response to OpenAI chat-completion shape.
 
@@ -361,6 +379,9 @@ def anthropic_response_to_openai(data: dict[str, Any], model: str) -> dict[str, 
         openai_usage["cache_read_input_tokens"] = cache_read
         # OpenAI's own spelling, so generic clients can read it too.
         openai_usage["prompt_tokens_details"] = {"cached_tokens": cache_read}
+        breakdown = _cache_creation_breakdown(usage)
+        if cache_creation and breakdown is not None:
+            openai_usage["cache_creation"] = breakdown
 
     return {
         "id": data.get("id", f"chatcmpl-{uuid.uuid4().hex[:24]}"),
@@ -547,6 +568,22 @@ def make_anthropic_native_request_stream(messages, model, **kwargs) -> Iterator[
                         "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0)
                         or 0,
                         "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0) or 0,
+                    }
+                    breakdown = _cache_creation_breakdown(usage)
+                    if usage_totals["cache_creation_input_tokens"] and breakdown is not None:
+                        usage_totals["cache_creation"] = breakdown
+                    # The input is billed by the provider from here on. Hand
+                    # it to billing now, on a chunk with no choices (nothing
+                    # reaches the caller), in case the stream ends before the
+                    # final usage below.
+                    early = {**usage_totals, "completion_tokens": usage.get("output_tokens") or 0}
+                    yield {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [],
+                        EARLY_INPUT_USAGE_FIELD: early,
                     }
 
                 elif event_type == "content_block_start":

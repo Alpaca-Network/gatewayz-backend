@@ -340,8 +340,9 @@ def test_stream_relays_every_event_as_received_and_still_feeds_the_pipeline(boun
     assert [(kind, name) for kind, name, _ in relayed] == [("event", n) for n, _ in RAW_EVENTS]
     assert [data for _, _, data in relayed] == [json.dumps(d) for _, d in RAW_EVENTS]
 
-    # the OpenAI-shaped chunks the pipeline bills from are unchanged
-    text = "".join(c["choices"][0]["delta"].get("content") or "" for c in chunks)
+    # the OpenAI-shaped chunks the pipeline bills from are unchanged (plus one
+    # chunk with no choices that hands the input usage to billing early)
+    text = "".join(c["choices"][0]["delta"].get("content") or "" for c in chunks if c["choices"])
     assert text == "hi"
     final = chunks[-1]
     assert final["choices"][0]["finish_reason"] == "stop"

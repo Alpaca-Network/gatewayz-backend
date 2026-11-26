@@ -64,6 +64,30 @@ async def resolve_model_routing(req, original_model: str) -> tuple[None, bool]:
     return None, False
 
 
+def enforce_balance_before_auto_routing(model: str | None, is_anonymous: bool, user: Any) -> None:
+    """Refuse (402) an auto-routed request from an account with no balance.
+
+    Auto-routing runs a classifier model call before the request's own credit
+    check, so the caller must pass the basic check (a positive balance) first.
+    Only applies when the classifier would run (an authenticated request for
+    a router alias with AUTO_ROUTING_ENABLED); otherwise a no-op.
+    """
+    if (
+        is_anonymous
+        or not isinstance(user, dict)
+        or not _is_router_model(model)
+        or not Config.AUTO_ROUTING_ENABLED
+    ):
+        return
+    balance = float(user.get("subscription_allowance") or 0) + float(
+        user.get("purchased_credits") or 0
+    )
+    if balance <= 0:
+        from src.utils.errors import APIExceptions
+
+        raise APIExceptions.payment_required(credits=balance)
+
+
 def _raise_auto_routing_failed() -> None:
     raise HTTPException(
         status_code=400,
