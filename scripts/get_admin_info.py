@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Get admin user information from staging database"""
+import os
 
 import requests
 import json
 
 SUPABASE_URL = "https://ynleroehyrmaafkgjgmr.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlubGVyb2VoeXJtYWFma2dqZ21yIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTY4Nzc3OSwiZXhwIjoyMDc1MjYzNzc5fQ.kIehmSJC9EX86rkhCbhzX6ZHiTfQO7k6ZM2wU4e6JNs"
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
 headers = {
     "apikey": SUPABASE_KEY,

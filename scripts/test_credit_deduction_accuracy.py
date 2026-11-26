@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 # Staging backend URL
 STAGING_URL = "https://gatewayz-staging.up.railway.app"
-ADMIN_KEY = os.getenv("STAGING_ADMIN_KEY", "gw_live_wTfpLJ5VB28qMXpOAhr7Uw")
+ADMIN_KEY = os.getenv("STAGING_ADMIN_KEY", "<set from environment>")
 
 # Test models with different providers and price points
 TEST_MODELS = [

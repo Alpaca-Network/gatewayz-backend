@@ -6,7 +6,7 @@ During PR #353 audit, GitGuardian detected exposed API keys and credentials in t
 ## Exposed Credentials
 
 ### 1. Test API Key (monitoring branch)
-- **Key**: `gw_live_01eQv2HGWkjo0ApxoC4-G3yaOv6ilbzJwL9t6QpjQ5c`
+- **Key**: `gw_live_01eQ… (redacted)`
 - **Files**:
   - `scripts/checks/check_deployment.py`
   - `scripts/utilities/clear_cache.py`
@@ -16,14 +16,14 @@ During PR #353 audit, GitGuardian detected exposed API keys and credentials in t
 - **Action**: This key should be ROTATED/DEACTIVATED in production
 
 ### 2. Supabase Test JWT (monitoring branch)
-- **Key**: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlubGVyb2VoeXJtYWFma2dqZ21yIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTY4Nzc3OSwiZXhwIjoyMDc1MjYzNzc5fQ.kIehmSJC9EX86rkhCbhzX6ZHiTfQO7k6ZM2wU4e6JNs`
+- **Key**: `eyJ… (redacted)`
 - **File**: `scripts/utilities/update_rate_limits.py`
 - **Commit**: 848c2f9b (removed and moved to environment variable)
 - **Status**: REMOVED from code, replaced with env var references
 - **Action**: This credential should be ROTATED/REGENERATED in Supabase
 
 ### 3. Performance Test API Key (monitoring branch, earlier)
-- **Key**: `gw_live_keYT21TicJZzxObd8-6LJukxOg5p0CLo_3Yki83w3pU`
+- **Key**: `gw_live_keYT… (redacted)`
 - **Files**:
   - `performance_test.py`
   - `comprehensive_performance_test.py`
@@ -62,9 +62,9 @@ During PR #353 audit, GitGuardian detected exposed API keys and credentials in t
 - **Recommendation**: Rotate/deactivate the exposed keys in production systems
 
 ## Required Actions (Must Complete)
-1. **URGENT**: Rotate/deactivate the API key `gw_live_01eQv2HGWkjo0ApxoC4-G3yaOv6ilbzJwL9t6QpjQ5c`
+1. **URGENT**: Rotate/deactivate the API key `gw_live_01eQ… (redacted)`
 2. **URGENT**: Rotate/regenerate the Supabase JWT token in admin panel
-3. **URGENT**: Rotate/deactivate the API key `gw_live_keYT21TicJZzxObd8-6LJukxOg5p0CLo_3Yki83w3pU`
+3. **URGENT**: Rotate/deactivate the API key `gw_live_keYT… (redacted)`
 4. Consider using `bfg-repo-cleaner` or `git filter-branch` to purge these keys from history (requires coordination with team)
 
 ## Environment Variables Now Required

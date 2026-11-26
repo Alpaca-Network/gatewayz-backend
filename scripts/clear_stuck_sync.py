@@ -2,12 +2,13 @@
 """
 Clear the stuck sync from our test run
 """
+import os
 
 from datetime import datetime
 from supabase import create_client, Client
 
 STAGING_URL = "https://ynleroehyrmaafkgjgmr.supabase.co"
-STAGING_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlubGVyb2VoeXJtYWFma2dqZ21yIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTY4Nzc3OSwiZXhwIjoyMDc1MjYzNzc5fQ.kIehmSJC9EX86rkhCbhzX6ZHiTfQO7k6ZM2wU4e6JNs"
+STAGING_KEY = os.environ["STAGING_KEY"]
 
 supabase: Client = create_client(STAGING_URL, STAGING_KEY)
 

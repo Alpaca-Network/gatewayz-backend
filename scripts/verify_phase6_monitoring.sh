@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Configuration
 STAGING_URL="${STAGING_URL:-https://gatewayz-staging.up.railway.app}"
 PRODUCTION_URL="${PRODUCTION_URL:-https://api.gatewayz.ai}"
-ADMIN_API_KEY="${ADMIN_KEY:-gw_live_wTfpLJ5VB28qMXpOAhr7Uw}"
+ADMIN_API_KEY="${ADMIN_KEY:-${ADMIN_API_KEY}}"
 
 # Test counters
 TOTAL_TESTS=0

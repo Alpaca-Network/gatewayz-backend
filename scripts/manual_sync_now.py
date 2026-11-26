@@ -2,12 +2,13 @@
 """
 Manual Pricing Sync - Try all available endpoints
 """
+import os
 
 import asyncio
 import httpx
 
 STAGING_URL = "https://gatewayz-staging.up.railway.app"
-ADMIN_KEY = "gw_live_wTfpLJ5VB28qMXpOAhr7Uw"
+ADMIN_KEY = os.environ["ADMIN_KEY"]
 
 ENDPOINTS = [
     {
