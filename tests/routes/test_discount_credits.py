@@ -435,9 +435,7 @@ def test_setting_the_cap_is_owner_only_and_rate_limited():
     from fastapi.routing import APIRoute
 
     route = next(
-        r
-        for r in app.routes
-        if isinstance(r, APIRoute) and r.path == "/discount-credits/daily-cap"
+        r for r in app.routes if isinstance(r, APIRoute) and r.path == "/discount-credits/daily-cap"
     )
     calls = set()
     stack = list(route.dependant.dependencies)

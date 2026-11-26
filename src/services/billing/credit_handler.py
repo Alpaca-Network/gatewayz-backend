@@ -34,6 +34,7 @@ def refund_key_for(original_request_id: str) -> str:
     id of the original charge."""
     return str(uuid.uuid5(_REFUND_KEY_NAMESPACE, f"refund:{original_request_id}"))
 
+
 # Retry configuration for credit deduction
 CREDIT_DEDUCTION_MAX_RETRIES = 3
 CREDIT_DEDUCTION_RETRY_DELAYS = [0.5, 1.0, 2.0]  # Exponential backoff in seconds
