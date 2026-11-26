@@ -48,6 +48,9 @@ ROUTES = [
     ("post", "/auth/wallet/link/nonce", {"wallet_address": "0x" + "a" * 40}),
     ("post", "/auth/wallet/link", {"message": "m", "signature": "0x00"}),
     ("delete", "/auth/wallets/0x" + "a" * 40, None),
+    # Not a wallet route, but the same rule: the daily cap on discount
+    # credits is set with the account's own key only.
+    ("put", "/discount-credits/daily-cap", {"daily_cap_usd": "10"}),
 ]
 
 
@@ -94,4 +97,4 @@ def test_the_dependency_is_used_by_every_wallet_route():
             ):
                 assert depends_on_owner(route), route.path
                 checked += 1
-    assert checked >= 6
+    assert checked >= 7

@@ -3,21 +3,24 @@ inference_discount_ledger and inference_discount_holds (supabase/migrations/
 20261011120000_delegation_reward_share_discount.sql; the tables and SQL
 functions keep their historical names).
 
-Every balance change goes through one of the SQL functions (discount_grant,
-discount_hold, discount_apply, discount_reverse), each of which takes the
-account's balance row lock and is idempotent on a UUID request_id. Nothing
-here reads a balance and writes it back.
+Every balance or hold change goes through one of the SQL functions
+(discount_grant, discount_hold, discount_apply, discount_reverse,
+discount_release), each of which takes the account's balance row lock and is
+idempotent on a UUID request_id. Nothing here reads a balance and writes it
+back.
 
 Two conventions, chosen per caller:
 
 * the billing calls (:func:`hold_discount`, :func:`apply_discount`,
-  :func:`reverse_discount`) RAISE
-  :class:`DiscountUnavailableError` on any failure. Billing must know the
-  call failed so it charges full price (fail open to full price); a silent 0
-  would be indistinguishable from "no balance", which is fine, but a silent
-  0 from a call that DID apply would double-charge.
-* the reads and :func:`grant_discount` return a safe default (None / empty)
-  and log.
+  :func:`reverse_discount`, :func:`release_discount`) RAISE
+  :class:`DiscountUnavailableError` on any failure, so billing knows the call
+  failed rather than reading it as "nothing drawn". On an apply error billing
+  retries the idempotent call once; if that fails too it reverses the
+  request's draw (in case the failed call did draw) and charges the list
+  price (src/services/discount_credits/billing.py::apply_for_request).
+* :func:`find_use` (read by refunds) raises the same way.
+* the other reads and :func:`grant_discount` return a safe default (None /
+  empty) and log.
 """
 
 from __future__ import annotations
@@ -74,9 +77,17 @@ def apply_discount(
     request_id: str,
     metadata: dict[str, Any] | None = None,
 ) -> Decimal:
-    """Draw min(cost x d, balance) for one billed request (supabase function
-    discount_apply). Idempotent on `request_id`: a repeat returns what the
-    first call applied. Raises DiscountUnavailableError on any failure."""
+    """Draw the discount for one billed request (supabase function
+    discount_apply):
+
+        least(trunc(cost x d, 6),
+              balance - other live holds,
+              greatest(own live hold, daily cap - used today - other live holds))
+
+    "Own live hold" is this account's unexpired hold for `request_id`, so a
+    cap lowered after the hold was placed never shrinks it. Settles (deletes)
+    that hold. Idempotent on `request_id`: a repeat returns what the first
+    call applied. Raises DiscountUnavailableError on any failure."""
     try:
         client = get_supabase_client()
         result = client.rpc(
@@ -102,9 +113,14 @@ def hold_discount(
     ttl_seconds: int,
 ) -> Decimal:
     """Reserve, at pre-check time, the discount a request will draw
-    (supabase function discount_hold): min(trunc(estimate x d, 6), balance
-    minus every other live hold), for `ttl_seconds`. Idempotent on
-    `request_id`. Raises DiscountUnavailableError on any failure."""
+    (supabase function discount_hold):
+
+        least(trunc(estimate x d, 6),
+              balance - every live hold of the account,
+              daily cap - used today - every live hold of the account)
+
+    for `ttl_seconds`. Idempotent on `request_id` (a repeat returns the
+    existing hold). Raises DiscountUnavailableError on any failure."""
     try:
         client = get_supabase_client()
         result = client.rpc(
@@ -132,6 +148,42 @@ def reverse_discount(request_id: str) -> Decimal:
     except Exception as e:  # noqa: BLE001
         raise DiscountUnavailableError(f"discount_reverse failed: {type(e).__name__}") from None
     return _scalar(result.data)
+
+
+def release_discount(request_id: str, user_id: int) -> Decimal:
+    """Free this account's hold for a request that ended without being billed
+    (supabase function discount_release). Returns the amount the live hold
+    reserved; 0 when there was none (already settled, expired, never placed,
+    or held by another account, which is left alone). Never changes a
+    balance. Raises DiscountUnavailableError on any failure."""
+    try:
+        client = get_supabase_client()
+        result = client.rpc(
+            "discount_release", {"p_request_id": request_id, "p_user_id": user_id}
+        ).execute()
+    except Exception as e:  # noqa: BLE001
+        raise DiscountUnavailableError(f"discount_release failed: {type(e).__name__}") from None
+    return _scalar(result.data)
+
+
+def find_use(request_id: str) -> dict[str, Any] | None:
+    """The discount `use` ledger row a billed request wrote, or None when it
+    drew no discount. Raises DiscountUnavailableError when the lookup fails,
+    so a refund can tell "no discount" from "do not know"."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_LEDGER_TABLE)
+            .select("id, user_id, amount_usd, created_at")
+            .eq("request_id", request_id)
+            .eq("kind", "use")
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:  # noqa: BLE001
+        raise DiscountUnavailableError(f"discount use lookup failed: {type(e).__name__}") from None
+    rows = result.data or []
+    return rows[0] if rows and isinstance(rows[0], dict) else None
 
 
 def grant_discount(
@@ -173,10 +225,11 @@ def set_daily_cap(user_id: int, cap_usd: Decimal) -> dict[str, Any] | None:
     """Set the account's daily cap on discount credits use, in USD (supabase
     function discount_set_daily_cap).
 
-    Lowering applies at once. Raising applies from the next UTC day, so a
-    leaked API key cannot lift the cap and drain the balance the same day.
+    Lowering applies at once. Raising applies 24 hours after this call
+    (next_daily_cap_at), so a raise can never be spent the day it is made.
     Returns {status: set | scheduled | invalid, daily_cap_usd?,
-    next_daily_cap_usd?, next_daily_cap_from?}; None on failure."""
+    next_daily_cap_usd?, next_daily_cap_from?, next_daily_cap_at?}; None on
+    failure."""
     try:
         client = get_supabase_client()
         result = client.rpc(

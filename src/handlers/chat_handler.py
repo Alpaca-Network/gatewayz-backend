@@ -341,6 +341,10 @@ class ChatInferenceHandler:
         # A job key's usage line, built in _save_request_record and written by
         # _flush_job_line() before the response is released.
         self._pending_job_line: tuple[tuple, dict] | None = None
+        # The billing ref a discount credits hold was placed under at the
+        # pre-check (None when none was). Billing settles that hold; every
+        # exit that does not bill releases it (_release_discount_hold).
+        self._discount_hold_ref: str | None = None
 
         logger.debug(
             f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}"
@@ -495,11 +499,12 @@ class ChatInferenceHandler:
             # deduct_credits settles on), so concurrent pre-checks cannot
             # all count one balance.
             max_cost, _, _ = calculate_maximum_cost(model_id, messages, max_tokens)
+            self._discount_hold_ref = self._billing_ref() or self.request_id
             credit_capacity = await discount_aware_credits_async(
                 self.user.get("id"),
                 user_credits,
                 max_cost,
-                self._billing_ref() or self.request_id,
+                self._discount_hold_ref,
             )
 
         # Perform pre-flight check (now includes affordability capping)
@@ -553,6 +558,22 @@ class ChatInferenceHandler:
             f"available=${user_credits:.4f}"
         )
         return max_tokens
+
+    async def _release_discount_hold(self) -> None:
+        """Free this request's discount credits hold when the request ends
+        without being billed (provider error, refused after the pre-check,
+        nothing to charge). No-op when no hold was placed; safe after billing
+        (the draw already settled the hold). Best effort: never raises, and
+        an unreleased hold still expires on its own."""
+        ref, self._discount_hold_ref = self._discount_hold_ref, None
+        if ref is None or not self.user:
+            return
+        try:
+            from src.services.discount_credits.billing import release_for_request_async
+
+            await release_for_request_async(self.user.get("id"), ref)
+        except Exception as e:  # noqa: BLE001 - best effort
+            logger.warning(f"[ChatHandler] Discount hold release failed: {type(e).__name__}")
 
     def _bind_byok(self, provider_name: str):
         """Bind the customer's own key for *provider_name* to the request context.
@@ -1093,6 +1114,11 @@ class ChatInferenceHandler:
         # makes get_transaction_by_request_id's double-charge guard apply here.
         billing_ref = self._billing_ref() or self.request_id
 
+        if cost <= 0:
+            # deduct_credits returns at once for a zero cost (free model, a
+            # BYOK request with no routing fee), so the hold is never settled.
+            await self._release_discount_hold()
+
         # Deduct credits
         try:
             await asyncio.to_thread(
@@ -1126,7 +1152,11 @@ class ChatInferenceHandler:
             )
         except Exception as e:
             logger.error(f"[ChatHandler] Credit deduction failed: {e}")
+            # A refused or failed charge settles nothing: free the hold too.
+            await self._release_discount_hold()
             raise
+        # Settled by the draw inside deduct_credits (or there was none).
+        self._discount_hold_ref = None
 
     def _save_request_record(
         self,
@@ -1593,6 +1623,8 @@ class ChatInferenceHandler:
         except Exception as e:
             # Log error and save failed request
             logger.error(f"[ChatHandler] Request failed: {e}", exc_info=True)
+            # Not billed (or billing itself failed): free the discount hold.
+            await self._release_discount_hold()
 
             # Save failed request metadata
             self._save_request_record(
@@ -2028,6 +2060,9 @@ class ChatInferenceHandler:
             # this the tokens the provider already generated were never charged.
             # Bill what was accumulated so far, in a task that survives the
             # cancellation, then let the cancellation continue.
+            if not stream_started and self._discount_hold_ref is not None:
+                # Cancelled before any provider call: nothing will be billed.
+                self._spawn_billing_task(self._release_discount_hold())
             if stream_started and not self._stream_billed and not self.is_anonymous:
                 self._spawn_billing_task(
                     self._bill_stream(
@@ -2049,6 +2084,8 @@ class ChatInferenceHandler:
         except Exception as e:
             # Log error and save failed request
             logger.error(f"[ChatHandler] Streaming request failed: {e}", exc_info=True)
+            # Not billed (or billing itself failed): free the discount hold.
+            await self._release_discount_hold()
 
             # Save failed request metadata
             self._save_request_record(

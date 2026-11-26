@@ -281,13 +281,14 @@ class Config:
     # billed exactly as with the switch off. A single "*" means every
     # account. Empty (default), or a value with no valid id in it, means
     # NOBODY: a missing or mistyped setting can never open discount billing
-    # to all accounts. Entries that are not positive whole numbers are ignored.
+    # to all accounts. Entries that are not positive whole numbers written in
+    # ASCII digits 0-9 are ignored (never an import error).
     _VAULT_DISCOUNT_PILOT_RAW = (_get_env_var("VAULT_DISCOUNT_PILOT_USER_IDS", "") or "").strip()
     VAULT_DISCOUNT_ALL_ACCOUNTS = _VAULT_DISCOUNT_PILOT_RAW == "*"
     VAULT_DISCOUNT_PILOT_USER_IDS = frozenset(
         int(part)
-        for part in _VAULT_DISCOUNT_PILOT_RAW.split(",")
-        if part.strip().isdigit() and int(part) > 0
+        for part in (p.strip() for p in _VAULT_DISCOUNT_PILOT_RAW.split(","))
+        if part.isascii() and part.isdigit() and int(part) > 0
     )
     # Cardano wallet linking (src/routes/wallet_auth_cardano.py,
     # src/services/wallet/). Accept stake_test1... addresses when linking

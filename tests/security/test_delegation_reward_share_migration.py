@@ -5,7 +5,14 @@ and every balance change under a row lock / advisory lock and idempotent on a
 UUID request_id.
 
 The SQL behaviour itself is exercised against a real Postgres by
-tests/security/test_reward_share_sql_live.py when GATEWAYZ_TEST_PG_DSN is set."""
+tests/security/test_reward_share_sql_live.py when GATEWAYZ_TEST_PG_DSN is set.
+
+These checks read the 20261011120000 file as written (migrations are never
+edited). The programme is retired: its attribution functions
+(delegation_attribution_spent, delegation_reserve_attribution,
+delegation_grant_attribution) are dropped by 20261126120000, and
+discount_apply / discount_hold were since replaced by later migrations; see
+tests/security/test_discount_credits_hardening_migration.py and tests/sql/."""
 
 from __future__ import annotations
 

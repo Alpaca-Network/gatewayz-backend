@@ -6,7 +6,8 @@ credits are granted only from the Gatewayz vault; there is no route that
 grants or adjusts them.
 
 ``PUT /discount-credits/daily-cap`` lets the account owner set how much of
-the balance may be used per UTC day. It changes a limit, never the balance.
+the balance may be used per UTC day. It changes a limit, never the balance,
+and needs the account's own sign-in key (not an inference API key).
 
 Numbers are strings (6 dp), so nothing is lost to a float on the way out.
 """
@@ -22,8 +23,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.db.inference_discount import get_balance, list_ledger, set_daily_cap
-from src.security.deps import get_current_user
+from src.security.deps import get_account_owner_id, get_current_user
 from src.services.discount_credits.billing import discount_enabled_for, discount_percent
+from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,9 @@ _DISCOUNT_HISTORY_LIMIT = 50
 DEFAULT_DAILY_CAP_USD = Decimal("50")
 # Same bound as the SQL function discount_set_daily_cap.
 MAX_DAILY_CAP_USD = Decimal("1000000")
+daily_cap_rl = create_endpoint_rate_limit(
+    "discount_credits_daily_cap", max_requests=10, window_seconds=60
+)
 
 
 def _decimal(value: Any) -> Decimal:
@@ -90,18 +95,52 @@ def _as_date(value: Any) -> date | None:
         return None
 
 
-def _cap_view(row: dict[str, Any] | None, today: date | None = None) -> dict[str, Any]:
+def _as_utc(value: Any) -> datetime | None:
+    """A stored timestamptz (ISO string or datetime) as an aware UTC datetime."""
+    if isinstance(value, datetime):
+        moment = value
+    elif value:
+        try:
+            moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC)
+
+
+def _iso_z(moment: datetime) -> str:
+    return moment.isoformat().replace("+00:00", "Z")
+
+
+def _cap_view(
+    row: dict[str, Any] | None, today: date | None = None, now: datetime | None = None
+) -> dict[str, Any]:
     """The daily cap as the account should see it right now.
 
     The stored row is brought up to date only when billing next touches it,
-    so this applies the same two rules while reading: use counted on an
-    earlier day reads as 0, and a raise whose date has come is in force."""
+    so this applies the same rules while reading: use counted on an earlier
+    day reads as 0, and a raise is in force once its time (next_daily_cap_at)
+    has passed -- or, for a raise recorded before that column existed, once
+    its date (next_daily_cap_from) has come. "Left today" is never below 0:
+    use can end above the cap when a request settles a hold placed before
+    the cap was lowered."""
     row = row or {}
-    today = today or datetime.now(UTC).date()
+    now = now or datetime.now(UTC)
+    today = today or now.date()
     cap = _decimal(row.get("daily_cap_usd", DEFAULT_DAILY_CAP_USD))
-    next_cap, next_from = row.get("next_daily_cap_usd"), _as_date(row.get("next_daily_cap_from"))
-    if next_cap is not None and next_from is not None and next_from <= today:
-        cap, next_cap, next_from = _decimal(next_cap), None, None
+    next_cap = row.get("next_daily_cap_usd")
+    next_at = _as_utc(row.get("next_daily_cap_at"))
+    next_from = _as_date(row.get("next_daily_cap_from"))
+    if next_at is not None:
+        next_from = next_at.date()
+        due = next_at <= now
+    else:
+        due = next_from is not None and next_from <= today
+    if next_cap is not None and next_from is not None and due:
+        cap, next_cap, next_from, next_at = _decimal(next_cap), None, None, None
 
     cap_day = _as_date(row.get("cap_day"))
     used = _decimal(row.get("cap_used_usd")) if cap_day == today else Decimal(0)
@@ -111,10 +150,13 @@ def _cap_view(row: dict[str, Any] | None, today: date | None = None) -> dict[str
         "daily_cap_usd": _usd(cap),
         "used_today_usd": _usd(used),
         "left_today_usd": _usd(max(cap - used, Decimal(0))),
-        "resets_at": tomorrow.isoformat().replace("+00:00", "Z"),
-        # A raise the account asked for that is not in force yet, or null.
+        "resets_at": _iso_z(tomorrow),
+        # A raise the account asked for that is not in force yet, or null:
+        # its amount, the UTC date it applies on, and (for raises recorded
+        # since the 24-hour rule) the exact time it applies.
         "next_daily_cap_usd": _usd(next_cap) if pending else None,
         "next_daily_cap_from": next_from.isoformat() if pending else None,
+        "next_daily_cap_at": _iso_z(next_at) if pending and next_at is not None else None,
     }
 
 
@@ -125,6 +167,7 @@ _NO_CAP = {
     "resets_at": None,
     "next_daily_cap_usd": None,
     "next_daily_cap_from": None,
+    "next_daily_cap_at": None,
 }
 
 
@@ -178,14 +221,17 @@ class DailyCapRequest(BaseModel):
 @router.put("/discount-credits/daily-cap", tags=["discount_credits"])
 async def put_daily_cap(
     body: DailyCapRequest,
-    user: dict[str, Any] = Depends(get_current_user),
+    user_id: int = Depends(get_account_owner_id),
+    _rl: None = Depends(daily_cap_rl),
 ) -> dict[str, Any]:
     """Set the caller's daily cap on discount credits use.
 
-    Lowering the cap applies at once. Raising it applies from the next UTC
-    day (`status: "scheduled"`). 0 stops discount credits from being used.
-    Reaching the cap never fails a request: the rest is billed as usual."""
-    user_id = user["id"]
+    Needs the account's own sign-in key; an inference API key gets 403
+    `account_key_required`. Lowering the cap applies at once. Raising it
+    applies 24 hours after you raise it (`status: "scheduled"`;
+    `next_daily_cap_at` says when). 0 stops discount credits from being
+    used. Reaching the cap never fails a request: the rest is billed as
+    usual."""
     if not discount_enabled_for(user_id):
         raise HTTPException(status_code=404, detail="discount_credits_not_enabled")
 

@@ -1135,6 +1135,12 @@ def deduct_credits(
                 logger.info(
                     f"Admin tier user {user_id} - skipping credit deduction of ${tokens:.6f}"
                 )
+                # Not billed, so a discount hold the pre-check placed is never
+                # settled: free it (no-op unless discount credits apply here;
+                # never raises).
+                from src.services.discount_credits.billing import release_for_request
+
+                release_for_request(user_id, request_id or (metadata or {}).get("request_id"))
                 return
         except Exception as e:
             logger.warning(f"Error checking admin tier status for credit deduction: {e}")
@@ -1221,8 +1227,11 @@ def deduct_credits(
         from_allowance = min(allowance_before, tokens)
         from_purchased = tokens - from_allowance
 
-        # Extract request_id from metadata if present (for idempotency / tracing)
-        request_id = (metadata or {}).get("request_id")
+        # The request_id the atomic RPC records on the credit_transactions row
+        # (its unique idempotency key) comes from metadata, as it always has;
+        # the `request_id` parameter (the early idempotency check above and
+        # the discount key) is left as the caller passed it.
+        rpc_request_id = (metadata or {}).get("request_id")
 
         # ===================================================================
         # ATOMIC PATH: Try stored procedure first (single-transaction guarantee)
@@ -1241,8 +1250,8 @@ def deduct_credits(
                 "p_description": description,
                 "p_metadata": metadata or {},
             }
-            if request_id:
-                rpc_params["p_request_id"] = str(request_id)
+            if rpc_request_id:
+                rpc_params["p_request_id"] = str(rpc_request_id)
 
             with track_database_query(table="users", operation="rpc_atomic_deduct"):
                 rpc_result = client.rpc("atomic_deduct_credits", rpc_params).execute()

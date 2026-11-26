@@ -591,7 +591,7 @@ async def get_account_owner_id(
 ) -> int:
     """The caller's user id, for actions that change who controls the account
     or where its discount credits go (linking or unlinking a wallet, the
-    eligibility attestation).
+    eligibility attestation) or how fast they may be used (the daily cap).
 
     Only the account's own sign-in key may do these: a primary key (issued at
     sign-in) or a temporary session key (gw_temp_). An ordinary API key made

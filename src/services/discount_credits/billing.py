@@ -8,19 +8,28 @@ the discount credits balance until it runs out, d = VAULT_DISCOUNT_PERCENT.
 1 discount credit = $1 of list price.
 
 Billing reaches this from src/db/users.py::deduct_credits (the draw), the
-pre-request sufficiency checks (the hold) and refunds (the reversal), and the
+pre-request sufficiency checks (the hold), the request paths when a request
+ends without being billed (the release) and refunds (the reversal), and the
 rules are:
 
 * **Dark by default.** :func:`discount_enabled` is a pure config read; with
   VAULT_DISCOUNT_BILLING_ENABLED off nothing here touches the database and
-  billing is unchanged.
-* **Fail open to full price.** Any discount error -> 0 applied -> the user is
-  charged the full list price and the request never fails because of the
-  discount.
+  billing is unchanged (refunds aside: they look up whether the request drew
+  a discount, whatever the switch says now).
+* **On error, charge the list price.** The request never fails because of
+  the discount. When the draw errors it is retried once (it is idempotent);
+  if it still errors, any draw the failed calls may have made is reversed
+  before the request is charged the list price, so a request is never both
+  discounted and charged in full.
 * **Idempotent on the billing request_id.** discount_apply returns the
   original amount on a repeat, so a retried deduction charges the same
   (cost - applied) and never draws twice. A request without a UUID
   request_id gets no discount (there is nothing to make it idempotent on).
+* **Holds are honoured.** A request settles against its own live hold even
+  if the daily cap was lowered after the hold was placed, so the pre-check
+  that admitted it on the strength of that hold stays true. A request that
+  ends without being billed releases its hold (best effort; otherwise the
+  hold expires after VAULT_DISCOUNT_HOLD_TTL_SECONDS).
 """
 
 from __future__ import annotations
@@ -98,9 +107,17 @@ def apply_for_request(
 ) -> Decimal:
     """The discount drawn for one billed request -- 0 when disabled, when the
     account is outside the pilot list, when the request has no UUID
-    request_id, when there is no balance, and on ANY error (full price).
+    request_id, when there is no balance, and on error (list price).
     Never raises. Never more than trunc(cost x d, 6) with
-    d <= MAX_DISCOUNT_PERCENT, so the paid-balance charge is always positive."""
+    d <= MAX_DISCOUNT_PERCENT, so the paid-balance charge is always positive.
+
+    On error: the draw (discount_apply) is idempotent on the request_id, so
+    it is tried a second time. If that fails too, a failed call may still
+    have drawn (the database committed but the reply was lost), so the
+    request's draw is reversed (also idempotent; best effort) and only then
+    is 0 returned and the list price charged. A request is never left both
+    discounted and charged in full -- unless the reversal fails as well,
+    which is logged as an error for reconciliation."""
     if not discount_enabled_for(user_id) or cost <= 0:
         return Decimal(0)
     percent = discount_percent()
@@ -109,15 +126,32 @@ def apply_for_request(
         return Decimal(0)
     from src.db.inference_discount import DiscountUnavailableError, apply_discount
 
-    try:
-        applied = apply_discount(user_id, cost, percent, key, metadata)
-    except Exception as e:  # noqa: BLE001 - fail open to full price, always
-        # DiscountUnavailableError messages are pre-redacted; anything else is
-        # described by class only.
-        reason = str(e) if isinstance(e, DiscountUnavailableError) else type(e).__name__
-        logger.warning(
-            "discount credits unavailable for user %s; charging full price: %s", user_id, reason
-        )
+    applied: Decimal | None = None
+    for attempt in (1, 2):
+        try:
+            applied = apply_discount(user_id, cost, percent, key, metadata)
+            break
+        except Exception as e:  # noqa: BLE001 - on error, charge the list price
+            # DiscountUnavailableError messages are pre-redacted; anything else
+            # is described by class only.
+            reason = str(e) if isinstance(e, DiscountUnavailableError) else type(e).__name__
+            logger.warning(
+                "discount credits draw failed for user %s (attempt %d): %s",
+                user_id,
+                attempt,
+                reason,
+            )
+    if applied is None:
+        if reverse_or_none(key) is None:
+            logger.error(
+                "discount credits: draw and reversal both failed for user %s; the request "
+                "is charged the list price and may also have drawn discount credits",
+                user_id,
+            )
+        else:
+            logger.warning(
+                "discount credits unavailable for user %s; charging the list price", user_id
+            )
         return Decimal(0)
     ceiling = (cost * percent).quantize(_DISCOUNT_DP, rounding=ROUND_DOWN)
     if applied > ceiling:
@@ -143,6 +177,28 @@ def reverse_or_none(request_id: Any) -> Decimal | None:
     except Exception as e:  # noqa: BLE001
         logger.warning("discount credits reversal failed: %s", type(e).__name__)
         return None
+
+
+def discount_drawn_for(request_id: Any) -> Decimal | None:
+    """What a billed request drew from discount credits (its `use` ledger
+    row; positive), 0 when it drew nothing, or None when that cannot be
+    established. Reads the data, not the config: a refund must know even if
+    the switch or the pilot list has changed since the request was billed."""
+    key = _uuid_or_none(request_id)
+    if key is None:
+        # discount_apply needs a UUID request_id: nothing can have been drawn.
+        return Decimal(0)
+    from src.db.inference_discount import find_use
+
+    try:
+        row = find_use(key)
+        if row is None:
+            return Decimal(0)
+        drawn = -Decimal(str(row.get("amount_usd")))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("discount credits use lookup failed: %s", type(e).__name__)
+        return None
+    return drawn if drawn.is_finite() and drawn >= 0 else None
 
 
 def charged_credits_for(request_id: Any) -> Decimal | None:
@@ -181,6 +237,45 @@ def reverse_for_request(request_id: Any) -> Decimal:
         return Decimal(0)
 
 
+def release_for_request(user_id: Any, request_id: Any) -> Decimal:
+    """Free the hold a request placed at pre-check when it ends without being
+    billed (provider error, nothing to charge, refused after the pre-check).
+    Returns the amount released; 0 when there was none, on error, and --
+    with no DB call -- while the discount is off for this account or the
+    request has no UUID request_id. Never raises; never changes a balance.
+    Safe after billing too: the draw already settled the hold, so nothing is
+    released."""
+    if not isinstance(user_id, int) or isinstance(user_id, bool):
+        return Decimal(0)
+    if not discount_enabled_for(user_id):
+        return Decimal(0)
+    key = _uuid_or_none(request_id)
+    if key is None:
+        return Decimal(0)
+    from src.db.inference_discount import DiscountUnavailableError, release_discount
+
+    try:
+        return release_discount(key, user_id)
+    except Exception as e:  # noqa: BLE001 - best effort; the hold still expires
+        reason = str(e) if isinstance(e, DiscountUnavailableError) else type(e).__name__
+        logger.warning("discount credits hold release failed for user %s: %s", user_id, reason)
+        return Decimal(0)
+
+
+async def release_for_request_async(user_id: Any, request_id: Any) -> Decimal:
+    """:func:`release_for_request` for async request paths: returns 0 at once
+    (no thread hop, no DB call) while the discount is off for this account,
+    else releases off the event loop. Never raises."""
+    if not discount_enabled_for(user_id):
+        return Decimal(0)
+    import asyncio
+
+    try:
+        return await asyncio.to_thread(release_for_request, user_id, request_id)
+    except Exception:  # noqa: BLE001 - best effort, never raises
+        return Decimal(0)
+
+
 def discount_aware_credits(user_id: Any, credits: float, estimate: float, request_id: Any) -> float:
     """The list-price spend `credits` can cover for ONE request once its
     discount is counted, for pre-request sufficiency checks.
@@ -193,7 +288,12 @@ def discount_aware_credits(user_id: Any, credits: float, estimate: float, reques
     request against its own hold. With hold H, discount d and credits C a
     request of list price X needs X - min(dX, H) <= C, i.e.
     X <= min(C / (1 - d), C + H), so every request it admits charges at most C
-    in credits, exactly like a request without the discount.
+    in credits, exactly like a request without the discount. That bound
+    assumes the request draws at least min(dX, H) at settlement: it does,
+    because discount_apply honours a live own hold even if the daily cap was
+    lowered meanwhile (the balance cannot fall below the account's live
+    holds). It does not hold if the hold expired first
+    (VAULT_DISCOUNT_HOLD_TTL_SECONDS) or the draw errored (list price).
 
     Returns `credits` unchanged -- and makes no DB call -- while the discount
     is disabled, the account is outside the pilot list, or the request has no

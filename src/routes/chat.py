@@ -33,6 +33,7 @@ from src.services.anonymous_rate_limiter import (
     validate_anonymous_request,
 )
 from src.services.auth_rate_limiting import get_client_ip
+from src.services.discount_credits.billing import release_for_request_async
 from src.services.job_usage_v2 import CONTENT_HASH_HEADER
 from src.services.key_purpose import enforce_no_routing_alias, is_validator_key
 from src.services.passive_health_monitor import capture_model_health
@@ -508,6 +509,10 @@ async def chat_completions(
     # pre-check. Must be released on EVERY exit path — a leaked slot
     # permanently 429s the key ("Concurrency limit exceeded") until restart.
     concurrency_slot_held = False
+    # The account a discount credits hold was placed for at the credit
+    # pre-check below (None when none was). The hold is keyed by request_id
+    # and settled by billing; an exit that never reaches billing releases it.
+    discount_hold_user_id = None
 
     try:
         # === 1) User + plan/trial prechecks (OPTIMIZED: parallelized DB calls) ===
@@ -750,6 +755,7 @@ async def chat_completions(
                 _max_cost, _, _ = calculate_maximum_cost(
                     req.model, _msgs, getattr(req, "max_tokens", None)
                 )
+                discount_hold_user_id = user.get("id")
                 _credit_capacity = await discount_aware_credits_async(
                     user.get("id"), _user_credits, _max_cost, request_id
                 )
@@ -1294,6 +1300,10 @@ async def chat_completions(
                 await rate_limit_mgr.release_concurrency(api_key)
             except Exception as release_exc:
                 logger.debug("Failed to release concurrency on error: %s", release_exc)
+        if discount_hold_user_id is not None:
+            # Free the discount hold if billing did not settle it (a no-op
+            # when it did).
+            await release_for_request_async(discount_hold_user_id, request_id)
 
         # Save failed request for HTTPException errors (rate limits, auth errors, etc.)
         await save_failed_request(
@@ -1325,6 +1335,10 @@ async def chat_completions(
                 await rate_limit_mgr.release_concurrency(api_key)
             except Exception as release_exc:
                 logger.debug("Failed to release concurrency on error: %s", release_exc)
+        if discount_hold_user_id is not None:
+            # Free the discount hold if billing did not settle it (a no-op
+            # when it did).
+            await release_for_request_async(discount_hold_user_id, request_id)
 
         # Save failed request for unexpected errors
         await save_failed_request(

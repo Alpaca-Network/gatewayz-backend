@@ -188,6 +188,8 @@ def test_lowering_the_cap_applies_at_once(db):
 
 
 def test_raising_the_cap_waits_for_the_next_day(db):
+    """Since 20261126120000 a raise waits 24 hours (next_daily_cap_at); see
+    tests/sql/test_discount_credits_hardening_sql.py for the timing rule."""
     with db.cursor() as cur:
         user_id = _account(cur, cap="5")
         result = _set_cap(cur, user_id, D("20"))
@@ -200,10 +202,12 @@ def test_raising_the_cap_waits_for_the_next_day(db):
         # Today is still bounded by the old cap.
         assert _apply(cur, user_id, D("100")) == D("5")
         assert _apply(cur, user_id, D("100")) == 0
-        # The next day: move the row and the pending date back by one day.
+        # A day later: move the row, the pending date and (since 20261126120000)
+        # the pending time back by one day.
         cur.execute(
             "UPDATE public.inference_discount_balances"
-            " SET cap_day = cap_day - 1, next_daily_cap_from = next_daily_cap_from - 1"
+            " SET cap_day = cap_day - 1, next_daily_cap_from = next_daily_cap_from - 1,"
+            " next_daily_cap_at = next_daily_cap_at - interval '24 hours'"
             " WHERE user_id = %s",
             (user_id,),
         )
