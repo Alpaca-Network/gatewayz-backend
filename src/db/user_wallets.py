@@ -38,7 +38,6 @@ def wallet_namespace(row: dict[str, Any]) -> str:
     return str(row.get("chain_namespace") or EVM_NAMESPACE)
 
 
-
 def is_evm_wallet(row: dict[str, Any]) -> bool:
     """True for an EVM (0x...) wallet: the kind that can sign in. A Cardano
     stake address is linked only to receive discount credits."""
