@@ -40,35 +40,39 @@ def record_attestation(
     user_id: int, attestation_version: str, country: str | None
 ) -> dict[str, Any] | None:
     """Mark the account eligible after it attested. Never clears a
-    'restricted' row: that one is returned as-is. None on any failure."""
+    'restricted' row: that one is returned as-is. None on any failure.
+
+    The write is conditional so a concurrent mark_restricted cannot be
+    overwritten: an existing row is updated only WHERE status is not
+    'restricted', and a missing row is inserted without overwriting one
+    that appeared in between. The row is read back afterwards, so the
+    caller always sees what is stored."""
     existing = get_eligibility(user_id)
     if existing is None:
         return None
     if existing.get("status") == "restricted":
         return existing
     now = datetime.now(UTC).isoformat()
+    fields = {
+        "status": "eligible",
+        "attested_at": now,
+        "attestation_version": attestation_version,
+        "country": country,
+        "updated_at": now,
+    }
     try:
         client = get_supabase_client()
-        result = (
-            client.table(_ELIGIBILITY_TABLE)
-            .upsert(
-                {
-                    "user_id": user_id,
-                    "status": "eligible",
-                    "attested_at": now,
-                    "attestation_version": attestation_version,
-                    "country": country,
-                    "updated_at": now,
-                },
-                on_conflict="user_id",
-            )
-            .execute()
-        )
-        rows = result.data or []
-        return rows[0] if rows else None
+        table = client.table(_ELIGIBILITY_TABLE)
+        if existing.get("status"):
+            table.update(fields).eq("user_id", user_id).neq("status", "restricted").execute()
+        else:
+            table.upsert(
+                {"user_id": user_id, **fields}, on_conflict="user_id", ignore_duplicates=True
+            ).execute()
     except Exception as e:
         logger.warning(f"wallet eligibility attestation write failed: {e}")
         return None
+    return get_eligibility(user_id)
 
 
 def mark_restricted(user_id: int, country: str | None, reason: str) -> bool:

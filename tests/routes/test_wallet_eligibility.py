@@ -11,8 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 import src.routes.discount_credits as discount_routes
+import src.routes.wallet_auth_cardano as cardano_routes
 from src.main import app
-from src.security.deps import get_current_user
+from src.security.deps import get_account_owner_id, get_current_user
 from src.services.wallet import eligibility
 
 client = TestClient(app)
@@ -23,6 +24,8 @@ USER = {"id": 42, "email": "staker@example.com"}
 def _user(monkeypatch):
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_current_user] = lambda: USER
+    app.dependency_overrides[get_account_owner_id] = lambda: USER["id"]
+    app.dependency_overrides[cardano_routes.wallet_eligibility_rl] = lambda: None
     monkeypatch.setattr(eligibility, "record_audit", lambda *a, **k: None)
     monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "")
     yield
@@ -33,6 +36,7 @@ def _user(monkeypatch):
 class TestAttest:
     def test_requires_a_caller(self):
         app.dependency_overrides.pop(get_current_user)
+        app.dependency_overrides.pop(get_account_owner_id)
         response = client.post("/wallet/eligibility", json={"not_us_ca_person": True})
         assert response.status_code in (401, 403)
 

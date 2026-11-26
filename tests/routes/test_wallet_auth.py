@@ -9,7 +9,7 @@ from eth_account.messages import encode_defunct
 from fastapi.testclient import TestClient
 
 from src.main import app
-from src.security.deps import get_user_id
+from src.security.deps import get_account_owner_id, get_user_id
 from src.security.siwe import build_siwe_message
 from src.services.auth_rate_limiting import AuthRateLimitResult
 
@@ -34,13 +34,16 @@ def _override_user_id():
     (rather than a bare pop) so whatever override was already in effect
     when this fixture's setup ran -- another module's, or none -- is put
     back afterward instead of being clobbered to unset."""
-    previous = app.dependency_overrides.get(get_user_id)
-    app.dependency_overrides[get_user_id] = lambda: _TEST_USER_ID
+    deps = (get_user_id, get_account_owner_id)
+    previous = {dep: app.dependency_overrides.get(dep) for dep in deps}
+    for dep in deps:
+        app.dependency_overrides[dep] = lambda: _TEST_USER_ID
     yield
-    if previous is None:
-        app.dependency_overrides.pop(get_user_id, None)
-    else:
-        app.dependency_overrides[get_user_id] = previous
+    for dep, before in previous.items():
+        if before is None:
+            app.dependency_overrides.pop(dep, None)
+        else:
+            app.dependency_overrides[dep] = before
 
 
 def _sign(account, message: str) -> str:
@@ -628,7 +631,7 @@ def test_list_wallets(mock_get_wallets):
 
 
 @patch("src.routes.wallet_auth.unlink_wallet")
-@patch("src.routes.wallet_auth.count_wallets")
+@patch("src.routes.wallet_auth.count_evm_wallets")
 @patch("src.routes.wallet_auth.users_module")
 @patch("src.routes.wallet_auth.get_wallet")
 def test_unlink_wallet_success(mock_get_wallet, mock_users_module, mock_count_wallets, mock_unlink):
@@ -643,7 +646,7 @@ def test_unlink_wallet_success(mock_get_wallet, mock_users_module, mock_count_wa
     assert response.status_code == 200
 
 
-@patch("src.routes.wallet_auth.count_wallets")
+@patch("src.routes.wallet_auth.count_evm_wallets")
 @patch("src.routes.wallet_auth.users_module")
 @patch("src.routes.wallet_auth.get_wallet")
 def test_unlink_wallet_blocks_last_auth_method(
@@ -670,7 +673,7 @@ def test_unlink_wallet_404_when_not_linked_to_caller(mock_get_wallet):
 
 
 @patch("src.routes.wallet_auth.unlink_wallet")
-@patch("src.routes.wallet_auth.count_wallets")
+@patch("src.routes.wallet_auth.count_evm_wallets")
 @patch("src.routes.wallet_auth.users_module")
 @patch("src.routes.wallet_auth.get_wallet")
 def test_unlink_wallet_fails_closed_when_user_lookup_errors(
@@ -690,3 +693,44 @@ def test_unlink_wallet_fails_closed_when_user_lookup_errors(
     assert response.status_code == 503
     mock_count_wallets.assert_not_called()
     mock_unlink.assert_not_called()
+
+
+@patch("src.routes.wallet_auth.unlink_wallet", return_value=True)
+@patch("src.routes.wallet_auth.count_evm_wallets", return_value=1)
+@patch("src.routes.wallet_auth.users_module")
+@patch("src.routes.wallet_auth.get_wallet")
+def test_unlink_last_evm_wallet_is_refused_even_with_a_stake_address_linked(
+    mock_get_wallet, mock_users_module, mock_count_evm, mock_unlink
+):
+    """A stake address never signs in, so it does not count as a way back in:
+    with one EVM wallet and one stake address, the EVM wallet stays."""
+    address = "0x" + "b" * 40
+    mock_get_wallet.return_value = {"user_id": _TEST_USER_ID, "wallet_address": address}
+    mock_users_module.get_user_by_id.return_value = {"id": _TEST_USER_ID, "auth_method": "wallet"}
+
+    response = client.delete(f"/auth/wallets/{address}")
+
+    assert response.status_code == 400
+    mock_unlink.assert_not_called()
+
+
+@patch("src.routes.wallet_auth.unlink_wallet", return_value=True)
+@patch("src.routes.wallet_auth.count_evm_wallets", return_value=1)
+@patch("src.routes.wallet_auth.users_module")
+@patch("src.routes.wallet_auth.get_wallet")
+def test_a_stake_address_can_be_unlinked_from_a_wallet_account(
+    mock_get_wallet, mock_users_module, mock_count_evm, mock_unlink
+):
+    stake = "stake1" + "u" * 53
+    mock_get_wallet.return_value = {
+        "user_id": _TEST_USER_ID,
+        "wallet_address": stake,
+        "chain_namespace": "cip34",
+    }
+    mock_users_module.get_user_by_id.return_value = {"id": _TEST_USER_ID, "auth_method": "wallet"}
+
+    with patch("src.routes.wallet_auth._normalize_linked_address", return_value=stake):
+        response = client.delete(f"/auth/wallets/{stake}")
+
+    assert response.status_code == 200
+    mock_unlink.assert_called_once()

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 import src.routes.wallet_auth_cardano as cardano_routes
 from src.main import app
-from src.security.deps import get_user_id
+from src.security.deps import get_account_owner_id, get_user_id
 from src.services.wallet import cip8, eligibility
 from tests.services.wallet.test_cip8 import _cose_key_hex, _raw_public, _sign1_hex
 
@@ -30,6 +30,7 @@ _ELIGIBLE = {
 def _overrides():
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_user_id] = lambda: USER_ID
+    app.dependency_overrides[get_account_owner_id] = lambda: USER_ID
     app.dependency_overrides[cardano_routes.cardano_link_rl] = lambda: None
     app.dependency_overrides[cardano_routes.cardano_link_nonce_rl] = lambda: None
     # The account has attested it is not a US / Canadian person.
@@ -74,6 +75,8 @@ def test_nonce_stores_and_returns_the_exact_message(wallet):
     assert bytes.fromhex(data["payload_hex"]).decode() == data["message"]
     assert data["nonce"] in data["message"] and wallet[2] in data["message"]
     assert f"account {USER_ID}" in data["message"]
+    # Says what signing does, so a user shown it elsewhere can tell (phishing).
+    assert "Discount credits" in data["message"] and "Only sign this on" in data["message"]
     assert set(data) == {"nonce", "message", "payload_hex", "expires_at"}
 
 
@@ -151,6 +154,7 @@ def test_address_linked_to_another_account_is_409(wallet):
 
 def test_requires_a_caller():
     app.dependency_overrides.pop(get_user_id, None)
+    app.dependency_overrides.pop(get_account_owner_id, None)
     response = client.post("/auth/wallet/cardano/nonce", json={"stake_address": "stake1x"})
     assert response.status_code in (401, 403, 422)
 

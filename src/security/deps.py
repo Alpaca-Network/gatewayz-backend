@@ -585,6 +585,24 @@ async def get_user_id(user: dict[str, Any] = Depends(get_current_user)) -> int:
     return user["id"]
 
 
+async def get_account_owner_id(
+    api_key: str = Depends(get_api_key),
+    user: dict[str, Any] = Depends(get_current_user),
+) -> int:
+    """The caller's user id, for actions that change who controls the account
+    or where its discount credits go (linking or unlinking a wallet, the
+    eligibility attestation).
+
+    Only the account's own sign-in key may do these: a primary key (issued at
+    sign-in) or a temporary session key (gw_temp_). An ordinary API key made
+    for inference, which may sit in a third-party tool, is refused with 403
+    account_key_required, so a leaked inference key cannot link a wallet and
+    use it to sign in or to receive the account's credits."""
+    if api_key.startswith("gw_temp_") or user.get("is_primary") is True:
+        return user["id"]
+    raise HTTPException(status_code=403, detail="account_key_required")
+
+
 async def verify_key_permissions(
     api_key: str = Depends(get_api_key), required_permissions: list[str] = None
 ) -> str:

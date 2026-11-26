@@ -385,16 +385,14 @@ def verify_stake_signature(
     if protected.get("address") != address_bytes:
         raise Cip8VerificationError("address_mismatch")
 
+    # A "hashed" signature covers only a 28-byte hash of the message, which a
+    # wallet shows as unreadable hex: the user cannot see what they agree to,
+    # so a phishing site could get it signed blind. CIP-30 wallets sign the
+    # full message, so only that is accepted.
     hashed = unprotected.get("hashed", False)
-    if not isinstance(hashed, bool):
-        raise Cip8VerificationError("invalid_cose_sign1")
-    message_bytes = expected_message.encode("utf-8")
-    expected_payload = (
-        hashlib.blake2b(message_bytes, digest_size=_CREDENTIAL_LEN).digest()
-        if hashed
-        else message_bytes
-    )
-    if payload != expected_payload:
+    if hashed is not False:
+        raise Cip8VerificationError("hashed_payload_unsupported")
+    if payload != expected_message.encode("utf-8"):
         raise Cip8VerificationError("payload_mismatch")
 
     sig_structure = cbor_encode(["Signature1", protected_bytes, b"", payload])

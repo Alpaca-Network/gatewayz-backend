@@ -155,11 +155,21 @@ class TestValidProof:
         sig = _sign1_hex(private, raw, MESSAGE.encode(), tagged=True)
         verify_stake_signature(address, sig, _cose_key_hex(public), MESSAGE)
 
-    def test_hashed_payload_verifies_against_blake2b_224_of_message(self, wallet):
+    def test_a_hashed_payload_is_refused_even_when_the_signature_is_valid(self, wallet):
+        """A wallet shows a hashed payload as unreadable hex, so the user cannot
+        see what they sign (blind signing on a phishing site). Refused."""
         private, public, address, raw = wallet
         digest = hashlib.blake2b(MESSAGE.encode(), digest_size=28).digest()
         sig = _sign1_hex(private, raw, digest, hashed=True)
-        verify_stake_signature(address, sig, _cose_key_hex(public), MESSAGE)
+        with pytest.raises(Cip8VerificationError) as excinfo:
+            verify_stake_signature(address, sig, _cose_key_hex(public), MESSAGE)
+        assert excinfo.value.code == "hashed_payload_unsupported"
+
+    def test_hashed_true_over_the_full_message_is_also_refused(self, wallet):
+        private, public, address, raw = wallet
+        sig = _sign1_hex(private, raw, MESSAGE.encode(), hashed=True)
+        with pytest.raises(Cip8VerificationError):
+            verify_stake_signature(address, sig, _cose_key_hex(public), MESSAGE)
 
     def test_long_message_uses_two_byte_length(self, wallet):
         private, public, address, raw = wallet

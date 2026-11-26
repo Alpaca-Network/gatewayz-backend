@@ -27,16 +27,18 @@ from src.config.config import Config
 from src.config.redis_config import get_redis_client
 from src.db.api_keys import create_api_key, get_user_api_keys, update_api_key
 from src.db.user_wallets import (
+    count_evm_wallets,
     count_wallets,
     get_wallet,
     get_wallets_for_user,
+    is_evm_wallet,
     link_wallet,
     unlink_wallet,
     wallet_namespace,
 )
 from src.routes.auth import _generate_unique_username, _handle_existing_user
 from src.schemas import AuthMethod, PrivyAuthRequest, PrivyAuthResponse, PrivyUserData
-from src.security.deps import get_user_id
+from src.security.deps import get_account_owner_id, get_user_id
 from src.security.siwe import SIWE_MESSAGE_TTL_SECONDS, build_siwe_message
 from src.security.wallet_signature import recover_wallet_address
 from src.services.auth_rate_limiting import AuthRateLimitType, check_auth_rate_limit, get_client_ip
@@ -384,7 +386,7 @@ async def wallet_verify(
 @router.post("/auth/wallet/link/nonce", tags=["wallet_auth"])
 async def wallet_link_nonce(
     body: WalletNonceRequest,
-    user_id: int = Depends(get_user_id),
+    user_id: int = Depends(get_account_owner_id),
     _rl: None = Depends(wallet_link_nonce_rl),
 ) -> dict[str, Any]:
     redis_client = _require_redis()
@@ -413,7 +415,7 @@ def _wallet_view(row: dict[str, Any]) -> dict[str, Any]:
 @router.post("/auth/wallet/link", tags=["wallet_auth"])
 async def wallet_link(
     body: WalletSignatureRequest,
-    user_id: int = Depends(get_user_id),
+    user_id: int = Depends(get_account_owner_id),
     _rl: None = Depends(wallet_link_rl),
 ) -> dict[str, Any]:
     redis_client = _require_redis()
@@ -472,7 +474,7 @@ def _normalize_linked_address(value: str) -> str:
 
 @router.delete("/auth/wallets/{wallet_address}", tags=["wallet_auth"])
 async def unlink_wallet_route(
-    wallet_address: str, user_id: int = Depends(get_user_id)
+    wallet_address: str, user_id: int = Depends(get_account_owner_id)
 ) -> dict[str, Any]:
     try:
         address = _normalize_linked_address(wallet_address)
@@ -493,9 +495,14 @@ async def unlink_wallet_route(
     user = users_module.get_user_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=503, detail="temporarily_unavailable")
-    if user.get("auth_method") == AuthMethod.WALLET.value and count_wallets(user_id) <= 1:
-        # This is the only wallet AND the only way to authenticate this
-        # account -- unlinking it would lock the owner out.
+    if (
+        user.get("auth_method") == AuthMethod.WALLET.value
+        and is_evm_wallet(existing)
+        and count_evm_wallets(user_id) <= 1
+    ):
+        # This is the only EVM wallet, and EVM wallets are the only way this
+        # account signs in (a Cardano stake address never signs in), so
+        # unlinking it would lock the owner out.
         raise HTTPException(status_code=400, detail="last_auth_method")
 
     if not unlink_wallet(user_id, address):
