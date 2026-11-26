@@ -54,12 +54,14 @@ def _prepare_openai_kwargs(model: str, kwargs: dict) -> dict:
     """
     from src.services.providers.reasoning_effort import (
         apply_reasoning_effort,
+        normalize_sampling_params,
         normalize_token_limit,
     )
 
     prepared = dict(kwargs)
     effort = prepared.pop("reasoning_effort", None)
     prepared = normalize_token_limit(prepared, "openai", model)
+    prepared = normalize_sampling_params(prepared, "openai", model)
     return apply_reasoning_effort(prepared, "openai", model, effort)
 
 

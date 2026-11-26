@@ -138,9 +138,25 @@ def normalize_sampling_params(payload: dict, gateway: str, model: str) -> dict:
       health sweep).
     - Newer Claude models (see ``claude_rejects_sampling``) likewise accept
       only ``temperature=1`` and reject ``top_p`` and ``top_k``.
+    - OpenAI reasoning models (o-series, GPT-5 onwards) accept only the default
+      ``temperature`` and ``top_p`` (1) and reject ``presence_penalty`` and
+      ``frequency_penalty``. Verified live on gpt-5.5, 2026-11-26: each of
+      temperature 0 / 0.5, top_p 0.9, presence_penalty 0.5 and
+      frequency_penalty 0.5 failed, and the failover turned the 400 into
+      "Model not found". The 6-hourly health sweep sends temperature 0, so it
+      marked every GPT-5 model as failing.
     """
     gw = (gateway or "").lower()
-    if gw == "moonshot" and is_reasoning_model(gateway, model):
+    if gw == "openai" and is_reasoning_model(gateway, model):
+        _drop_temperature_unless_one(payload, model)
+        top_p = payload.get("top_p")
+        if top_p is not None and top_p != 1:
+            payload.pop("top_p")
+            logger.debug("Dropping top_p=%r for %s (only 1 is allowed)", top_p, model)
+        for key in ("presence_penalty", "frequency_penalty"):
+            if payload.pop(key, None) is not None:
+                logger.debug("Dropping %s for %s (not accepted by this model)", key, model)
+    elif gw == "moonshot" and is_reasoning_model(gateway, model):
         _drop_temperature_unless_one(payload, model)
     elif gw == "anthropic" and claude_rejects_sampling(model):
         _drop_temperature_unless_one(payload, model)
