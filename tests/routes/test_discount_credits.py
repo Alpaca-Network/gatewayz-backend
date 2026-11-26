@@ -445,4 +445,3 @@ def test_setting_the_cap_is_owner_only_and_rate_limited():
         stack.extend(dep.dependencies)
     assert get_account_owner_id in calls
     assert routes.daily_cap_rl in calls
-
