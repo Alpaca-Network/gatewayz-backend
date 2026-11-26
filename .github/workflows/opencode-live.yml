@@ -1,8 +1,10 @@
-name: Other terminals on Gatewayz (OpenCode, Codex CLI)
+name: OpenCode on Gatewayz
 
-# Live check that OpenCode and Codex CLI can use Gatewayz through the
-# OpenAI-compatible /v1/chat/completions route: each reads a file and reports
-# its content. Uses the GATEWAYZ_CONFORMANCE_KEY secret. Weekly, on demand, and
+# Live check that OpenCode can use Gatewayz through the OpenAI-compatible
+# /v1/chat/completions route: it reads a file and reports its content.
+#
+# Codex CLI is not checked: since 0.17x it only speaks OpenAI's Responses API
+# (`wire_api = "chat"` is rejected), and Gatewayz has no /v1/responses. Uses the GATEWAYZ_CONFORMANCE_KEY secret. Weekly, on demand, and
 # when this file changes.
 
 on:
@@ -11,7 +13,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - ".github/workflows/other-terminals.yml"
+      - ".github/workflows/opencode-live.yml"
 
 permissions:
   contents: read
@@ -24,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [opencode, codex]
+        tool: [opencode]
         model: ["openai/gpt-5.4-mini", "moonshot/kimi-k2.6"]
     env:
       GATEWAYZ_API_KEY: ${{ secrets.GATEWAYZ_CONFORMANCE_KEY }}
@@ -60,25 +62,4 @@ jobs:
           '
           timeout 600 opencode run -m "gatewayz/$MODEL" \
             "Read the file a.txt in the current folder and tell me the launch code." | tee out.txt
-          grep -q "MAPLE-41" out.txt
-
-      - name: Codex CLI
-        if: matrix.tool == 'codex'
-        working-directory: ${{ runner.temp }}/work
-        run: |
-          set -euo pipefail
-          npm install -g @openai/codex >/dev/null && codex --version
-          mkdir -p "$HOME/.codex"
-          cat > "$HOME/.codex/config.toml" <<TOML
-          model = "$MODEL"
-          model_provider = "gatewayz"
-
-          [model_providers.gatewayz]
-          name = "Gatewayz"
-          base_url = "https://api.gatewayz.ai/v1"
-          env_key = "GATEWAYZ_API_KEY"
-          wire_api = "chat"
-          TOML
-          timeout 600 codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
-            "Read the file a.txt in the current folder and tell me the launch code." 2>&1 | tee out.txt
           grep -q "MAPLE-41" out.txt
