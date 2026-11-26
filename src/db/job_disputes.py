@@ -74,13 +74,7 @@ def list_for_job(job_id: str, user_id: int) -> list[dict]:
 
 def update_dispute(dispute_id: str, fields: dict[str, Any]) -> dict:
     fields = {**fields, "updated_at": datetime.now(UTC).isoformat()}
-    r = (
-        get_supabase_client()
-        .table(_DISPUTES)
-        .update(fields)
-        .eq("dispute_id", dispute_id)
-        .execute()
-    )
+    r = get_supabase_client().table(_DISPUTES).update(fields).eq("dispute_id", dispute_id).execute()
     if not r.data:
         raise RuntimeError(f"job_disputes update for {dispute_id} matched nothing")
     return r.data[0]
