@@ -27,7 +27,7 @@ WORKDIR /app/health-service
 # Default port (Railway will override with $PORT)
 ENV PORT=8001
 
-# Note: Railway handles healthchecks externally via railway.json config
+# Note: Railway handles healthchecks externally (set in the Railway dashboard)
 # Docker HEALTHCHECK removed to avoid port mismatch issues
 
 # Run the health service

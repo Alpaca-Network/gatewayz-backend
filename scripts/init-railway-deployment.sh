@@ -83,10 +83,11 @@ fi
 echo ""
 echo -e "${BLUE}Step 4: Deploy Current Code${NC}"
 
-# Check if railway.json exists
-if [ ! -f "railway.json" ]; then
-    echo -e "${RED}Error: railway.json not found${NC}"
-    echo "This file is required for Railway deployment configuration"
+# Railway builds with Nixpacks and starts with start.sh. Service settings live
+# in the Railway dashboard (no service reads railway.json / railway.toml).
+if [ ! -f "nixpacks.toml" ] || [ ! -f "start.sh" ]; then
+    echo -e "${RED}Error: nixpacks.toml or start.sh not found${NC}"
+    echo "Run this from the repository root"
     exit 1
 fi
 
