@@ -2,13 +2,14 @@
 """
 Check pricing sync status and wait for completion
 """
+import os
 
 import asyncio
 import httpx
 import time
 
 STAGING_URL = "https://gatewayz-staging.up.railway.app"
-ADMIN_KEY = "gw_live_wTfpLJ5VB28qMXpOAhr7Uw"
+ADMIN_KEY = os.environ["ADMIN_KEY"]
 SYNC_ID = "cb2a2c26-f70e-42f4-92a2-65c8798bdd53"
 
 print("="*60)

@@ -116,7 +116,7 @@ After applying the migration, test your API:
 
 ```bash
 # Test email search (should work now!)
-curl -H "Authorization: Bearer gw_live_wTfpLJ5VB28qMXpOAhr7Uw" \
+curl -H "Authorization: Bearer <redacted>" \
   "https://api.gatewayz.ai/admin/users?email=radar&limit=10"
 ```
 
