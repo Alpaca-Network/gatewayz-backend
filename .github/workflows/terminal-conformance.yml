@@ -1,0 +1,78 @@
+name: Terminal conformance (Claude Code on Gatewayz)
+
+# Drives the real Claude Code client against production /v1/messages for each
+# model and checks that it can do agent work: a tool loop that edits and runs
+# code, parallel tool calls, a large file, a sub-agent. See
+# scripts/terminal_conformance/run.py. Results are uploaded as an artifact and
+# shown in the job summary.
+#
+# Needs the repository secret GATEWAYZ_CONFORMANCE_KEY: a Gatewayz API key on
+# an account with credits (each nightly run uses roughly 2-3M tokens across the
+# default ten models).
+
+on:
+  schedule:
+    - cron: "30 3 * * *" # 03:30 UTC nightly
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Space-separated model ids (empty = the default ten)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code && claude --version
+      - name: Run
+        env:
+          GATEWAYZ_API_KEY: ${{ secrets.GATEWAYZ_CONFORMANCE_KEY }}
+          MODELS: ${{ github.event.inputs.models }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GATEWAYZ_API_KEY:-}" ]; then
+            echo "::error::GATEWAYZ_CONFORMANCE_KEY secret is not set"
+            exit 1
+          fi
+          if [ -n "${MODELS:-}" ]; then
+            # shellcheck disable=SC2086
+            python scripts/terminal_conformance/run.py --models $MODELS --out results.json
+          else
+            python scripts/terminal_conformance/run.py --out results.json
+          fi
+      - name: Summary
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          p = pathlib.Path("results.json")
+          if not p.exists():
+              print("No results."); raise SystemExit
+          d = json.loads(p.read_text())
+          names = [s["scenario"] for s in d["models"][0]["scenarios"]] if d["models"] else []
+          print(f"Client: {d['client']}\n")
+          print("| Model | Agent-ready | " + " | ".join(names) + " |")
+          print("|---|---|" + "---|" * len(names))
+          for m in d["models"]:
+              cells = ["pass" if s["passed"] else "**FAIL**" for s in m["scenarios"]]
+              print(f"| `{m['model']}` | {'yes' if m['agent_ready'] else '**no**'} | " + " | ".join(cells) + " |")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: terminal-conformance
+          path: results.json
+          if-no-files-found: ignore
