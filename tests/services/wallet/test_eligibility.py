@@ -6,6 +6,7 @@ files written by tests/services/wallet/mmdb_writer.py."""
 
 from __future__ import annotations
 
+import importlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -100,16 +101,18 @@ class TestRequireEligible:
         monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "cf-ipcountry")
         for country in ("US", "ca"):
             store.row = {}
-            assert _status(
+            status = _status(
                 lambda: eligibility.require_eligible(
                     USER_ID, _request({"cf-ipcountry": country}), True
                 )
-            ) == (451, "region_restricted")
+            )
+            assert status == (451, "region_restricted")
         assert [c for _, c, _ in store.restricted] == ["US", "CA"]
         # Attesting later, from anywhere, never clears it.
-        assert _status(
+        status = _status(
             lambda: eligibility.require_eligible(USER_ID, _request({"cf-ipcountry": "FR"}), True)
-        ) == (451, "region_restricted")
+        )
+        assert status == (451, "region_restricted")
         assert not eligibility.account_eligible(USER_ID)
 
     def test_header_ignored_unless_configured(self, store):
@@ -159,8 +162,13 @@ def geo(store, tmp_path, monkeypatch):
             "85.240.0.0/13": {"country": {"iso_code": "PT"}},
         },
     )
-    monkeypatch.setattr(eligibility.Config, "WALLET_LINK_IP_COUNTRY_DB_PATH", str(path))
-    monkeypatch.setattr(eligibility.Config, "TRUSTED_CLIENT_IP_HEADER", "x-real-ip")
+    # Other test modules may reload src.config.config, leaving more than one
+    # Config class alive: patch every copy the code under test can read.
+    configs = {eligibility.Config, importlib.import_module("src.config.config").Config}
+    configs.add(getattr(ip_country, "Config", eligibility.Config))
+    for config in configs:
+        monkeypatch.setattr(config, "WALLET_LINK_IP_COUNTRY_DB_PATH", str(path), raising=False)
+        monkeypatch.setattr(config, "TRUSTED_CLIENT_IP_HEADER", "x-real-ip", raising=False)
     monkeypatch.setattr(ip_country, "_state", (None, None, None))
     return path
 
@@ -179,23 +187,20 @@ class TestIpCountry:
     def test_restricted_ip_country_is_refused_and_sticks(self, store, geo):
         for ip, country in ((US_IP, "US"), ("24.48.1.1", "CA")):
             store.row = {}
-            assert _status(
-                lambda: eligibility.require_eligible(USER_ID, _ip_request(ip), True)
-            ) == (451, "region_restricted")
+            status = _status(lambda: eligibility.require_eligible(USER_ID, _ip_request(ip), True))
+            assert status == (451, "region_restricted")
             assert store.restricted[-1] == (USER_ID, country, "ip_country")
         assert store.attested == []
         metadata = eligibility.record_audit.call_args.kwargs["metadata"]
         assert metadata["country_source"] == "ip" and metadata["country"] == "CA"
         # Sticky: a later request from an allowed country is still refused.
-        assert _status(
-            lambda: eligibility.require_eligible(USER_ID, _ip_request(PT_IP), True)
-        ) == (451, "region_restricted")
+        status = _status(lambda: eligibility.require_eligible(USER_ID, _ip_request(PT_IP), True))
+        assert status == (451, "region_restricted")
         assert not eligibility.account_eligible(USER_ID)
 
     def test_allowed_ip_country_takes_the_attestation_path(self, store, geo):
-        assert _status(
-            lambda: eligibility.require_eligible(USER_ID, _ip_request(PT_IP), False)
-        ) == (451, "attestation_required")
+        status = _status(lambda: eligibility.require_eligible(USER_ID, _ip_request(PT_IP), False))
+        assert status == (451, "attestation_required")
         eligibility.require_eligible(USER_ID, _ip_request(PT_IP), True)
         assert store.restricted == []
         assert store.attested == [(USER_ID, eligibility.ATTESTATION_VERSION, "PT")]
@@ -210,20 +215,20 @@ class TestIpCountry:
         assert _audit_metadata("wallet.eligibility.attested")["country_source"] == "header"
         # Header says US, IP says PT: refused, recorded as the header.
         store.row = {}
-        assert _status(
+        status = _status(
             lambda: eligibility.require_eligible(
                 USER_ID, _ip_request(PT_IP, {"cf-ipcountry": "US"}), True
             )
-        ) == (451, "region_restricted")
+        )
+        assert status == (451, "region_restricted")
         assert store.restricted == [(USER_ID, "US", "request_country")]
         metadata = _audit_metadata("wallet.eligibility.restricted")
         assert metadata["country_source"] == "header"
 
     def test_header_configured_but_absent_falls_back_to_ip(self, store, geo, monkeypatch):
         monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "cf-ipcountry")
-        assert _status(
-            lambda: eligibility.require_eligible(USER_ID, _ip_request(US_IP), True)
-        ) == (451, "region_restricted")
+        status = _status(lambda: eligibility.require_eligible(USER_ID, _ip_request(US_IP), True))
+        assert status == (451, "region_restricted")
         assert store.restricted == [(USER_ID, "US", "ip_country")]
 
     @pytest.mark.parametrize("ip", [UNKNOWN_IP, "10.0.0.1", "not-an-ip"])
@@ -240,9 +245,8 @@ class TestIpCountry:
             geo.unlink()
         else:
             geo.write_bytes(content)
-        assert _status(
-            lambda: eligibility.require_eligible(USER_ID, _ip_request(US_IP), False)
-        ) == (451, "attestation_required")
+        status = _status(lambda: eligibility.require_eligible(USER_ID, _ip_request(US_IP), False))
+        assert status == (451, "attestation_required")
         eligibility.require_eligible(USER_ID, _ip_request(US_IP), True)
         assert store.restricted == []
         assert store.attested == [(USER_ID, eligibility.ATTESTATION_VERSION, None)]
