@@ -28,7 +28,7 @@ from src.config.config import Config
 from src.config.redis_config import get_redis_client
 from src.db.user_wallets import CARDANO_NAMESPACE, get_wallet, link_wallet
 from src.routes.wallet_auth import _wallet_view
-from src.security.deps import get_current_user, get_user_id
+from src.security.deps import get_account_owner_id
 from src.security.siwe import SIWE_MESSAGE_TTL_SECONDS
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.services.wallet.cip8 import (
@@ -49,6 +49,9 @@ cardano_link_nonce_rl = create_endpoint_rate_limit(
 )
 cardano_link_rl = create_endpoint_rate_limit(
     "cardano_wallet_link", max_requests=5, window_seconds=60
+)
+wallet_eligibility_rl = create_endpoint_rate_limit(
+    "wallet_eligibility", max_requests=5, window_seconds=60
 )
 
 
@@ -106,12 +109,16 @@ def build_cardano_link_message(
     user_id: int, stake_address: str, nonce: str, issued_at: datetime
 ) -> str:
     """The exact text the wallet signs. Names the domain, the account and
-    the address, so a signature is useless anywhere else."""
+    the address, so a signature is useless anywhere else, and says in plain
+    words what signing does, so a user shown it on another site can tell it
+    is not theirs to sign (phishing)."""
     expires = issued_at + timedelta(seconds=SIWE_MESSAGE_TTL_SECONDS)
     return (
         f"{Config.SIWE_DOMAIN} wants you to link a Cardano stake address.\n"
         f"\n"
-        f"Link this stake address to Gatewayz account {user_id}.\n"
+        f"Link this stake address to Gatewayz account {user_id}. Discount credits\n"
+        f"for this stake address will go to that account. Only sign this on\n"
+        f"{Config.SIWE_DOMAIN}, and only if account {user_id} is yours.\n"
         f"\n"
         f"Stake address: {stake_address}\n"
         f"URI: {Config.SIWE_URI}\n"
@@ -132,7 +139,7 @@ def _require_redis():
 async def cardano_link_nonce(
     body: CardanoNonceRequest,
     request: Request,
-    user_id: int = Depends(get_user_id),
+    user_id: int = Depends(get_account_owner_id),
     _rl: None = Depends(cardano_link_nonce_rl),
 ) -> dict[str, Any]:
     """Issue a one-time message for the wallet to sign with CIP-30
@@ -166,7 +173,7 @@ async def cardano_link_nonce(
 async def cardano_link(
     body: CardanoLinkRequest,
     request: Request,
-    user_id: int = Depends(get_user_id),
+    user_id: int = Depends(get_account_owner_id),
     _rl: None = Depends(cardano_link_rl),
 ) -> dict[str, Any]:
     """Verify the CIP-30 proof over the issued message and link the stake
@@ -224,10 +231,11 @@ async def cardano_link(
 async def attest_wallet_eligibility(
     body: WalletEligibilityRequest,
     request: Request,
-    user: dict[str, Any] = Depends(get_current_user),
+    user_id: int = Depends(get_account_owner_id),
+    _rl: None = Depends(wallet_eligibility_rl),
 ) -> dict[str, Any]:
     """Record the caller's attestation that they are not a US or Canadian
     person, without linking a wallet in the same call. 451 region_restricted /
     attestation_required otherwise."""
-    require_eligible(user["id"], request, body.not_us_ca_person)
-    return {"success": True, "data": {"eligibility": eligibility_view(user["id"])}}
+    require_eligible(user_id, request, body.not_us_ca_person)
+    return {"success": True, "data": {"eligibility": eligibility_view(user_id)}}

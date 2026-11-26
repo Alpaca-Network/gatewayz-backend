@@ -204,8 +204,9 @@ def _ingest_privy_wallets(user_id: int, linked_accounts: list, verified: bool) -
             if existing is not None:
                 if existing.get("user_id") != user_id:
                     logger.warning(
-                        "privy_auth.wallet_conflict addr=%s user_id=%s owner_id=%s",
-                        address,
+                        "privy_auth.wallet_conflict addr=%s...%s user_id=%s owner_id=%s",
+                        address[:8],
+                        address[-4:],
                         user_id,
                         existing.get("user_id"),
                     )

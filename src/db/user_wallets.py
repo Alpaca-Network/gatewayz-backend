@@ -26,6 +26,12 @@ EVM_NAMESPACE = "eip155"
 CARDANO_NAMESPACE = "cip34"
 
 
+def _short(address: str) -> str:
+    """An address shortened for logs, so logs do not map on-chain balances
+    to account ids."""
+    return f"{address[:8]}...{address[-4:]}" if len(address) > 16 else "<address>"
+
+
 def wallet_namespace(row: dict[str, Any]) -> str:
     """The row's chain namespace. A row (or a test double) without the
     column predates it and is EVM, which is also the column default."""
@@ -70,7 +76,7 @@ def get_wallet(address: str) -> dict[str, Any] | None:
             return None
         return result.data[0]
     except Exception as e:
-        logger.warning(f"user_wallets lookup failed for {address}: {e}")
+        logger.warning(f"user_wallets lookup failed for {_short(address)}: {e}")
         return None
 
 
@@ -84,6 +90,20 @@ def count_wallets(user_id: int) -> int:
         return len(result.data or [])
     except Exception as e:
         logger.warning(f"user_wallets count failed for user {user_id}: {e}")
+        return 0
+
+
+def count_evm_wallets(user_id: int) -> int:
+    """Number of EVM wallets linked to a user: the wallets that can sign in.
+    A Cardano stake address is linked only to receive discount credits and
+    never signs in. 0 on any lookup error, for the same reason as
+    count_wallets: the unlink guard must fail closed."""
+    try:
+        client = get_supabase_client()
+        result = client.table(_TABLE).select("*").eq("user_id", user_id).execute()
+        return sum(1 for row in (result.data or []) if is_evm_wallet(row))
+    except Exception as e:
+        logger.warning(f"user_wallets EVM count failed for user {user_id}: {e}")
         return 0
 
 
@@ -122,7 +142,7 @@ def link_wallet(
             return None
         return result.data[0]
     except Exception as e:
-        logger.warning(f"user_wallets link failed for user {user_id} / {address}: {e}")
+        logger.warning(f"user_wallets link failed for user {user_id} / {_short(address)}: {e}")
         return None
 
 
@@ -204,5 +224,5 @@ def unlink_wallet(user_id: int, address: str) -> bool:
         )
         return bool(result.data)
     except Exception as e:
-        logger.warning(f"user_wallets unlink failed for user {user_id} / {address}: {e}")
+        logger.warning(f"user_wallets unlink failed for user {user_id} / {_short(address)}: {e}")
         return False
