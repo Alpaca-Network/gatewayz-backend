@@ -1,6 +1,7 @@
 """Tests for src/routes/admin_emission.py (Chutes-style WAYZ emission
 rewards admin API, gatewayz-backend tokenomics)."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -97,14 +98,17 @@ class TestGetEpochScores:
         mock_scores.assert_called_once_with("2026-09-12")
 
 
+_YESTERDAY = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
+
+
 class TestRunEmissionEpoch:
     @patch("src.routes.admin_emission.record_audit")
     @patch("src.routes.admin_emission.run_emission_epoch")
     def test_runs_and_audits(self, mock_run, mock_audit, superadmin_override):
         mock_run.return_value = {"epoch_date": "2026-09-12", "providers_scored": 3}
-        response = client.post("/admin/emission/run", json={"epoch_date": "2026-09-12"})
+        response = client.post("/admin/emission/run", json={"epoch_date": _YESTERDAY})
         assert response.status_code == 200
-        assert response.json()["data"]["epoch_date"] == "2026-09-12"
+        assert response.json()["data"]["epoch_date"] == "2026-09-12"  # what the job returned
         mock_audit.assert_called_once()
         assert mock_audit.call_args.kwargs["action"] == "emission.epoch.run"
 
@@ -118,7 +122,7 @@ class TestRunEmissionEpoch:
             "providers_scored": 3,
         }
         mock_run.return_value = summary
-        response = client.post("/admin/emission/run", json={"epoch_date": "2026-09-12"})
+        response = client.post("/admin/emission/run", json={"epoch_date": _YESTERDAY})
         assert response.status_code == 200
         assert response.json() == {"success": True, "data": summary}
         assert "staker" not in response.text
@@ -164,3 +168,43 @@ class TestConfig:
             response = client.put("/admin/emission/config")
         assert response.status_code == 501
         mock_audit.assert_called_once()
+
+
+class TestManualRunDates:
+    """A manual run covers a finished UTC day from the last week only."""
+
+    @pytest.mark.parametrize(
+        "days_ago, detail",
+        [
+            (0, "epoch_date_not_finished"),
+            (-1, "epoch_date_not_finished"),
+            (8, "epoch_date_too_old"),
+        ],
+    )
+    @patch("src.routes.admin_emission.run_emission_epoch")
+    def test_dates_outside_the_window_are_refused_before_the_job(
+        self, mock_run, superadmin_override, days_ago, detail
+    ):
+        day = (datetime.now(UTC).date() - timedelta(days=days_ago)).isoformat()
+        response = client.post("/admin/emission/run", json={"epoch_date": day})
+        assert response.status_code == 400
+        assert response.json()["error"]["context"]["parameter_value"] == detail
+        mock_run.assert_not_called()
+
+    @pytest.mark.parametrize("days_ago", [1, 7])
+    @patch("src.routes.admin_emission.record_audit")
+    @patch("src.routes.admin_emission.run_emission_epoch", return_value={"epoch_date": "x"})
+    def test_finished_days_in_the_last_week_run(
+        self, mock_run, mock_audit, superadmin_override, days_ago
+    ):
+        day = (datetime.now(UTC).date() - timedelta(days=days_ago)).isoformat()
+        response = client.post("/admin/emission/run", json={"epoch_date": day})
+        assert response.status_code == 200
+        mock_run.assert_called_once()
+
+    @patch("src.routes.admin_emission.record_audit")
+    @patch("src.routes.admin_emission.run_emission_epoch", return_value={"epoch_date": "x"})
+    def test_no_date_means_yesterday_and_is_allowed(
+        self, mock_run, mock_audit, superadmin_override
+    ):
+        assert client.post("/admin/emission/run", json={}).status_code == 200

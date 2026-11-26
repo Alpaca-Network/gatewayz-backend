@@ -12,7 +12,7 @@ superadmin-only and audited.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -30,6 +30,23 @@ router = APIRouter()
 
 _DEFAULT_EPOCHS_LIMIT = 30
 _MAX_EPOCHS_LIMIT = 90
+# How far back a manual run may go. Each date can be run once, and each run
+# pays the day's provider pool, so an unbounded date would let one call pay
+# for days that were never meant to be paid this way.
+MAX_MANUAL_BACKFILL_DAYS = 7
+
+
+def _check_manual_epoch_date(epoch_date: date | None) -> None:
+    """A manual run covers a finished UTC day from the last week only:
+    never today or a future day (a partial day, and it would block the
+    scheduled run), never more than MAX_MANUAL_BACKFILL_DAYS back."""
+    if epoch_date is None:
+        return
+    today = datetime.now(UTC).date()
+    if epoch_date >= today:
+        raise HTTPException(status_code=400, detail="epoch_date_not_finished")
+    if epoch_date < today - timedelta(days=MAX_MANUAL_BACKFILL_DAYS):
+        raise HTTPException(status_code=400, detail="epoch_date_too_old")
 
 
 class RunEmissionEpochRequest(BaseModel):
@@ -65,7 +82,11 @@ async def run_emission_epoch_now(
     """Run the emission_epoch job now (for `epoch_date`, default yesterday
     UTC) -- idempotent, safe to call any number of times, same as the
     scheduled run. Used to force a run without waiting for the schedule,
-    e.g. right after flipping REWARDS_MODE to 'emission'."""
+    e.g. right after flipping REWARDS_MODE to 'emission'.
+
+    Idempotent per date: a date already run is not paid again. Only finished
+    UTC days from the last MAX_MANUAL_BACKFILL_DAYS days are accepted."""
+    _check_manual_epoch_date(body.epoch_date)
     summary = run_emission_epoch(body.epoch_date)
 
     record_audit(
