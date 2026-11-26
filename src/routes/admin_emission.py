@@ -1,6 +1,7 @@
-"""Admin API for Chutes-style WAYZ emission rewards (gatewayz-backend
-tokenomics -- boss asks: split WAYZ rewards between stakers and GPU
-providers the way Chutes/Bittensor does). See docs/tokenomics/EMISSION.md.
+"""Admin API for the score-based GPU provider emission rewards. The
+emission is split between GPU providers and the treasury. A staker share
+existed in an earlier design and was removed on 2026-11-25. See
+docs/tokenomics/EMISSION.md.
 
 GET endpoints accept either an admin API key or the ADMIN_API_KEY env key
 (require_admin_or_env_key, matching src/routes/admin_wayz.py's ops-status
@@ -11,7 +12,7 @@ superadmin-only and audited.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -22,7 +23,6 @@ from src.db.audit import record_audit
 from src.db.emission import list_epochs, list_provider_scores_for_epoch
 from src.security.deps import require_admin_or_env_key, require_superadmin
 from src.services.emission.epoch import is_emission_job_disabled, run_emission_epoch
-from src.services.staking_rewards import StakingRewardsStaleError
 
 logger = logging.getLogger(__name__)
 
@@ -30,24 +30,27 @@ router = APIRouter()
 
 _DEFAULT_EPOCHS_LIMIT = 30
 _MAX_EPOCHS_LIMIT = 90
+# How far back a manual run may go. Each date can be run once, and each run
+# pays the day's provider pool, so an unbounded date would let one call pay
+# for days that were never meant to be paid this way.
+MAX_MANUAL_BACKFILL_DAYS = 7
+
+
+def _check_manual_epoch_date(epoch_date: date | None) -> None:
+    """A manual run covers a finished UTC day from the last week only:
+    never today or a future day (a partial day, and it would block the
+    scheduled run), never more than MAX_MANUAL_BACKFILL_DAYS back."""
+    if epoch_date is None:
+        return
+    today = datetime.now(UTC).date()
+    if epoch_date >= today:
+        raise HTTPException(status_code=400, detail="epoch_date_not_finished")
+    if epoch_date < today - timedelta(days=MAX_MANUAL_BACKFILL_DAYS):
+        raise HTTPException(status_code=400, detail="epoch_date_too_old")
 
 
 class RunEmissionEpochRequest(BaseModel):
     epoch_date: date | None = None
-
-
-def _conflict(message: str, code: str, parameter_value: Any = None) -> HTTPException:
-    return HTTPException(
-        status_code=409,
-        detail={
-            "error": {
-                "message": message,
-                "type": "conflict_error",
-                "code": code,
-                "context": {"parameter_value": parameter_value},
-            }
-        },
-    )
 
 
 @router.get("/admin/emission/epochs", tags=["admin", "emission"])
@@ -79,15 +82,12 @@ async def run_emission_epoch_now(
     """Run the emission_epoch job now (for `epoch_date`, default yesterday
     UTC) -- idempotent, safe to call any number of times, same as the
     scheduled run. Used to force a run without waiting for the schedule,
-    e.g. right after flipping REWARDS_MODE to 'emission'."""
-    try:
-        summary = run_emission_epoch(body.epoch_date)
-    except StakingRewardsStaleError as e:
-        raise _conflict(
-            "Stake sync is too stale to trust today's staker split.",
-            "stake_sync_stale",
-            str(e),
-        ) from e
+    e.g. right after flipping REWARDS_MODE to 'emission'.
+
+    Idempotent per date: a date already run is not paid again. Only finished
+    UTC days from the last MAX_MANUAL_BACKFILL_DAYS days are accepted."""
+    _check_manual_epoch_date(body.epoch_date)
+    summary = run_emission_epoch(body.epoch_date)
 
     record_audit(
         admin_user,
@@ -106,7 +106,6 @@ def _config_view() -> dict[str, Any]:
         "daily_emission_wayz": str(Config.WAYZ_DAILY_EMISSION),
         "split_bps": {
             "providers": Config.EMISSION_SPLIT_PROVIDERS_BPS,
-            "stakers": Config.EMISSION_SPLIT_STAKERS_BPS,
             "treasury": Config.EMISSION_SPLIT_TREASURY_BPS,
         },
         "score_weights_bps": Config.emission_score_weights_bps(),
@@ -115,8 +114,6 @@ def _config_view() -> dict[str, Any]:
         # the WAYZ providers leg of the split is not emitted.
         "provider_pool_usd_per_day": str(Config.PROVIDER_EMISSION_USD_PER_DAY),
         "provider_payout_asset": Config.PROVIDER_PAYOUT_ASSET,
-        "staker_reward_asset": Config.STAKER_REWARD_ASSET,
-        "wayz_credit_rate": str(Config.WAYZ_CREDIT_RATE),
         "cron_utc": f"{Config.EMISSION_EPOCH_CRON_HOUR_UTC:02d}:{Config.EMISSION_EPOCH_CRON_MINUTE_UTC:02d}",
         "disabled_reason": is_emission_job_disabled(),
     }
@@ -153,7 +150,7 @@ async def update_emission_config(
         status_code=501,
         detail=(
             "Emission config is env-only today -- there is no kv store backing a runtime "
-            "override (unlike staking_reward_rates for the per_unit path). Change the "
+            "override. Change the "
             "EMISSION_SPLIT_*_BPS / WAYZ_DAILY_EMISSION / PROVIDER_SCORE_WEIGHT_*_BPS env "
             "vars and restart, or use POST /admin/emission/run to test a one-off value."
         ),

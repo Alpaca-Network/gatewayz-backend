@@ -1,6 +1,7 @@
 """Tests for src/routes/admin_emission.py (Chutes-style WAYZ emission
 rewards admin API, gatewayz-backend tokenomics)."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -8,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from src.main import app
 from src.security.deps import require_admin_or_env_key, require_superadmin
-from src.services.staking_rewards import StakingRewardsStaleError
 
 client = TestClient(app)
 
@@ -98,25 +98,41 @@ class TestGetEpochScores:
         mock_scores.assert_called_once_with("2026-09-12")
 
 
+_YESTERDAY = (datetime.now(UTC).date() - timedelta(days=1)).isoformat()
+
+
 class TestRunEmissionEpoch:
     @patch("src.routes.admin_emission.record_audit")
     @patch("src.routes.admin_emission.run_emission_epoch")
     def test_runs_and_audits(self, mock_run, mock_audit, superadmin_override):
         mock_run.return_value = {"epoch_date": "2026-09-12", "providers_scored": 3}
-        response = client.post("/admin/emission/run", json={"epoch_date": "2026-09-12"})
+        response = client.post("/admin/emission/run", json={"epoch_date": _YESTERDAY})
         assert response.status_code == 200
-        assert response.json()["data"]["epoch_date"] == "2026-09-12"
+        assert response.json()["data"]["epoch_date"] == "2026-09-12"  # what the job returned
         mock_audit.assert_called_once()
         assert mock_audit.call_args.kwargs["action"] == "emission.epoch.run"
 
+    @patch("src.routes.admin_emission.record_audit")
     @patch("src.routes.admin_emission.run_emission_epoch")
-    def test_stale_sync_returns_409(self, mock_run, superadmin_override):
-        mock_run.side_effect = StakingRewardsStaleError("stake_sync_stale")
-        response = client.post("/admin/emission/run", json={})
-        assert response.status_code == 409
-        body = response.json()
-        assert body["error"]["code"] == "stake_sync_stale"
-        assert body["error"]["context"]["parameter_value"] == "stake_sync_stale"
+    def test_returns_the_two_way_summary_unchanged(self, mock_run, mock_audit, superadmin_override):
+        summary = {
+            "epoch_date": "2026-09-12",
+            "emission_wei": "100000000000000000000000",
+            "split": {"providers_wei": "0", "treasury_wei": "100000000000000000000000"},
+            "providers_scored": 3,
+        }
+        mock_run.return_value = summary
+        response = client.post("/admin/emission/run", json={"epoch_date": _YESTERDAY})
+        assert response.status_code == 200
+        assert response.json() == {"success": True, "data": summary}
+        assert "staker" not in response.text
+
+    def test_run_route_has_no_stale_stake_sync_guard(self):
+        """The 409 stake_sync_stale path existed only for the staker split."""
+        import src.routes.admin_emission as admin_emission
+
+        assert not hasattr(admin_emission, "StakingRewardsStaleError")
+        assert not hasattr(admin_emission, "_conflict")
 
 
 class TestConfig:
@@ -129,8 +145,66 @@ class TestConfig:
         assert "rewards_mode" in data
         assert "split_bps" in data
 
+    def test_get_config_is_a_two_way_split_with_no_staker_fields(self, admin_or_env_override):
+        response = client.get("/admin/emission/config")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert set(data) == {
+            "rewards_mode",
+            "daily_emission_wayz",
+            "split_bps",
+            "score_weights_bps",
+            "exponent_above_median",
+            "provider_pool_usd_per_day",
+            "provider_payout_asset",
+            "cron_utc",
+            "disabled_reason",
+        }
+        assert set(data["split_bps"]) == {"providers", "treasury"}
+        assert "staker" not in response.text
+
     def test_put_config_returns_501(self, superadmin_override):
         with patch("src.routes.admin_emission.record_audit") as mock_audit:
             response = client.put("/admin/emission/config")
         assert response.status_code == 501
         mock_audit.assert_called_once()
+
+
+class TestManualRunDates:
+    """A manual run covers a finished UTC day from the last week only."""
+
+    @pytest.mark.parametrize(
+        "days_ago, detail",
+        [
+            (0, "epoch_date_not_finished"),
+            (-1, "epoch_date_not_finished"),
+            (8, "epoch_date_too_old"),
+        ],
+    )
+    @patch("src.routes.admin_emission.run_emission_epoch")
+    def test_dates_outside_the_window_are_refused_before_the_job(
+        self, mock_run, superadmin_override, days_ago, detail
+    ):
+        day = (datetime.now(UTC).date() - timedelta(days=days_ago)).isoformat()
+        response = client.post("/admin/emission/run", json={"epoch_date": day})
+        assert response.status_code == 400
+        assert response.json()["error"]["context"]["parameter_value"] == detail
+        mock_run.assert_not_called()
+
+    @pytest.mark.parametrize("days_ago", [1, 7])
+    @patch("src.routes.admin_emission.record_audit")
+    @patch("src.routes.admin_emission.run_emission_epoch", return_value={"epoch_date": "x"})
+    def test_finished_days_in_the_last_week_run(
+        self, mock_run, mock_audit, superadmin_override, days_ago
+    ):
+        day = (datetime.now(UTC).date() - timedelta(days=days_ago)).isoformat()
+        response = client.post("/admin/emission/run", json={"epoch_date": day})
+        assert response.status_code == 200
+        mock_run.assert_called_once()
+
+    @patch("src.routes.admin_emission.record_audit")
+    @patch("src.routes.admin_emission.run_emission_epoch", return_value={"epoch_date": "x"})
+    def test_no_date_means_yesterday_and_is_allowed(
+        self, mock_run, mock_audit, superadmin_override
+    ):
+        assert client.post("/admin/emission/run", json={}).status_code == 200

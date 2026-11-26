@@ -1,8 +1,8 @@
-"""Pure scoring/split math for Chutes-style WAYZ emission rewards
-(gatewayz-backend tokenomics -- boss asks: split WAYZ rewards between
-stakers and GPU providers the way Chutes/Bittensor does). See
-docs/tokenomics/EMISSION.md for the worked example and the Chutes/
-Bittensor references this mirrors:
+"""Pure scoring/split math for the score-based GPU provider emission
+rewards. The emission is split between GPU providers and the treasury. A
+staker share existed in an earlier design and was removed on 2026-11-25.
+See docs/tokenomics/EMISSION.md for the worked example and the Chutes/
+Bittensor provider-scoring references this mirrors:
 https://chutes.ai/docs/miner-resources/scoring and
 https://docs.learnbittensor.org/learn/emissions.
 
@@ -40,34 +40,31 @@ def wayz_to_wei(amount_wayz: str | int | float | Decimal) -> int:
 class EmissionSplit:
     emission_wei: int
     providers_wei: int
-    stakers_wei: int
     treasury_wei: int
 
 
 def split_emission(
     daily_emission_wayz: str | int | float | Decimal,
     providers_bps: int,
-    stakers_bps: int,
     treasury_bps: int,
 ) -> EmissionSplit:
-    """Split one day's WAYZ emission into (providers, stakers, treasury)
-    wei amounts. providers_wei and stakers_wei are each floor(emission_wei
-    * bps / 10000); treasury_wei is whatever is left over
-    (emission_wei - providers_wei - stakers_wei) rather than its own floor
-    division -- this both implements the spec's "dust -> treasury" rule
-    and guarantees the three always sum to exactly emission_wei regardless
-    of whether providers_bps + stakers_bps + treasury_bps happens to equal
-    10000 (that sum is validated separately at startup -- see
-    src/services/emission/epoch.py::check_emission_config -- this function
-    itself never raises on a bad sum, it just floors what it's given)."""
+    """Split one day's WAYZ emission into (providers, treasury) wei
+    amounts. providers_wei is floor(emission_wei * providers_bps / 10000);
+    treasury_wei is whatever is left over (emission_wei - providers_wei)
+    rather than its own floor division -- this both implements the spec's
+    "dust -> treasury" rule and guarantees the two always sum to exactly
+    emission_wei regardless of whether providers_bps + treasury_bps
+    happens to equal 10000 (that sum is validated separately at startup --
+    see src/services/emission/epoch.py::check_emission_config -- this
+    function itself never raises on a bad sum, it just floors what it's
+    given; treasury_bps is not used in the math, the treasury amount is
+    always the remainder)."""
     emission_wei = wayz_to_wei(daily_emission_wayz)
     providers_wei = (emission_wei * providers_bps) // 10000
-    stakers_wei = (emission_wei * stakers_bps) // 10000
-    treasury_wei = emission_wei - providers_wei - stakers_wei
+    treasury_wei = emission_wei - providers_wei
     return EmissionSplit(
         emission_wei=emission_wei,
         providers_wei=providers_wei,
-        stakers_wei=stakers_wei,
         treasury_wei=treasury_wei,
     )
 

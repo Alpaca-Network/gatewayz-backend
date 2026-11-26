@@ -1663,10 +1663,11 @@ def get_pricing_drift_status() -> dict[str, Any]:
 
 
 # ============================================================================
-# Emission Epoch Job (Chutes-style WAYZ emission rewards, gatewayz-backend
-# tokenomics) -- daily job that splits WAYZ_DAILY_EMISSION 41/41/18 between
-# providers (by 7-day rolling score), stakers (pro-rata to stake), and
-# treasury. Runs once a day at Config.EMISSION_EPOCH_CRON_HOUR_UTC:
+# Emission Epoch Job (score-based GPU provider emission rewards) -- daily
+# job that splits WAYZ_DAILY_EMISSION between GPU providers (by 7-day
+# rolling score) and the treasury. A staker share existed in an earlier
+# design and was removed on 2026-11-25. Runs once a day at
+# Config.EMISSION_EPOCH_CRON_HOUR_UTC:
 # EMISSION_EPOCH_CRON_MINUTE_UTC (default 00:40 UTC -- after
 # gpu_spot_check, per docs/tokenomics/EMISSION.md). Gated by
 # Config.REWARDS_MODE == 'emission' itself (default 'per_unit') -- this
@@ -1681,7 +1682,6 @@ async def run_scheduled_emission_epoch():
     """Run one pass of the daily emission_epoch job
     (src/services/emission/epoch.py::run_emission_epoch)."""
     from src.services.emission.epoch import run_emission_epoch
-    from src.services.staking_rewards import StakingRewardsStaleError
 
     run_started_at = datetime.now(UTC)
     try:
@@ -1693,23 +1693,14 @@ async def run_scheduled_emission_epoch():
             return
 
         logger.info(
-            "✅ Emission epoch OK | epoch_date=%s providers_scored=%s stakers_paid=%s "
-            "credits_paid=%s dust_wei=%s",
+            "✅ Emission epoch OK | epoch_date=%s providers_scored=%s "
+            "providers_usd_micros=%s dust_wei=%s",
             result.get("epoch_date"),
             result.get("providers_scored"),
-            result.get("stakers_paid"),
-            result.get("credits_paid"),
+            result.get("providers_usd_micros"),
             result.get("dust_wei"),
         )
         record_job_run("emission_epoch", ok=True, summary=result, duration_ms=duration_ms)
-    except StakingRewardsStaleError as e:
-        logger.warning("Emission epoch skipped: %s", e)
-        record_job_run(
-            "emission_epoch",
-            ok=False,
-            error=str(e),
-            duration_ms=int((datetime.now(UTC) - run_started_at).total_seconds() * 1000),
-        )
     except Exception as e:
         logger.warning("Emission epoch run failed (non-fatal): %s", e)
         record_job_run(
