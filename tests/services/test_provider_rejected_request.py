@@ -93,7 +93,7 @@ def _handler():
 def _call_with_upstream_error(handler, mapped_status, mapped_detail):
     from unittest.mock import patch
 
-    upstream = RuntimeError("Error code: %d - upstream said no" % mapped_status)
+    upstream = RuntimeError(f"Error code: {mapped_status} - upstream said no")
 
     def provider_request(messages, model_id, **kwargs):
         raise upstream
