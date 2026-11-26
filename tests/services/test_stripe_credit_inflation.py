@@ -386,9 +386,12 @@ def _apply(svc, sub, from_tier, to_tier, remaining):
             return_value={"subscription_allowance": remaining, "purchased_credits": 0},
         ),
         patch("src.db.users.reset_subscription_allowance", return_value=True) as reset,
+        patch("src.db.credit_transactions.log_credit_transaction") as ledger,
         patch("stripe.Subscription.modify") as modify,
     ):
         svc._apply_tier_change_allowance(1, sub, from_tier, to_tier)
+    if reset.called:
+        ledger.assert_called_once()
     target = reset.call_args.args[1] if reset.called else None
     return target, modify
 
