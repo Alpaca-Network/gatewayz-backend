@@ -845,6 +845,47 @@ def start_verify_poller():
         logger.error("❌ Failed to start Verify poller: %s", e)
 
 
+_dispute_scheduler = None
+
+
+def start_dispute_poller():
+    """Advance open cost disputes every 20s (no-op unless cost disputes are configured)."""
+    global _dispute_scheduler
+    from src.services.cost_disputes import is_configured, poll_open_disputes
+
+    if not is_configured():
+        logger.info(
+            "Dispute poller not started: COST_DISPUTES_ENABLED / GENLAYER_COST_DISPUTE_CONTRACT"
+            " / GENLAYER_DISPUTE_SUBMITTER_KEY unset"
+        )
+        return
+    try:
+        _dispute_scheduler = AsyncIOScheduler()
+        _dispute_scheduler.add_job(
+            poll_open_disputes,
+            trigger=IntervalTrigger(seconds=20),
+            id="dispute_poll",
+            name="Job cost dispute poller",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _dispute_scheduler.start()
+        logger.info("✅ Dispute poller started (every 20s)")
+    except Exception as e:
+        logger.error("❌ Failed to start dispute poller: %s", e)
+
+
+def stop_dispute_poller():
+    global _dispute_scheduler
+    if _dispute_scheduler is not None:
+        try:
+            _dispute_scheduler.shutdown(wait=False)
+        except Exception as e:
+            logger.warning("dispute poller shutdown: %s", e)
+        _dispute_scheduler = None
+
+
 def stop_verify_poller():
     global _verify_scheduler
     if _verify_scheduler is None:

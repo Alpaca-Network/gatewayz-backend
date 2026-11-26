@@ -784,6 +784,14 @@ async def lifespan(app):
     except Exception as e:
         logger.warning(f"Failed to start Verify poller: {e}")
 
+    # Job cost dispute poller (CostDispute on GenLayer); no-op unless configured.
+    try:
+        from src.services.scheduled_sync import start_dispute_poller
+
+        start_dispute_poller()
+    except Exception as e:
+        logger.warning(f"Failed to start dispute poller: {e}")
+
     # Start data retention cleanup (gatewayz-backend M3, threat model L11)
     try:
         from src.services.scheduled_sync import start_retention_scheduler
@@ -1041,9 +1049,14 @@ async def lifespan(app):
 
     # Stop scheduled model sync (Phase 3 - Issue #996)
     try:
-        from src.services.scheduled_sync import stop_scheduler, stop_verify_poller
+        from src.services.scheduled_sync import (
+            stop_dispute_poller,
+            stop_scheduler,
+            stop_verify_poller,
+        )
 
         stop_verify_poller()
+        stop_dispute_poller()
 
         stop_scheduler()
         logger.info("Scheduled model sync service stopped")

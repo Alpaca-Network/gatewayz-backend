@@ -127,41 +127,10 @@ class GenLayerVerifyClient:
         """Consensus v0.6: every write carries a fees distribution and the sender pays it;
         without one the consensus contract reverts with FeesDistributionMissing."""
         call = {"address": self.contract, "function_name": "submit_case", "args": args}
-        fees = self._write_fees(call)
-        tx = self._client.write_contract(**call, fees=fees)
-        return tx if isinstance(tx, str) else "0x" + bytes(tx).hex()
-
-    def _write_fees(self, call: dict) -> dict:
-        from genlayer_py.chains.utils import is_studio_chain
-
-        studio = is_studio_chain(self._client.chain)
-        estimate = None
-        if studio:
-            try:  # Studio simulates this exact call and returns the budget to attach
-                estimate = self._client.estimate_transaction_fees_for_write(**call)
-            except Exception as e:
-                logger.info("GenLayer write simulation unavailable, using policy fees: %s", e)
-        if estimate is None:
-            estimate = self._client.estimate_transaction_fees({})
-        fees = {"distribution": estimate["distribution"], "feeValue": int(estimate["feeValue"])}
-        if estimate.get("messageAllocations"):
-            fees["messageAllocations"] = estimate["messageAllocations"]
-        if studio:
-            address = self._client.local_account.address
-            if self._client.w3.eth.get_balance(address) < 2 * fees["feeValue"]:
-                self._client.fund_account(address, STUDIO_TOP_UP_WEI)
-        return fees
+        return write_with_fees(self._client, call)
 
     def tx_state(self, tx: str) -> TxState | None:
-        t = self._client.get_transaction(transaction_hash=tx)
-        if t is None:
-            return None
-        return TxState(
-            status=status_name(t),
-            result=str(t["result_name"]) if t.get("result_name") is not None else None,
-            execution=t.get("tx_execution_result_name") or _leader_rollback(t),
-            recipient=str(t.get("to_address") or t.get("recipient") or "") or None,
-        )
+        return tx_state_of(self._client, tx)
 
     def read_verdict(self, case_id: str, final: bool) -> dict:
         from genlayer_py.types import TransactionHashVariant
@@ -188,6 +157,63 @@ class GenLayerVerifyClient:
     def appeal(self, tx: str, bond_wei: int | None) -> str:
         # None lets genlayer-py resolve the charge for the active decision (topUpAndSubmitAppeal).
         return self._client.appeal_transaction(transaction_id=tx, value=bond_wei)
+
+
+def write_with_fees(gl_client, call: dict) -> str:
+    """write_contract with the fees consensus v0.6 requires. Returns the tx hash as 0x hex.
+
+    Studio simulates the exact call and returns the budget to attach (policy budget as a
+    fallback), and a Studio sender is topped up with free test GEN when it runs low."""
+    fees = write_fees(gl_client, call)
+    tx = gl_client.write_contract(**call, fees=fees)
+    return tx if isinstance(tx, str) else "0x" + bytes(tx).hex()
+
+
+def write_fees(gl_client, call: dict) -> dict:
+    from genlayer_py.chains.utils import is_studio_chain
+
+    studio = is_studio_chain(gl_client.chain)
+    estimate = None
+    if studio:
+        try:  # Studio simulates this exact call and returns the budget to attach
+            estimate = gl_client.estimate_transaction_fees_for_write(**call)
+        except Exception as e:
+            logger.info("GenLayer write simulation unavailable, using policy fees: %s", e)
+    if estimate is None:
+        estimate = gl_client.estimate_transaction_fees({})
+    fees = {"distribution": estimate["distribution"], "feeValue": int(estimate["feeValue"])}
+    if estimate.get("messageAllocations"):
+        fees["messageAllocations"] = estimate["messageAllocations"]
+    if studio:
+        address = gl_client.local_account.address
+        if gl_client.w3.eth.get_balance(address) < 2 * fees["feeValue"]:
+            gl_client.fund_account(address, STUDIO_TOP_UP_WEI)
+    return fees
+
+
+def tx_state_of(gl_client, tx: str) -> TxState | None:
+    t = gl_client.get_transaction(transaction_hash=tx)
+    if t is None:
+        return None
+    return TxState(
+        status=status_name(t),
+        result=str(t["result_name"]) if t.get("result_name") is not None else None,
+        execution=t.get("tx_execution_result_name") or _leader_rollback(t),
+        recipient=str(t.get("to_address") or t.get("recipient") or "") or None,
+    )
+
+
+def leader_error(gl_client, tx: str) -> str | None:
+    """The contract's error code when the leader's execution rolled back, else None."""
+    t = gl_client.get_transaction(transaction_hash=tx) or {}
+    try:
+        receipt = t["consensus_data"]["leader_receipt"]
+        result = (receipt[0] if isinstance(receipt, list) else receipt)["result"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if isinstance(result, dict) and result.get("status") == "rollback":
+        return str(result.get("payload") or "contract_error")[:300]
+    return None
 
 
 def status_name(t: dict) -> str:
