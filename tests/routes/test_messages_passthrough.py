@@ -8,8 +8,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from src.main import app
-from src.services.anthropic_messages.stream import relay_passthrough_stream
 from src.security.identity import RequestIdentity
+from src.services.anthropic_messages.stream import relay_passthrough_stream
 from src.services.providers import anthropic_passthrough as pt
 
 _HEADERS = {

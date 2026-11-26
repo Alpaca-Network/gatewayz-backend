@@ -15,9 +15,9 @@ import pytest
 from src.adapters.chat.openai import OpenAIChatAdapter
 from src.handlers import chat_handler
 from src.handlers.chat_handler import ChatInferenceHandler
-from src.services.anthropic_messages import stream as anthropic_stream
 from src.routes.chat_dispatch import _aclose_quiet
 from src.schemas.internal.chat import InternalChatRequest, InternalMessage
+from src.services.anthropic_messages import stream as anthropic_stream
 from src.utils.token_estimator import count_tokens_text
 
 

@@ -8,13 +8,13 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.main import app
+from src.security.identity import RequestIdentity
 from src.services.anthropic_messages.errors import safe_error_message
 from src.services.anthropic_messages.stream import translate_stream
 from src.services.anthropic_messages.tokens import (
     AnthropicCountTokensRequest,
     estimate_input_tokens,
 )
-from src.security.identity import RequestIdentity
 
 _HEADERS = {"x-api-key": "placeholder-key", "anthropic-version": "2023-06-01"}
 _BODY = {

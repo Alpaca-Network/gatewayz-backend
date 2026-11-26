@@ -73,6 +73,7 @@ def _trusted_ip(request: Request | None) -> str | None:
     ip = get_client_ip(request)
     return None if not ip or ip == "unknown" else ip
 
+
 router = APIRouter(tags=["messages"])
 
 
@@ -178,9 +179,7 @@ def _resolve_checked_api_key(request: Request, api_key: str | None) -> str | Non
                 lease_sink=lease_sink,
             )
         except ApiKeyLookupUnavailable as e:
-            raise anthropic_error(
-                503, "api_error", "Authentication temporarily unavailable"
-            ) from e
+            raise anthropic_error(503, "api_error", "Authentication temporarily unavailable") from e
         except ValueError as e:
             if JOB_BUSY in str(e):
                 raise anthropic_error(429, "rate_limit_error", str(e)) from e
@@ -400,4 +399,3 @@ async def messages_health():
         "supports": ["streaming", "tools", "prompt_caching", "vision"],
         "timestamp": int(time.time()),
     }
-

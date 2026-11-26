@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+
 class AnthropicCountTokensRequest(BaseModel):
     """Body of ``POST /v1/messages/count_tokens``. Same shape as a message request,
     without ``max_tokens``."""
@@ -58,4 +59,3 @@ def estimate_input_tokens(body: AnthropicCountTokensRequest) -> int:
     for tool in body.tools or []:
         total += _count_block_tokens(tool)
     return max(total, 1)
-

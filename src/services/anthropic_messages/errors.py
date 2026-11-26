@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+
 def anthropic_error(status_code: int, error_type: str, message: str) -> HTTPException:
     """Errors in Anthropic's envelope, so Anthropic SDKs parse them correctly."""
     return HTTPException(
@@ -153,7 +154,6 @@ STREAM_ERROR_TYPE_MAP = {
 # crossed the plan allowance, and it was already delivered and billed. The NEXT
 # request is refused before it starts; this one must end normally.
 NON_FATAL_STREAM_ERROR_TYPES = frozenset({"stream_normalization_warning", "plan_limit_exceeded"})
-
 
 
 def to_anthropic_error(exc: HTTPException) -> HTTPException:
