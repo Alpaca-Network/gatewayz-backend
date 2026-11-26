@@ -604,7 +604,9 @@ vercel deploy
 
 ### Railway
 ```bash
-# Configured in railway.json
+# Builds with nixpacks.toml, starts with start.sh. Service settings (health
+# check, replicas, crons) are set in the Railway dashboard: no service reads
+# a railway.json / railway.toml file.
 railway up
 ```
 

@@ -492,9 +492,9 @@ jobs:
 
       - name: Verify Railway config
         run: |
-          # Check Railway config files exist
-          test -f railway.json && echo "✅ railway.json exists"
-          test -f railway.toml && echo "✅ railway.toml exists"
+          # Build and start files Railway uses. Service settings (start command,
+          # health check, replicas, crons) live in the Railway dashboard, not in
+          # config files: no service reads railway.json / railway.toml.
           test -f nixpacks.toml && echo "✅ nixpacks.toml exists"
           test -f start.sh && echo "✅ start.sh exists"
           echo "✅ Railway deployment config verified"

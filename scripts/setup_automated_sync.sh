@@ -20,7 +20,7 @@ echo ""
 
 # Detect platform
 detect_platform() {
-    if [ -f "railway.json" ] || [ -f "railway.toml" ]; then
+    if [ -f "nixpacks.toml" ]; then
         echo "railway"
     elif [ -f "vercel.json" ]; then
         echo "vercel"
@@ -147,19 +147,13 @@ case $CHOICE in
             exit 1
         fi
 
-        echo -e "${GREEN}✅ Railway cron is configured in railway.toml${NC}"
+        echo -e "${YELLOW}⚠️  Railway crons are set in the Railway dashboard, not in a file${NC}"
         echo ""
-        echo "The cron job will run automatically after deployment."
+        echo "No service reads railway.toml, so a [[crons]] block there never runs."
+        echo "Model sync runs from the GitHub Actions workflow (option 2):"
+        echo "  .github/workflows/scheduled-sync.yml"
         echo ""
-        echo "To change schedule, edit railway.toml:"
-        echo "  [[crons]]"
-        echo "  schedule = \"0 */6 * * *\""
-        echo "  command = \"curl -X POST http://localhost:\$PORT/admin/model-sync/all\""
-        echo ""
-        echo "Deploy changes:"
-        echo "  git add railway.toml"
-        echo "  git commit -m 'Configure Railway cron'"
-        echo "  git push"
+        echo "To add a Railway cron instead: Railway dashboard → service → Settings → Cron Schedule."
         ;;
 
     5)
