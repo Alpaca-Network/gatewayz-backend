@@ -172,6 +172,19 @@ def _check_sentry() -> dict[str, Any]:
     return _result("ok" if Config.SENTRY_DSN else "not_configured")
 
 
+def _check_ip_country_db() -> dict[str, Any]:
+    """The local IP-to-country database used by the wallet-link country check
+    (src/services/wallet/ip_country.py). Reads a local file only."""
+    from src.services.wallet.ip_country import ip_country_status
+
+    status = ip_country_status()
+    if not status["configured"]:
+        return _result("not_configured")
+    if not status["loaded"]:
+        return _result("down", detail=status["error"])
+    return _result("ok", detail=f"{status['database_type']} build_epoch={status['build_epoch']}")
+
+
 def check_all(timeout_s: float = _DEFAULT_TIMEOUT_SECONDS) -> dict[str, dict[str, Any]]:
     """Return ``{name: {status, latency_ms, detail}}`` for every integration.
 
@@ -195,6 +208,7 @@ def check_all(timeout_s: float = _DEFAULT_TIMEOUT_SECONDS) -> dict[str, dict[str
         ("redis", lambda: _check_redis(timeout_s)),
         ("stripe", _check_stripe),
         ("sentry", _check_sentry),
+        ("ip_country_db", _check_ip_country_db),
     ):
         try:
             checks[name] = fn()

@@ -1,7 +1,8 @@
 """Tests for src/services/wallet/eligibility.py -- the US / Canada block.
 Counsel cleared the program everywhere except the US and Canada; an account
 must attest before it links a Cardano wallet, and a restricted country is
-sticky. The DB and the audit log are mocked."""
+sticky. The DB and the audit log are mocked; IP country databases are small
+files written by tests/services/wallet/mmdb_writer.py."""
 
 from __future__ import annotations
 
@@ -11,7 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from src.services.wallet import eligibility
+from src.services.wallet import eligibility, ip_country
+from tests.services.wallet.mmdb_writer import write_mmdb
 
 USER_ID = 42
 ATTESTED = {
@@ -61,6 +63,7 @@ def store(monkeypatch):
         eligibility.Config, "WALLET_LINK_RESTRICTED_COUNTRIES", frozenset({"US", "CA"})
     )
     monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "")
+    monkeypatch.setattr(eligibility.Config, "WALLET_LINK_IP_COUNTRY_DB_PATH", "")
     return fake
 
 
@@ -140,3 +143,116 @@ class TestAccountEligible:
         view = eligibility.eligibility_view(USER_ID)
         assert view["status"] == "eligible"
         assert view["attestation_text"] == eligibility.ATTESTATION_TEXT
+
+
+US_IP, PT_IP, UNKNOWN_IP = "8.8.8.8", "85.240.0.1", "1.1.1.1"
+
+
+@pytest.fixture
+def geo(store, tmp_path, monkeypatch):
+    """A configured IP country database and the production client-IP header."""
+    path = write_mmdb(
+        tmp_path / "country.mmdb",
+        {
+            "8.8.8.0/24": {"country": {"iso_code": "US"}},
+            "24.48.0.0/16": {"registered_country": {"iso_code": "CA"}},
+            "85.240.0.0/13": {"country": {"iso_code": "PT"}},
+        },
+    )
+    monkeypatch.setattr(eligibility.Config, "WALLET_LINK_IP_COUNTRY_DB_PATH", str(path))
+    monkeypatch.setattr(eligibility.Config, "TRUSTED_CLIENT_IP_HEADER", "x-real-ip")
+    monkeypatch.setattr(ip_country, "_state", (None, None, None))
+    return path
+
+
+def _ip_request(ip, headers=None):
+    return SimpleNamespace(headers={"X-Real-IP": ip, **(headers or {})}, client=None)
+
+
+def _audit_metadata(action):
+    calls = [c for c in eligibility.record_audit.call_args_list if c.kwargs["action"] == action]
+    assert len(calls) == 1
+    return calls[0].kwargs["metadata"]
+
+
+class TestIpCountry:
+    def test_restricted_ip_country_is_refused_and_sticks(self, store, geo):
+        for ip, country in ((US_IP, "US"), ("24.48.1.1", "CA")):
+            store.row = {}
+            assert _status(
+                lambda: eligibility.require_eligible(USER_ID, _ip_request(ip), True)
+            ) == (451, "region_restricted")
+            assert store.restricted[-1] == (USER_ID, country, "ip_country")
+        assert store.attested == []
+        metadata = eligibility.record_audit.call_args.kwargs["metadata"]
+        assert metadata["country_source"] == "ip" and metadata["country"] == "CA"
+        # Sticky: a later request from an allowed country is still refused.
+        assert _status(
+            lambda: eligibility.require_eligible(USER_ID, _ip_request(PT_IP), True)
+        ) == (451, "region_restricted")
+        assert not eligibility.account_eligible(USER_ID)
+
+    def test_allowed_ip_country_takes_the_attestation_path(self, store, geo):
+        assert _status(
+            lambda: eligibility.require_eligible(USER_ID, _ip_request(PT_IP), False)
+        ) == (451, "attestation_required")
+        eligibility.require_eligible(USER_ID, _ip_request(PT_IP), True)
+        assert store.restricted == []
+        assert store.attested == [(USER_ID, eligibility.ATTESTATION_VERSION, "PT")]
+        metadata = _audit_metadata("wallet.eligibility.attested")
+        assert (metadata["country"], metadata["country_source"]) == ("PT", "ip")
+
+    def test_header_wins_over_ip(self, store, geo, monkeypatch):
+        monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "cf-ipcountry")
+        # Header says allowed, IP says US: the header decides.
+        eligibility.require_eligible(USER_ID, _ip_request(US_IP, {"cf-ipcountry": "FR"}), True)
+        assert store.restricted == []
+        assert _audit_metadata("wallet.eligibility.attested")["country_source"] == "header"
+        # Header says US, IP says PT: refused, recorded as the header.
+        store.row = {}
+        assert _status(
+            lambda: eligibility.require_eligible(
+                USER_ID, _ip_request(PT_IP, {"cf-ipcountry": "US"}), True
+            )
+        ) == (451, "region_restricted")
+        assert store.restricted == [(USER_ID, "US", "request_country")]
+        metadata = _audit_metadata("wallet.eligibility.restricted")
+        assert metadata["country_source"] == "header"
+
+    def test_header_configured_but_absent_falls_back_to_ip(self, store, geo, monkeypatch):
+        monkeypatch.setattr(eligibility.Config, "WALLET_LINK_COUNTRY_HEADER", "cf-ipcountry")
+        assert _status(
+            lambda: eligibility.require_eligible(USER_ID, _ip_request(US_IP), True)
+        ) == (451, "region_restricted")
+        assert store.restricted == [(USER_ID, "US", "ip_country")]
+
+    @pytest.mark.parametrize("ip", [UNKNOWN_IP, "10.0.0.1", "not-an-ip"])
+    def test_unknown_ip_is_attestation_only(self, store, geo, ip):
+        eligibility.require_eligible(USER_ID, _ip_request(ip), True)
+        assert store.restricted == []
+        assert store.attested == [(USER_ID, eligibility.ATTESTATION_VERSION, None)]
+        assert _audit_metadata("wallet.eligibility.attested")["country_source"] == "none"
+
+    @pytest.mark.timeout(10)
+    @pytest.mark.parametrize("content", [None, b"", b"corrupt" * 100])
+    def test_missing_or_unreadable_db_is_attestation_only(self, store, geo, content):
+        if content is None:
+            geo.unlink()
+        else:
+            geo.write_bytes(content)
+        assert _status(
+            lambda: eligibility.require_eligible(USER_ID, _ip_request(US_IP), False)
+        ) == (451, "attestation_required")
+        eligibility.require_eligible(USER_ID, _ip_request(US_IP), True)
+        assert store.restricted == []
+        assert store.attested == [(USER_ID, eligibility.ATTESTATION_VERSION, None)]
+        assert _audit_metadata("wallet.eligibility.attested")["country_source"] == "none"
+
+    def test_db_off_ignores_the_ip(self, store):
+        eligibility.require_eligible(USER_ID, _ip_request(US_IP), True)
+        assert store.restricted == []
+
+    def test_request_without_client_ip_is_unknown(self, store, geo):
+        no_ip = SimpleNamespace(headers={})
+        assert eligibility.request_country_and_source(no_ip) == (None, "none")
+        assert eligibility.request_country_and_source(None) == (None, "none")

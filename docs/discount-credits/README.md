@@ -117,6 +117,9 @@ A user links a Cardano stake address once, by signing a server-issued message
 Linking is refused for residents or citizens of the United States or Canada.
 The attestation can also be recorded on its own with `POST /wallet/eligibility`.
 The code is in `src/routes/wallet_auth_cardano.py` and `src/services/wallet/`.
+Besides the attestation, the request country (a trusted header, or the client
+IP looked up in a local country database) can refuse the link; see
+[docs/wallet/ip-country.md](../wallet/ip-country.md).
 
 ## Historical names
 
@@ -128,7 +131,10 @@ The tables and SQL functions keep the names they were created with:
 only the names are historical. That program's attribution functions
 (`delegation_grant_attribution`, `delegation_reserve_attribution`,
 `delegation_attribution_spent`) were dropped in
-`supabase/migrations/20261126120000_discount_credits_hardening.sql`.
+`supabase/migrations/20261126120000_discount_credits_hardening.sql`, and its
+last functions (`delegation_account_spent`, `delegation_reserve_accrual`,
+`delegation_claim_accrual`, `delegation_release_claim`) in
+`supabase/migrations/20261126140000_drop_retired_delegation_functions.sql`.
 
 ## Who the switch applies to
 
