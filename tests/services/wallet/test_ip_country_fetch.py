@@ -101,7 +101,8 @@ def test_a_stale_file_is_replaced(configured, db_bytes):
 
 @pytest.mark.parametrize(
     "body",
-    [b"not a database", gzip.compress(b"not a database"), b"\x1f\x8b broken gzip"],
+    [b"not a database", gzip.compress(b"not a database", mtime=0), b"\x1f\x8b broken gzip"],
+    ids=["plain", "gzip", "broken-gzip"],
 )
 def test_a_bad_download_never_replaces_a_working_file(configured, db_bytes, body):
     configured.parent.mkdir(parents=True)

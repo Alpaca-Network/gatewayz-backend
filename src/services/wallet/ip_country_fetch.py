@@ -53,9 +53,8 @@ def candidate_urls(template: str, now: datetime | None = None) -> list[str]:
     now = now or datetime.now(UTC)
     year, month = now.year, now.month
     previous = (year - 1, 12) if month == 1 else (year, month - 1)
-    return [
-        template.replace("{month}", f"{y:04d}-{m:02d}") for y, m in ((year, month), previous)
-    ]
+    months = ((year, month), previous)
+    return [template.replace("{month}", f"{y:04d}-{m:02d}") for y, m in months]
 
 
 def is_stale(path: str, now: float | None = None) -> bool:
