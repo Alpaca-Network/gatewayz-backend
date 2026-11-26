@@ -215,11 +215,20 @@ def _map_http_exception_to_detailed_error(
             except ValueError:
                 pass
 
-        return DetailedErrorFactory.rate_limit_exceeded(
-            limit_type="request_rate",
+        if "plan limit" in detail.lower():
+            return DetailedErrorFactory.plan_limit_reached(reason=detail, request_id=request_id)
+
+        # Name the limit that was hit. Every 429 used to say "request_rate",
+        # whatever the cause (an upstream provider's limit, a per-minute token
+        # limit, a concurrency cap), so callers could not tell what to change.
+        error = DetailedErrorFactory.rate_limit_exceeded(
+            limit_type=_classify_rate_limit(detail),
             retry_after=retry_after,
             request_id=request_id,
         )
+        if detail and detail != _NO_DETAIL:
+            error.error.detail = detail[:300]
+        return error
 
     elif status_code in [502, 503, 504]:
         # Provider or service errors
@@ -324,6 +333,32 @@ def _extract_credit_amounts(detail: str) -> tuple[float | None, float | None]:
             pass
 
     return None, None
+
+
+# (substring in the lowercased detail, limit type), checked in order.
+_RATE_LIMIT_KINDS = (
+    ("upstream", "provider_rate_limit"),
+    ("provider", "provider_rate_limit"),
+    ("congestion", "provider_rate_limit"),
+    ("concurren", "concurrent_requests"),
+    ("minute token", "tokens_per_minute"),
+    ("tokens per minute", "tokens_per_minute"),
+    ("minute request", "requests_per_minute"),
+    ("requests per minute", "requests_per_minute"),
+    ("trial", "trial_limit"),
+    ("anonymous", "anonymous_limit"),
+    ("daily", "daily_limit"),
+    ("monthly", "monthly_limit"),
+)
+
+
+def _classify_rate_limit(detail: str) -> str:
+    """The kind of limit a 429's detail describes; "request_rate" if unknown."""
+    lowered = (detail or "").lower()
+    for needle, kind in _RATE_LIMIT_KINDS:
+        if needle in lowered:
+            return kind
+    return "request_rate"
 
 
 def _extract_model_id(detail: str) -> str | None:
