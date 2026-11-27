@@ -419,6 +419,16 @@ def refresh(dispute: dict, client) -> dict:
     return db.update_dispute(dispute["dispute_id"], stamp)
 
 
+def _usd(value: Any) -> str | None:
+    """Money as an exact decimal string. PostgREST returns numeric columns as JSON
+    numbers, which would print 3.863e-06 and lose exactness."""
+    if value is None:
+        return None
+    from decimal import Decimal
+
+    return format(Decimal(str(value)).normalize(), "f")
+
+
 def view(d: dict) -> dict[str, Any]:
     """Dispute view schema v1. `refund_usd` is the verdict's ruling; in shadow mode it is
     recorded only, never paid (`settled` stays false)."""
@@ -430,8 +440,8 @@ def view(d: dict) -> dict[str, Any]:
         "status": d["status"],
         "final": d["status"] == "final",
         "lines": d["line_indexes"],
-        "billed_usd": d.get("billed_usd"),
-        "refund_usd": d.get("refund_usd"),
+        "billed_usd": _usd(d.get("billed_usd")),
+        "refund_usd": _usd(d.get("refund_usd")),
         "rulings": v.get("lines") or [],
         "policy_hash": v.get("policy_hash"),
         "settled": False,

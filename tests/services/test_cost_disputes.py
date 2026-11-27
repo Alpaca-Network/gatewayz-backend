@@ -266,3 +266,12 @@ def test_still_processing_only_stamps(fake):
     fake(_open())
     out = cd.refresh(_open(), FakeClient(state=TxState("PENDING", None, None, CONTRACT)))
     assert out["status"] == "adjudicating" and out["last_checked_at"]
+
+
+@pytest.mark.parametrize(
+    "stored,shown",
+    [(3.863e-06, "0.000003863"), (0.0, "0"), ("0.0000195", "0.0000195"), (None, None)],
+)
+def test_amounts_are_exact_decimal_strings(stored, shown):
+    v = cd.view(_dispute(billed_usd=stored, refund_usd=stored))
+    assert v["billed_usd"] == shown and v["refund_usd"] == shown
