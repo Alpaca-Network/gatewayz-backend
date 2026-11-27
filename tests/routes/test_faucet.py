@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from fastapi.testclient import TestClient
@@ -11,6 +12,17 @@ from src.security.deps import get_user_id
 
 client = TestClient(app)
 app.dependency_overrides[get_user_id] = lambda: 42
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits():
+    """Anonymous calls are limited per client IP, and every test shares the
+    TestClient's address: start each test with empty buckets."""
+    from src.services import endpoint_rate_limiter
+
+    endpoint_rate_limiter._buckets.clear()
+    yield
+    endpoint_rate_limiter._buckets.clear()
 
 
 def _signed_claim_body(user_id: int, nonce: str, account) -> dict:
