@@ -82,7 +82,7 @@ async def get_api_key_id_with_retry(
                     _key_id_cache[api_key] = (api_key_id, time.monotonic())
                     return api_key_id
                 else:
-                    logger.warning(f"API key record found but missing 'id' field: {api_key_record}")
+                    logger.warning("API key record found but missing 'id' field")
                     if metrics_available:
                         api_key_tracking_failures.labels(reason="invalid_record").inc()
                     return None

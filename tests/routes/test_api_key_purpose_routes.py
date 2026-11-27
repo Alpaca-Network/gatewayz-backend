@@ -144,6 +144,9 @@ class TestStorage:
         from src.db import api_keys
 
         monkeypatch.setenv("KEY_HASH_SALT", "0123456789abcdef0123456789abcdef")
+        # New keys are stored encrypted (no plaintext column), so encryption
+        # must be available; the test keyring is not configured at import.
+        monkeypatch.setattr("src.db.api_key_lookup.encrypt_api_key", lambda k: ("ciphertext", 1))
         client = _InsertRecorder()
         monkeypatch.setattr(api_keys, "get_supabase_client", lambda: client)
         monkeypatch.setattr(api_keys, "check_key_name_uniqueness", lambda *a, **k: True)

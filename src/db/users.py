@@ -1,5 +1,4 @@
 import logging
-import secrets
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -8,7 +7,15 @@ from typing import Any
 
 from src.config.config import Config
 from src.config.supabase_config import get_supabase_client
+from src.db.api_key_lookup import (
+    find_key_row,
+    find_legacy_user_row,
+    key_label,
+    new_key_storage_fields,
+    resolve_user_id,
+)
 from src.db.api_keys import create_api_key, get_api_key_by_key
+from src.utils.api_key_lookup import mask_api_key_for_logging
 from src.utils.crypto import last4
 from src.utils.db_instrumentation import track_database_query
 from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
@@ -29,7 +36,7 @@ def clear_user_cache(api_key: str | None = None) -> None:
     if api_key:
         if api_key in _user_cache:
             del _user_cache[api_key]
-            logger.debug(f"Cleared user cache for API key {api_key[:10]}...")
+            logger.debug(f"Cleared user cache for API key {mask_api_key_for_logging(api_key)}")
     else:
         _user_cache.clear()
         logger.info("Cleared entire user cache")
@@ -46,7 +53,7 @@ def get_user_cache_stats() -> dict[str, Any]:
 def invalidate_user_cache(api_key: str) -> None:
     """Invalidate cache for a specific user (e.g., after profile update)"""
     clear_user_cache(api_key)
-    logger.debug(f"Invalidated user cache for API key {api_key[:10]}...")
+    logger.debug(f"Invalidated user cache for API key {mask_api_key_for_logging(api_key)}")
 
 
 def invalidate_user_cache_by_id(user_id: int) -> None:
@@ -87,6 +94,22 @@ def _is_temporary_api_key(api_key: str) -> bool:
     return False
 
 
+def _clear_legacy_key_column(client, user_id: int) -> None:
+    """Drop the plaintext users.api_key once the key lives in api_keys_new.
+
+    The key keeps authenticating through api_keys_new (by key_hash), which
+    every lookup tries before the legacy column. Best-effort.
+    """
+    try:
+        client.table("users").update({"api_key": None}).eq("id", user_id).execute()
+    except Exception as e:
+        logger.warning(
+            "Could not clear legacy users.api_key for user %s: %s",
+            sanitize_for_logging(str(user_id)),
+            type(e).__name__,
+        )
+
+
 def _migrate_legacy_api_key(client, user: dict[str, Any], api_key: str) -> bool:
     """Migrate a legacy API key from users.api_key to api_keys_new table.
 
@@ -124,10 +147,11 @@ def _migrate_legacy_api_key(client, user: dict[str, Any], api_key: str) -> bool:
 
         # Check if key already exists in api_keys_new (race condition protection)
         with track_database_query(table="api_keys_new", operation="select"):
-            existing = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
+            existing = find_key_row(client, api_key, "id")
 
-        if existing.data:
+        if existing:
             logger.debug("Legacy key already exists in api_keys_new, skipping migration")
+            _clear_legacy_key_column(client, user_id)
             return True  # Already migrated
 
         # Determine environment tag from key prefix
@@ -141,9 +165,10 @@ def _migrate_legacy_api_key(client, user: dict[str, Any], api_key: str) -> bool:
             environment_tag = "live"
 
         # Prepare migration payload matching the SQL migration
+        # Stored as hash + ciphertext + last4; the plaintext is not copied.
         migration_payload = {
             "user_id": user_id,
-            "api_key": api_key,
+            **new_key_storage_fields(api_key),
             "key_name": "Legacy Primary Key (auto-migrated)",
             "environment_tag": environment_tag,
             "is_primary": True,
@@ -165,6 +190,7 @@ def _migrate_legacy_api_key(client, user: dict[str, Any], api_key: str) -> bool:
                 sanitize_for_logging(str(user_id)),
                 environment_tag,
             )
+            _clear_legacy_key_column(client, user_id)
             return True
         else:
             logger.warning(
@@ -229,8 +255,8 @@ def create_enhanced_user(
             if Config.PRIVY_APP_ID:
                 user_data["privy_app_id"] = Config.PRIVY_APP_ID
 
-        # Create user account with a temporary API key (will be replaced)
-        user_data["api_key"] = f"gw_live_{secrets.token_urlsafe(16)}"
+        # users.api_key (legacy) is left NULL: keys live in api_keys_new only,
+        # stored as hash + ciphertext. It used to get a temporary plaintext key.
         user_result = client.table("users").insert(user_data).execute()
 
         # Use safe_get_first to safely extract user data with validation
@@ -268,21 +294,11 @@ def create_enhanced_user(
             subscription_status=subscription_status,
         )
 
-        # Update user with the actual API key
-        update_result = (
-            client.table("users").update({"api_key": primary_key}).eq("id", user_id).execute()
-        )
-
-        if not update_result.data:
-            logger.warning(
-                "Failed to update users.api_key for user %s, but primary key created successfully in api_keys_new",
-                sanitize_for_logging(str(user_id)),
-            )
-
+        # The primary key is NOT copied into the legacy users.api_key column.
         logger.info(
             "User %s created successfully with primary API key: %s",
             sanitize_for_logging(str(user_id)),
-            sanitize_for_logging(primary_key[:15] + "..."),
+            mask_api_key_for_logging(primary_key),
         )
 
         # Return user info with primary key
@@ -404,15 +420,13 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
 
         # First, try to get user from the new api_keys table
         with track_database_query(table="api_keys_new", operation="select"):
-            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+            key_row = find_key_row(client, api_key)
 
-        if key_result.data and len(key_result.data) > 0:
+        if key_row:
             try:
-                key_data = safe_get_first(
-                    key_result,
-                    error_message="API key found but data structure invalid",
-                    validate_keys=["id", "user_id"],
-                )
+                if "id" not in key_row or "user_id" not in key_row:
+                    raise DatabaseResultError("API key found but data structure invalid")
+                key_data = key_row
 
                 # Revocation must hold here too, not just in
                 # validate_api_key_security -- anything that calls get_user()
@@ -424,7 +438,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                 if not key_data.get("is_active", True):
                     logger.info(
                         "API key %s is inactive; treating as no user",
-                        sanitize_for_logging(api_key[:10] + "..."),
+                        mask_api_key_for_logging(api_key),
                     )
                     return None
 
@@ -441,13 +455,13 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                         if expiration < now:
                             logger.info(
                                 "API key %s has expired; treating as no user",
-                                sanitize_for_logging(api_key[:10] + "..."),
+                                mask_api_key_for_logging(api_key),
                             )
                             return None
                     except Exception as date_error:
                         logger.warning(
                             "Error checking expiration for key %s: %s",
-                            sanitize_for_logging(api_key[:10] + "..."),
+                            mask_api_key_for_logging(api_key),
                             sanitize_for_logging(str(date_error)),
                         )
 
@@ -481,18 +495,10 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
 
         # Fallback: Check if this is a legacy key (for backward compatibility during migration)
         # PERF: Legacy keys are allowed to authenticate immediately - no blocking
+        # Only while API_KEY_PLAINTEXT_FALLBACK is on (find_legacy_user_row).
         with track_database_query(table="users", operation="select"):
-            legacy_result = client.table("users").select("*").eq("api_key", api_key).execute()
-        if legacy_result.data and len(legacy_result.data) > 0:
-            try:
-                user = safe_get_first(
-                    legacy_result,
-                    error_message="Legacy key found but user data invalid",
-                    validate_keys=["id"],
-                )
-            except (DatabaseResultError, KeyError) as e:
-                logger.error(f"Error extracting legacy user data: {e}")
-                return None
+            user = find_legacy_user_row(client, api_key)
+        if user:
 
             # Same revocation gap as the api_keys_new branch above, for the
             # legacy users.api_key column: a deactivated user must not keep
@@ -504,14 +510,14 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
             if not user.get("is_active", True):
                 logger.info(
                     "Legacy API key %s belongs to an inactive user; treating as no user",
-                    sanitize_for_logging(api_key[:10] + "..."),
+                    mask_api_key_for_logging(api_key),
                 )
                 return None
 
             logger.info(
-                "Legacy users.api_key column used for user %s (key %s...)",
+                "Legacy users.api_key column used for user %s (key %s)",
                 user.get("id"),
-                sanitize_for_logging(api_key[:10]),
+                mask_api_key_for_logging(api_key),
             )
 
             # Check if this is a temporary key that should be replaced
@@ -560,16 +566,20 @@ def get_user(api_key: str) -> dict[str, Any] | None:
         cache_time = entry["timestamp"]
         if time.time() - cache_time < _user_cache_ttl:
             logger.debug(
-                f"User cache hit for API key {api_key[:10]}... (age: {time.time() - cache_time:.1f}s)"
+                "User cache hit for API key %s (age: %.1fs)",
+                mask_api_key_for_logging(api_key),
+                time.time() - cache_time,
             )
             return entry["user"]
         else:
             # Cache expired, remove it
             del _user_cache[api_key]
-            logger.debug(f"User cache expired for API key {api_key[:10]}...")
+            logger.debug(f"User cache expired for API key {mask_api_key_for_logging(api_key)}")
 
     # Cache miss - fetch from database
-    logger.debug(f"User cache miss for API key {api_key[:10]}... - fetching from database")
+    logger.debug(
+        "User cache miss for API key %s - fetching from database", mask_api_key_for_logging(api_key)
+    )
     user = _get_user_uncached(api_key)
 
     # Cache the result (even if None, to avoid repeated DB queries for invalid keys)
@@ -935,7 +945,7 @@ def add_credits(api_key: str, credits: int) -> None:
     """Legacy function for backward compatibility"""
     user = get_user(api_key)
     if not user:
-        raise ValueError(f"User with API key {api_key} not found")
+        raise ValueError("User with this API key not found")
 
     add_credits_to_user(
         user_id=user["id"],
@@ -970,7 +980,10 @@ def log_api_usage_transaction(
 
         user = get_user(api_key)
         if not user:
-            logger.warning(f"User with API key {api_key[:20]}... not found for transaction logging")
+            logger.warning(
+                "User with API key %s not found for transaction logging",
+                mask_api_key_for_logging(api_key),
+            )
             return
 
         user_id = user["id"]
@@ -1154,31 +1167,21 @@ def deduct_credits(
         # This prevents race conditions from stale cached balance data
         # Use proper API key lookup to support both api_keys_new and legacy users.api_key
 
-        # First, try api_keys_new table (primary key store)
+        # api_keys_new by key_hash first, then (behind the fallback flag) the
+        # legacy users.api_key column.
         with track_database_query(table="api_keys_new", operation="select"):
-            key_result = (
-                client.table("api_keys_new").select("user_id").eq("api_key", api_key).execute()
-            )
+            resolved_user_id = resolve_user_id(client, api_key)
 
-        if key_result.data:
-            # Found in api_keys_new - get user data with both allowance and purchased credits
-            user_id = key_result.data[0]["user_id"]
-            with track_database_query(table="users", operation="select"):
-                user_lookup = (
-                    client.table("users")
-                    .select("id, subscription_allowance, purchased_credits, tier")
-                    .eq("id", user_id)
-                    .execute()
-                )
-        else:
-            # Fallback: try legacy users.api_key column
-            with track_database_query(table="users", operation="select"):
-                user_lookup = (
-                    client.table("users")
-                    .select("id, subscription_allowance, purchased_credits, tier")
-                    .eq("api_key", api_key)
-                    .execute()
-                )
+        if resolved_user_id is None:
+            raise ValueError("User with API key not found")
+
+        with track_database_query(table="users", operation="select"):
+            user_lookup = (
+                client.table("users")
+                .select("id, subscription_allowance, purchased_credits, tier")
+                .eq("id", resolved_user_id)
+                .execute()
+            )
 
         if not user_lookup.data:
             raise ValueError("User with API key not found")
@@ -1837,10 +1840,13 @@ def get_all_users() -> list[dict[str, Any]]:
 def delete_user(api_key: str) -> None:
     try:
         client = get_supabase_client()
-        result = client.table("users").delete().eq("api_key", api_key).execute()
+        user_id = resolve_user_id(client, api_key)
+        if user_id is None:
+            raise ValueError("User with this API key not found")
+        result = client.table("users").delete().eq("id", user_id).execute()
 
         if not result.data:
-            raise ValueError(f"User with API key {api_key} not found")
+            raise ValueError("User with this API key not found")
 
     except Exception as e:
         logger.error("Failed to delete user: %s", sanitize_for_logging(str(e)))
@@ -1931,16 +1937,10 @@ def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
-        # Get user info from api_keys_new table first
-        key_result = client.table("api_keys_new").select("user_id").eq("api_key", api_key).execute()
-        if not key_result.data:
-            # Fallback to legacy users table
-            user_result = client.table("users").select("id").eq("api_key", api_key).execute()
-            if not user_result.data:
-                return None
-            user_id = user_result.data[0]["id"]
-        else:
-            user_id = key_result.data[0]["user_id"]
+        # api_keys_new by key_hash first, then the legacy column (fallback flag)
+        user_id = resolve_user_id(client, api_key)
+        if user_id is None:
+            return None
 
         # Get user credits
         user_result = (
@@ -2144,9 +2144,10 @@ def get_admin_monitor_data() -> dict[str, Any]:
         api_key_to_user_id = {}
 
         # First, build mappings from already-fetched users data
+        # Keys are identified by a non-secret label ("...a1b2"), never plaintext.
         for user in users:
             user_id = user.get("id")
-            api_key = user.get("api_key")
+            api_key = key_label(user) if user.get("api_key") else None
             if user_id and api_key:
                 user_id_to_api_key[user_id] = api_key
                 api_key_to_user_id[api_key] = user_id
@@ -2155,14 +2156,14 @@ def get_admin_monitor_data() -> dict[str, Any]:
         try:
             api_keys_result = (
                 client.table("api_keys_new")
-                .select("user_id, api_key, is_primary")
+                .select("id, user_id, last4, is_primary")
                 .limit(10000)
                 .execute()
             )
             if api_keys_result.data:
                 for key_data in api_keys_result.data:
                     user_id = key_data.get("user_id")
-                    api_key = key_data.get("api_key")
+                    api_key = key_label(key_data)
                     is_primary = key_data.get("is_primary", False)
                     # Prefer primary keys, but update if user_id not in mapping
                     if user_id and api_key:
@@ -2394,7 +2395,7 @@ def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str,
         # Get current user
         user = get_user(api_key)
         if not user:
-            raise ValueError(f"User with API key {api_key} not found")
+            raise ValueError("User with this API key not found")
 
         # Prepare update data
         update_data = {}
@@ -2410,7 +2411,7 @@ def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str,
         update_data["updated_at"] = datetime.now(UTC).isoformat()
 
         # Update user profile
-        result = client.table("users").update(update_data).eq("api_key", api_key).execute()
+        result = client.table("users").update(update_data).eq("id", user["id"]).execute()
 
         if not result.data:
             raise ValueError("Failed to update user profile")
@@ -2427,10 +2428,12 @@ def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str,
 def get_user_profile(api_key: str) -> dict[str, Any]:
     """Get user profile information"""
     try:
-        logger.info(f"get_user_profile called for API key: {api_key[:10]}...")
+        logger.info(f"get_user_profile called for API key: {mask_api_key_for_logging(api_key)}")
         user = get_user(api_key)
         if not user:
-            logger.warning(f"get_user returned None for API key: {api_key[:10]}...")
+            logger.warning(
+                "get_user returned None for API key: %s", mask_api_key_for_logging(api_key)
+            )
             return None
 
         logger.info(f"Building profile for user {user.get('id')}")
@@ -2526,12 +2529,12 @@ def delete_user_account(api_key: str) -> bool:
         # Get user first to verify existence
         user = get_user(api_key)
         if not user:
-            raise ValueError(f"User with API key {api_key} not found")
+            raise ValueError("User with this API key not found")
 
         user_id = user["id"]
 
         # Delete user (this will cascade delete all related records due to CASCADE constraints)
-        result = client.table("users").delete().eq("api_key", api_key).execute()
+        result = client.table("users").delete().eq("id", user_id).execute()
 
         if not result.data:
             raise ValueError("Failed to delete user account")

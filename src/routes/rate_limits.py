@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from src.db.api_key_lookup import find_key_row, key_label
 from src.db.api_keys import get_api_key_by_id
 from src.db.rate_limits import (
     bulk_update_rate_limit_configs,
@@ -602,16 +603,11 @@ async def delete_rate_limits(
         user_id = None
 
         try:
-            # Get API key ID and user_id
-            key_record = (
-                client.table("api_keys_new")
-                .select("id, user_id")
-                .eq("api_key", target_api_key)
-                .execute()
-            )
-            if key_record.data and len(key_record.data) > 0:
-                api_key_id = key_record.data[0]["id"]
-                user_id = key_record.data[0]["user_id"]
+            # Get API key ID and user_id (by key_hash)
+            key_record = find_key_row(client, target_api_key, "id, user_id")
+            if key_record:
+                api_key_id = key_record["id"]
+                user_id = key_record["user_id"]
                 result = (
                     client.table("rate_limit_configs")
                     .delete()
@@ -627,18 +623,20 @@ async def delete_rate_limits(
         # Try to reset rate_limit_config in api_keys_new table
         reset_in_api_keys = False
         try:
-            result = (
-                client.table("api_keys_new")
-                .update(
-                    {
-                        "rate_limit_config": None,
-                        "updated_at": datetime.now(UTC).isoformat(),
-                    }
+            result = None
+            if api_key_id is not None:
+                result = (
+                    client.table("api_keys_new")
+                    .update(
+                        {
+                            "rate_limit_config": None,
+                            "updated_at": datetime.now(UTC).isoformat(),
+                        }
+                    )
+                    .eq("id", api_key_id)
+                    .execute()
                 )
-                .eq("api_key", target_api_key)
-                .execute()
-            )
-            reset_in_api_keys = len(result.data) > 0 if result.data else False
+            reset_in_api_keys = bool(result and result.data)
         except Exception as e:
             logger.debug(f"Could not reset rate_limit_config in api_keys_new: {e}")
 
@@ -724,7 +722,7 @@ async def get_users_rate_limits(
         rate_limit_config_available = True
         try:
             query = client.table("api_keys_new").select(
-                "id, api_key, key_name, user_id, rate_limit_config, environment_tag, created_at"
+                "id, last4, key_name, user_id, rate_limit_config, environment_tag, created_at"
             )
 
             if q_user_id is not None:
@@ -743,7 +741,7 @@ async def get_users_rate_limits(
                 logger.debug(f"rate_limit_config column not available: {e}")
                 rate_limit_config_available = False
                 query = client.table("api_keys_new").select(
-                    "id, api_key, key_name, user_id, environment_tag, created_at"
+                    "id, last4, key_name, user_id, environment_tag, created_at"
                 )
 
                 if q_user_id is not None:
@@ -789,7 +787,7 @@ async def get_users_rate_limits(
             users_rate_limits.append(
                 {
                     "key_id": key["id"],
-                    "api_key": key["api_key"][:15] + "...",
+                    "api_key": key_label(key),
                     "key_name": key.get("key_name"),
                     "user_id": key["user_id"],
                     "environment_tag": key.get("environment_tag"),

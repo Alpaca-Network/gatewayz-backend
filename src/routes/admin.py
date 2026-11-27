@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config.config import Config
+from src.db.api_key_lookup import plaintext_from_row
 from src.db.chat_completion_requests import get_chat_completion_requests_by_api_key
 from src.db.credit_transactions import (
     get_admin_daily_grant_total,
@@ -707,7 +708,7 @@ async def get_users_stats(
         count_result = count_query.execute()
         total_users = count_result.count if count_result.count is not None else 0
         logger.info(
-            f"Stats query - Total users: {total_users}, email_pattern: {email_pattern}, api_key: {api_key}, is_active: {is_active}"
+            f"Stats query - Total users: {total_users}, email_pattern: {email_pattern}, api_key filter set: {bool(api_key)}, is_active: {is_active}"
         )
 
         # Build separate queries for role and subscription statistics
@@ -986,7 +987,9 @@ async def get_all_users_info(
             total_users = count_result.count if count_result.count is not None else 0
         except Exception as count_err:
             logger.error(f"Error getting user count: {count_err}")
-            logger.error(f"Filters - email: {email}, api_key: {api_key}, is_active: {is_active}")
+            logger.error(
+                f"Filters - email: {email}, api_key filter set: {bool(api_key)}, is_active: {is_active}"
+            )
             # Fallback to 0 if count fails
             total_users = 0
 
@@ -1026,7 +1029,9 @@ async def get_all_users_info(
             users_data = result.data if result.data else []
         except Exception as data_err:
             logger.error(f"Error fetching user data: {data_err}")
-            logger.error(f"Filters - email: {email}, api_key: {api_key}, is_active: {is_active}")
+            logger.error(
+                f"Filters - email: {email}, api_key filter set: {bool(api_key)}, is_active: {is_active}"
+            )
             raise HTTPException(
                 status_code=500, detail=f"Failed to fetch users: {str(data_err)}"
             ) from data_err
@@ -1064,7 +1069,9 @@ async def get_all_users_info(
         raise
     except Exception as e:
         logger.error(f"Error getting all users info: {e}")
-        logger.error(f"Filters used - email: {email}, api_key: {api_key}, is_active: {is_active}")
+        logger.error(
+            f"Filters used - email: {email}, api_key filter set: {bool(api_key)}, is_active: {is_active}"
+        )
         logger.error(f"Pagination - limit: {limit}, offset: {offset}")
         import traceback
 
@@ -1267,22 +1274,28 @@ async def get_user_by_api_key(
 
         client = get_db()
 
-        # Use PostgreSQL RPC function for fast, indexed lookup
-        logger.info(f"Looking up user by API key: {api_key[:20]}...")
+        # Indexed lookup by key_hash (api_keys_new), then the legacy
+        # users.api_key column only behind API_KEY_PLAINTEXT_FALLBACK. This
+        # replaces the search_user_by_api_key RPC, which matched plaintext.
+        from src.db.api_key_lookup import find_user_row
+        from src.utils.api_key_lookup import mask_api_key_for_logging
 
-        result = client.rpc("search_user_by_api_key", {"search_api_key": api_key}).execute()
+        masked = mask_api_key_for_logging(api_key)
+        logger.info(f"Looking up user by API key: {masked}")
 
-        if not result.data or len(result.data) == 0:
-            raise HTTPException(
-                status_code=404, detail=f"No user found with API key: {api_key[:20]}..."
-            )
+        user_data = find_user_row(
+            client,
+            api_key,
+            "id, username, email, subscription_allowance, purchased_credits, is_active, role, "
+            "subscription_status, created_at",
+        )
 
-        # Extract user and key info from function result
-        user_data = result.data[0]
+        if not user_data:
+            raise HTTPException(status_code=404, detail=f"No user found with API key: {masked}")
 
         # Build user object
         user = {
-            "id": user_data.get("user_id"),
+            "id": user_data.get("id"),
             "username": user_data.get("username"),
             "email": user_data.get("email"),
             "credits": float(user_data.get("subscription_allowance", 0) or 0)
@@ -1394,7 +1407,7 @@ async def get_api_key_details_by_id(api_key_id: int, admin_user: dict = Depends(
         # Build comprehensive response
         response_data = {
             "id": api_key_data.get("id"),
-            "api_key": api_key_data.get("api_key"),  # Full API key string
+            "api_key": plaintext_from_row(api_key_data),  # Full key (decrypted if needed)
             "key_name": api_key_data.get("key_name"),
             "environment_tag": api_key_data.get("environment_tag", "live"),
             "is_active": api_key_data.get("is_active", True),

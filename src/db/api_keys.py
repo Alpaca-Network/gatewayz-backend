@@ -7,20 +7,24 @@ from postgrest import APIError
 
 from src.config.supabase_config import execute_with_retry, get_supabase_client
 from src.config.usage_limits import TRIAL_CREDITS_AMOUNT, TRIAL_DURATION_DAYS
+from src.db.api_key_lookup import (
+    find_key_row,
+    key_label,
+    new_key_storage_fields,
+    plaintext_from_row,
+    query_by_key,
+    safe_db_error,
+)
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
 from src.db.rate_limit_defaults import default_rate_limit_config
-from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
+from src.utils.api_key_lookup import mask_api_key_for_logging
 from src.utils.db_safety import DatabaseResultError, safe_get_first
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
 
 SCHEMA_CACHE_ERROR_CODE = "PGRST204"
-ENCRYPTED_COLUMNS = {"encrypted_key", "key_version", "key_hash", "last4"}
-
-# Track if we've already logged the encryption warning to reduce log noise
-_encryption_warning_logged = False
 
 
 # near the top of the module
@@ -54,52 +58,30 @@ def refresh_postgrest_schema_cache(client) -> bool:
         return False
 
 
-def _insert_api_key_row(
-    client, api_key_payload: dict[str, Any], include_encrypted_fields: bool = True
-):
-    """Insert API key data, optionally dropping encrypted columns for legacy schemas."""
-    payload = dict(api_key_payload)
-    if not include_encrypted_fields:
-        for column in ENCRYPTED_COLUMNS:
-            payload.pop(column, None)
-    return client.table("api_keys_new").insert(payload).execute()
-
-
-def _is_optional_column_error(error: Exception) -> bool:
-    """Detect whether an insert failure references optional encrypted columns."""
-    message = str(error)
-    return any(column in message for column in ENCRYPTED_COLUMNS)
+def _insert_api_key_row(client, api_key_payload: dict[str, Any]):
+    """Insert one api_keys_new row."""
+    return client.table("api_keys_new").insert(dict(api_key_payload)).execute()
 
 
 def _handle_schema_cache_insert_error(
     client, api_key_payload: dict[str, Any], original_error: APIError
 ):
-    """Retry API key insert after schema refresh or by omitting encrypted columns."""
+    """Retry an API key insert once after a PostgREST schema cache refresh.
+
+    The insert is never retried without key_hash/encrypted_key: the plaintext
+    is no longer stored, so a row without them could not authenticate.
+    """
     if not _is_schema_cache_error(original_error):
         raise original_error
 
     logger.warning(
         "API key insert failed due to PostgREST schema cache miss (%s); attempting refresh",
-        sanitize_for_logging(str(original_error)),
+        safe_db_error(original_error),
     )
 
-    if refresh_postgrest_schema_cache(client):
-        try:
-            return _insert_api_key_row(client, api_key_payload, include_encrypted_fields=True)
-        except APIError as retry_error:
-            if not _is_schema_cache_error(retry_error):
-                raise
-            logger.warning(
-                "Schema cache refresh did not resolve API key insert error (%s); "
-                "retrying without encrypted columns",
-                sanitize_for_logging(str(retry_error)),
-            )
-    else:
-        logger.warning(
-            "Unable to refresh schema cache automatically; falling back to insert without encrypted columns"
-        )
-
-    return _insert_api_key_row(client, api_key_payload, include_encrypted_fields=False)
+    if not refresh_postgrest_schema_cache(client):
+        raise original_error
+    return _insert_api_key_row(client, api_key_payload)
 
 
 def check_key_name_uniqueness(
@@ -153,7 +135,6 @@ def create_api_key(
     on a database without the column fails loudly instead of being created as
     a general key.
     """
-    global _encryption_warning_logged
     try:
         client = get_supabase_client()
 
@@ -218,48 +199,15 @@ def create_api_key(
                 "subscription_plan": "free_trial" if is_trial else "bot",
             }
 
-        # KEY_HASH_SALT is required - always validate it first (outside try-except)
-        # This ensures the mandatory hash check cannot be bypassed by encryption failures
-        try:
-            api_key_hash = sha256_key_hash(api_key)
-            api_key_last4 = last4(api_key)
-        except RuntimeError as hash_error:
-            error_msg = (
-                "API key creation requires KEY_HASH_SALT environment variable. "
-                "Generate a 16+ character random salt:\n"
-                "  python -c \"import secrets; print('KEY_HASH_SALT=' + secrets.token_hex(32))\"\n"
-                "Then set it in your environment variables."
-            )
-            logger.error(error_msg)
-            raise ValueError(error_msg) from hash_error
-
-        # Encryption is optional - try to encrypt but continue if it fails
-        try:
-            encrypted_token, key_version = encrypt_api_key(api_key)
-        except RuntimeError as enc_error:
-            # Encryption keys are optional - log warning once and continue
-            if not _encryption_warning_logged:
-                logger.warning(
-                    "Encryption unavailable; proceeding without encrypted fields: %s",
-                    sanitize_for_logging(str(enc_error)),
-                )
-                _encryption_warning_logged = True
-            encrypted_token, key_version = None, None
-        except Exception as enc_e:
-            # Log encryption failures once to reduce noise
-            if not _encryption_warning_logged:
-                logger.warning(
-                    "Encryption unavailable or failed; proceeding without encrypted fields: %s",
-                    sanitize_for_logging(str(enc_e)),
-                )
-                _encryption_warning_logged = True
-            encrypted_token, key_version = None, None
+        # Stored as key_hash (lookup) + encrypted_key (shown again to the owner)
+        # + last4. The plaintext is never written. KEY_HASH_SALT and the
+        # encryption keyring are both required: raises ValueError otherwise.
+        storage_fields = new_key_storage_fields(api_key)
 
         # Combine base data with trial data
         base_api_key_data = {
             "user_id": user_id,
             "key_name": key_name,
-            "api_key": api_key,
             "is_active": True,
             "is_primary": is_primary,
             "expiration_date": expiration_date,
@@ -278,34 +226,12 @@ def create_api_key(
         # Add trial data if this is a primary key
         base_api_key_data.update(trial_data)
 
-        # Optional encrypted fields should only be sent if we have values populated
-        optional_encrypted_fields = {}
-        if encrypted_token is not None:
-            optional_encrypted_fields["encrypted_key"] = encrypted_token
-        if key_version is not None:
-            optional_encrypted_fields["key_version"] = key_version
-        if api_key_hash is not None:
-            optional_encrypted_fields["key_hash"] = api_key_hash
-        if api_key_last4 is not None:
-            optional_encrypted_fields["last4"] = api_key_last4
-
-        api_key_data = {**base_api_key_data, **optional_encrypted_fields}
+        api_key_data = {**base_api_key_data, **storage_fields}
 
         try:
-            result = _insert_api_key_row(client, api_key_data, include_encrypted_fields=True)
+            result = _insert_api_key_row(client, api_key_data)
         except APIError as api_error:
             result = _handle_schema_cache_insert_error(client, api_key_data, api_error)
-        except Exception as insert_error:
-            if _is_optional_column_error(insert_error):
-                logger.warning(
-                    "api_keys_new schema missing encrypted columns, retrying without optional fields: %s",
-                    sanitize_for_logging(str(insert_error)),
-                )
-                result = _insert_api_key_row(
-                    client, base_api_key_data, include_encrypted_fields=False
-                )
-            else:
-                raise
 
         # Safely get the created API key record
         try:
@@ -330,9 +256,9 @@ def create_api_key(
                 )
             else:
                 logger.warning(
-                    "Failed to create rate limit config for API key %s: %s",
-                    sanitize_for_logging(api_key[:20] + "..."),
-                    sanitize_for_logging(str(rate_limit_error)),
+                    "Failed to create rate limit config for API key id %s: %s",
+                    api_key_record["id"],
+                    safe_db_error(rate_limit_error),
                 )
 
         # Create audit log entry
@@ -362,16 +288,19 @@ def create_api_key(
                 )
             else:
                 logger.warning(
-                    "Failed to create audit log for API key %s: %s",
-                    sanitize_for_logging(api_key[:20] + "..."),
-                    sanitize_for_logging(str(audit_error)),
+                    "Failed to create audit log for API key id %s: %s",
+                    api_key_record["id"],
+                    safe_db_error(audit_error),
                 )
 
         return api_key, api_key_record["id"]
 
     except Exception as e:
-        logger.error("Failed to create API key: %s", sanitize_for_logging(str(e)))
-        raise RuntimeError(f"Failed to create API key: {e}") from e
+        # Never str() a PostgREST error here: its `details` carry the failing
+        # row, which used to include the plaintext key.
+        error_text = sanitize_for_logging(safe_db_error(e))
+        logger.error("Failed to create API key: %s", error_text)
+        raise RuntimeError(f"Failed to create API key: {error_text}") from e
 
 
 def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
@@ -431,7 +360,7 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                 key_data = {
                     "id": key["id"],
                     "key_name": key["key_name"],
-                    "api_key": key["api_key"],
+                    "api_key": plaintext_from_row(key),
                     "environment_tag": key.get("environment_tag") or "live",
                     "scope_permissions": key.get("scope_permissions") or {},
                     "is_active": key["is_active"],
@@ -475,14 +404,11 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
     try:
         client = get_supabase_client()
 
-        # Delete from the api_keys_new table
-        result = (
-            client.table("api_keys_new")
-            .delete()
-            .eq("api_key", api_key)
-            .eq("user_id", user_id)
-            .execute()
-        )
+        # Delete from the api_keys_new table (matched by key_hash)
+        def _delete(column: str, value: str):
+            return client.table("api_keys_new").delete().eq(column, value).eq("user_id", user_id)
+
+        result = query_by_key(api_key, _delete, operation="delete")
 
         # Safely extract deleted key data
         try:
@@ -499,8 +425,8 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
             # Only log if it's NOT a missing table error
             if not is_schema_cache_error(e):
                 logger.warning(
-                    "Failed to delete rate limit configs for key %s: %s",
-                    sanitize_for_logging(api_key[:20] + "..."),
+                    "Failed to delete rate limit configs for key id %s: %s",
+                    deleted_key["id"],
                     sanitize_for_logging(str(e)),
                 )
             else:
@@ -581,35 +507,14 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
 
         # Check if key exists in api_keys_new table
         try:
-            # Primary lookup: hash-based (avoids exposing plaintext in queries)
-            hash_lookup_attempted = False
-            try:
-                computed_hash = sha256_key_hash(api_key)
-                key_result = (
-                    client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
-                )
-                hash_lookup_attempted = True
-            except (ValueError, RuntimeError, KeyError) as e:
-                logger.warning("Hash lookup unavailable, falling back to plaintext: %s", str(e))
-                key_result = (
-                    client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
-                )
+            # Hash lookup; plaintext fallback only behind API_KEY_PLAINTEXT_FALLBACK
+            key_data = find_key_row(client, api_key)
 
-            # Only fall back to plaintext when the hash lookup succeeded but found nothing
-            # (backward compatibility for keys created before key_hash was populated)
-            if hash_lookup_attempted and not key_result.data:
-                key_result = (
-                    client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
-                )
-
-            if key_result.data:
-                key_data = key_result.data[0]
+            if key_data:
 
                 # Check if key is active
                 if not key_data.get("is_active", True):
-                    logger.warning(
-                        "API key %s is inactive", sanitize_for_logging(api_key[:20] + "...")
-                    )
+                    logger.warning("API key %s is inactive", mask_api_key_for_logging(api_key))
                     return None
 
                 # Check expiration date
@@ -628,13 +533,13 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                             if expiration < now:
                                 logger.warning(
                                     "API key %s has expired",
-                                    sanitize_for_logging(api_key[:20] + "..."),
+                                    mask_api_key_for_logging(api_key),
                                 )
                                 return None
                     except Exception as date_error:
                         logger.warning(
                             "Error checking expiration for key %s: %s",
-                            sanitize_for_logging(api_key[:20] + "..."),
+                            mask_api_key_for_logging(api_key),
                             sanitize_for_logging(str(date_error)),
                         )
 
@@ -658,14 +563,14 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                             if trial_end < now:
                                 logger.warning(
                                     "Trial expired for API key %s (expired: %s)",
-                                    sanitize_for_logging(api_key[:20] + "..."),
+                                    mask_api_key_for_logging(api_key),
                                     trial_end_str,
                                 )
                                 return None
                     except Exception as trial_date_error:
                         logger.warning(
                             "Error checking trial expiration for key %s: %s",
-                            sanitize_for_logging(api_key[:20] + "..."),
+                            mask_api_key_for_logging(api_key),
                             sanitize_for_logging(str(trial_date_error)),
                         )
 
@@ -674,7 +579,7 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
                     if key_data["requests_used"] >= key_data["max_requests"]:
                         logger.warning(
                             "API key %s has reached request limit",
-                            sanitize_for_logging(api_key[:20] + "..."),
+                            mask_api_key_for_logging(api_key),
                         )
                         return None
 
@@ -734,18 +639,18 @@ def increment_api_key_usage(api_key: str) -> None:
         # Try to increment in the new system first (api_keys_new table)
         try:
             # Check if key exists in api_keys_new table
-            existing_key = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+            existing_key = find_key_row(client, api_key, "id, requests_used")
 
-            if existing_key.data:
+            if existing_key:
                 # Update existing entry in new system
-                current_usage = existing_key.data[0]["requests_used"]
+                current_usage = existing_key.get("requests_used") or 0
                 client.table("api_keys_new").update(
                     {
                         "requests_used": current_usage + 1,
                         "last_used_at": datetime.now(UTC).isoformat(),
                         "updated_at": datetime.now(UTC).isoformat(),
                     }
-                ).eq("api_key", api_key).execute()
+                ).eq("id", existing_key["id"]).execute()
                 return
 
         except Exception as e:
@@ -763,15 +668,12 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
         client = get_supabase_client()
 
         # Query the api_keys_new table
-        key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+        key_data = find_key_row(client, api_key)
 
-        # Safely get the API key data
-        try:
-            key_data = safe_get_first(key_result, error_message="API key not found")
-        except DatabaseResultError:
+        if not key_data:
             logger.warning(
                 "API key not found in api_keys_new table: %s",
-                sanitize_for_logging(api_key[:20] + "..."),
+                mask_api_key_for_logging(api_key),
             )
             return {
                 "api_key": api_key,
@@ -810,7 +712,7 @@ def get_api_key_usage_stats(api_key: str) -> dict[str, Any]:
     except Exception as e:
         logger.error(
             "Error getting API key usage stats for %s: %s",
-            sanitize_for_logging(api_key[:20] + "..."),
+            mask_api_key_for_logging(api_key),
             sanitize_for_logging(str(e)),
         )
         return {
@@ -836,23 +738,9 @@ def update_api_key(api_key: str, user_id: int, updates: dict[str, Any]) -> bool:
         client = get_supabase_client()
 
         # First, get the key to verify ownership and get key_id
-        key_result = (
-            client.table("api_keys_new")
-            .select("*")
-            .eq("api_key", api_key)
-            .eq("user_id", user_id)
-            .execute()
-        )
-
-        # Safely get the API key record
-        try:
-            key_data = safe_get_first(
-                key_result,
-                error_message="API key not found or not owned by user",
-                validate_keys=["id"],
-            )
-        except DatabaseResultError as e:
-            raise ValueError(str(e))
+        key_data = find_key_row(client, api_key, filters={"user_id": user_id})
+        if not key_data or "id" not in key_data:
+            raise ValueError("API key not found or not owned by user")
 
         key_id = key_data["id"]
 
@@ -968,7 +856,7 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
     try:
         logger.info(
             "Validating permissions for API key %s - Required: %s on %s",
-            sanitize_for_logging(api_key[:15] + "..."),
+            mask_api_key_for_logging(api_key),
             sanitize_for_logging(required_permission),
             sanitize_for_logging(resource),
         )
@@ -977,38 +865,31 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
         if api_key.startswith("gw_temp_"):
             logger.info(
                 "Granting full permissions to session key: %s",
-                sanitize_for_logging(api_key[:15] + "..."),
+                mask_api_key_for_logging(api_key),
             )
             return True
 
         client = get_supabase_client()
 
         # Get the API key record with is_primary flag
-        key_result = (
-            client.table("api_keys_new")
-            .select("scope_permissions, is_active, is_primary")
-            .eq("api_key", api_key)
-            .execute()
-        )
+        key_data = find_key_row(client, api_key, "scope_permissions, is_active, is_primary")
 
-        # Safely get the API key data
-        try:
-            key_data = safe_get_first(key_result, error_message="API key not found")
+        if key_data:
             logger.info(
                 "Found in api_keys_new - is_active: %s, is_primary: %s",
                 key_data.get("is_active"),
                 key_data.get("is_primary", False),
             )
-        except DatabaseResultError:
+        else:
             logger.warning(
                 "API key not found in api_keys_new table: %s",
-                sanitize_for_logging(api_key[:10] + "..."),
+                mask_api_key_for_logging(api_key),
             )
             return False
 
         # Check if key is active
         if not key_data.get("is_active", True):
-            logger.warning("API key is inactive: %s", sanitize_for_logging(api_key[:10] + "..."))
+            logger.warning("API key is inactive: %s", mask_api_key_for_logging(api_key))
             return False
 
         # Primary keys (auto-generated for new users) have full permissions
@@ -1016,7 +897,7 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
         if key_data.get("is_primary", False):
             logger.info(
                 "Granting full permissions to primary key: %s",
-                sanitize_for_logging(api_key[:15] + "..."),
+                mask_api_key_for_logging(api_key),
             )
             return True
         else:
@@ -1032,7 +913,7 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
         if not scope_permissions or scope_permissions == {}:
             logger.info(
                 "No scope permissions set, granting default access for %s",
-                sanitize_for_logging(api_key[:15] + "..."),
+                mask_api_key_for_logging(api_key),
             )
             return True
 
@@ -1045,7 +926,7 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
                 has_permission = "*" in allowed_resources or resource in allowed_resources
                 logger.info(
                     "Permission check result for %s: %s",
-                    sanitize_for_logging(api_key[:15] + "..."),
+                    mask_api_key_for_logging(api_key),
                     has_permission,
                 )
                 return has_permission
@@ -1054,14 +935,14 @@ def validate_api_key_permissions(api_key: str, required_permission: str, resourc
                 has_permission = allowed_resources == "*" or allowed_resources == resource
                 logger.info(
                     "Permission check result for %s: %s",
-                    sanitize_for_logging(api_key[:15] + "..."),
+                    mask_api_key_for_logging(api_key),
                     has_permission,
                 )
                 return has_permission
 
         logger.warning(
             "Permission denied for %s - required: %s on %s, available: %s",
-            sanitize_for_logging(api_key[:15] + "..."),
+            mask_api_key_for_logging(api_key),
             sanitize_for_logging(required_permission),
             sanitize_for_logging(resource),
             sanitize_for_logging(str(scope_permissions)),
@@ -1130,7 +1011,7 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
         return {
             "id": key_data["id"],
             "key_name": key_data["key_name"],
-            "api_key": key_data["api_key"],
+            "api_key": plaintext_from_row(key_data),
             "environment_tag": key_data.get("environment_tag") or "live",
             "scope_permissions": key_data.get("scope_permissions") or {},
             "is_active": key_data["is_active"],
@@ -1215,7 +1096,7 @@ def get_user_all_api_keys_usage(user_id: int) -> dict[str, Any]:
 
             key_usage = {
                 "key_id": key_data["id"],
-                "api_key": key_data["api_key"][:10] + "...",  # Truncate for security
+                "api_key": key_label(key_data),  # Non-secret label, e.g. "...a1b2"
                 "key_name": key_data.get("key_name", "Unnamed Key"),
                 "is_active": key_data.get("is_active", False),
                 "is_primary": key_data.get("is_primary", False),
@@ -1273,31 +1154,8 @@ def get_api_key_by_key(api_key: str) -> dict[str, Any] | None:
     """
 
     def _fetch_key(client):
-        # Primary lookup: hash-based (avoids exposing plaintext in queries)
-        hash_lookup_attempted = False
-        try:
-            computed_hash = sha256_key_hash(api_key)
-            key_result = (
-                client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
-            )
-            hash_lookup_attempted = True
-            if key_result.data and len(key_result.data) > 0:
-                return key_result.data[0]
-        except (ValueError, RuntimeError, KeyError) as e:
-            logger.warning("Hash lookup unavailable, falling back to plaintext: %s", str(e))
-            # Fallback: plaintext lookup if hashing fails
-            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
-            if key_result.data and len(key_result.data) > 0:
-                return key_result.data[0]
-            return None
-
-        # Only fall back to plaintext when the hash lookup succeeded but found nothing
-        if hash_lookup_attempted and not key_result.data:
-            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
-            if key_result.data and len(key_result.data) > 0:
-                return key_result.data[0]
-
-        return None
+        # Hash lookup; plaintext fallback only behind API_KEY_PLAINTEXT_FALLBACK
+        return find_key_row(client, api_key)
 
     try:
         # Use execute_with_retry to handle HTTP/2 connection errors

@@ -226,26 +226,27 @@ def revoke_user_keys(user_id: int) -> int:
     api_keys_new rows deactivated (the legacy column, if present, is
     counted separately and always cleared regardless).
     """
-    from src.db.users import invalidate_user_cache
+    from src.db.users import invalidate_user_cache, invalidate_user_cache_by_id
 
     try:
         client = get_supabase_client()
         result = (
             client.table("api_keys_new")
-            .select("api_key")
+            .select("id")
             .eq("user_id", user_id)
             .eq("is_active", True)
             .execute()
         )
-        keys = [row["api_key"] for row in (result.data or [])]
+        keys = list(result.data or [])
 
         if keys:
             client.table("api_keys_new").update(
                 {"is_active": False, "updated_at": datetime.now(UTC).isoformat()}
             ).eq("user_id", user_id).eq("is_active", True).execute()
 
-            for api_key in keys:
-                invalidate_user_cache(api_key)
+            # The cache is keyed by the presented key, which is no longer
+            # stored in plaintext: drop every cached entry for this user.
+            invalidate_user_cache_by_id(user_id)
 
         # Clear the legacy key too, whether or not it happens to equal one
         # of the api_keys_new rows above -- users.api_key is a separate

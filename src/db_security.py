@@ -9,12 +9,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.db.api_key_lookup import new_key_storage_fields
 from src.db.rate_limit_defaults import default_rate_limit_config
 from src.security.security import (
     generate_secure_api_key,
     get_audit_logger,
     get_security_manager,
-    hash_api_key,
     validate_domain_referrers,
     validate_ip_allowlist,
 )
@@ -36,7 +36,6 @@ def create_secure_api_key(
     """Create a new API key with enhanced security features"""
     try:
         client = get_supabase_client()
-        security_manager = get_security_manager()
         audit_logger = get_audit_logger()
 
         # Check for name uniqueness within user scope
@@ -48,11 +47,8 @@ def create_secure_api_key(
         # Generate secure API key
         api_key = generate_secure_api_key(environment_tag)
 
-        # Create hash for secure storage
-        key_hash = hash_api_key(api_key)
-
-        # Encrypt the API key for storage
-        encrypted_key = security_manager.encrypt_api_key(api_key)
+        # Standard storage: key_hash (lookup) + encrypted_key + last4, no plaintext
+        storage_fields = new_key_storage_fields(api_key)
 
         # Calculate expiration date if specified
         expiration_date = None
@@ -70,8 +66,7 @@ def create_secure_api_key(
                 {
                     "user_id": user_id,
                     "key_name": key_name,
-                    "api_key": encrypted_key,  # Store encrypted version
-                    "key_hash": key_hash,  # Store hash for validation
+                    **storage_fields,
                     "is_active": True,
                     "is_primary": is_primary,
                     "expiration_date": expiration_date,
@@ -313,7 +308,6 @@ def rotate_api_key(key_id: int, user_id: int, new_key_name: str = None) -> str |
     """Rotate an existing API key with a new one"""
     try:
         client = get_supabase_client()
-        security_manager = get_security_manager()
         audit_logger = get_audit_logger()
 
         # Get current key data
@@ -334,14 +328,12 @@ def rotate_api_key(key_id: int, user_id: int, new_key_name: str = None) -> str |
         # Generate new API key
         new_api_key = generate_secure_api_key(key_data.get("environment_tag", "live"))
 
-        # Create hash and encrypt new key
-        new_key_hash = hash_api_key(new_api_key)
-        new_encrypted_key = security_manager.encrypt_api_key(new_api_key)
-
-        # Update the key record
+        # Update the key record: same storage as create_api_key (key_hash used
+        # by every lookup, encrypted_key, last4; plaintext api_key cleared).
+        # This used to write an HMAC hash and the ciphertext into api_key,
+        # which no lookup matched, so rotated keys could not authenticate.
         update_data = {
-            "api_key": new_encrypted_key,
-            "key_hash": new_key_hash,
+            **new_key_storage_fields(new_api_key),
             "updated_at": datetime.now(UTC).isoformat(),
         }
 
@@ -352,6 +344,11 @@ def rotate_api_key(key_id: int, user_id: int, new_key_name: str = None) -> str |
 
         if not result.data:
             raise ValueError("Failed to rotate API key")
+
+        # The old key must stop authenticating now, not after the cache TTL.
+        from src.db.users import invalidate_user_cache_by_id
+
+        invalidate_user_cache_by_id(user_id)
 
         # Log the rotation
         audit_logger.log_api_key_creation(
