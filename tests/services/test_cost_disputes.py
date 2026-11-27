@@ -171,8 +171,9 @@ class FakeClient:
     def leader_error(self, tx):
         return self.reason
 
-    def read_dispute(self, dispute_id, final):
+    def read_dispute(self, dispute_id, final, address=None):
         self.reads.append(final)
+        self.read_from = address
         return self.verdict
 
 
@@ -182,6 +183,11 @@ def fake(monkeypatch):
         f = FakeDB(row)
         monkeypatch.setattr(cd.db, "update_dispute", f.update_dispute)
         monkeypatch.setattr(cd.db, "release_lines", f.release_lines)
+        f.claims = []
+        monkeypatch.setattr(
+            cd.db, "claim_for_submit", lambda i, lease_s=120: f.claims.append(i) or f.claim
+        )
+        f.claim = dict(f.row)
         monkeypatch.setattr("src.db.inference_jobs.list_usage_v2", lambda job_id: ENTRIES)
         monkeypatch.setattr("src.services.dispute_vault.enabled", lambda: False)
         monkeypatch.setattr(cd, "policy_text", lambda uri: '{"version":"fbp-v5"}')
@@ -275,3 +281,56 @@ def test_still_processing_only_stamps(fake):
 def test_amounts_are_exact_decimal_strings(stored, shown):
     v = cd.view(_dispute(billed_usd=stored, refund_usd=stored))
     assert v["billed_usd"] == shown and v["refund_usd"] == shown
+
+
+def test_dispute_exists_is_adopted_not_failed(fake):
+    f = fake(_dispute())
+    c = FakeClient(fail="UserError: dispute_exists", verdict=VERDICT)
+    out = cd.submit(_dispute(), c)
+    assert out["status"] == "decided" and out["refund_usd"] == "0.0000195"
+    assert not f.released and c.read_from == CONTRACT
+
+
+def test_a_dispute_already_claimed_is_not_submitted_again(fake):
+    f = fake(_dispute())
+    f.claim = None  # someone else holds the lease
+    c = FakeClient()
+    out = cd.refresh(_dispute(), c)
+    assert out["status"] == "submitted" and c.args is None
+
+
+def test_refresh_claims_before_submitting(fake):
+    f = fake(_dispute())
+    c = FakeClient()
+    out = cd.refresh(_dispute(), c)
+    assert f.claims == ["0x" + "33" * 32] and out["status"] == "adjudicating"
+
+
+def test_missing_recipient_is_an_error(fake):
+    f = fake(_open())
+    out = cd.refresh(_open(), FakeClient(state=TxState("ACCEPTED", "MAJORITY_AGREE", None, None)))
+    assert out["status"] == "error" and f.released
+
+
+def test_reads_use_the_disputes_own_contract(fake):
+    old = "0x" + "aa" * 20
+    fake(_open(contract_address=old))
+    c = FakeClient(state=TxState("ACCEPTED", "MAJORITY_AGREE", None, old), verdict=VERDICT)
+    cd.refresh(_open(contract_address=old), c)
+    assert c.read_from == old
+
+
+@pytest.mark.parametrize(
+    "raw,code",
+    [
+        (None, None),
+        ("contract refused the dispute: policy_not_allowed", "contract_refused:policy_not_allowed"),
+        ("consensus: UNDETERMINED/None", "no_consensus"),
+        (
+            "insufficient funds for gas * price + value: address 0xF8f2 have 0 want 9",
+            "submission_failed",
+        ),
+    ],
+)
+def test_customers_see_codes_not_raw_errors(raw, code):
+    assert cd.view(_dispute(error=raw))["error"] == code

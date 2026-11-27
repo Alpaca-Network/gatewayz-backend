@@ -80,6 +80,24 @@ def update_dispute(dispute_id: str, fields: dict[str, Any]) -> dict:
     return r.data[0]
 
 
+def claim_for_submit(dispute_id: str, lease_s: int = 120) -> dict | None:
+    """Atomically take a `submitted` dispute for one submission attempt. Only one caller
+    (the request's background task or a poller) gets the row back; the others get None.
+    The lease lets a crashed attempt be retried after lease_s seconds."""
+    now = datetime.now(UTC)
+    cutoff = (now - timedelta(seconds=lease_s)).isoformat()
+    r = (
+        get_supabase_client()
+        .table(_DISPUTES)
+        .update({"last_checked_at": now.isoformat(), "updated_at": now.isoformat()})
+        .eq("dispute_id", dispute_id)
+        .eq("status", "submitted")
+        .or_(f"last_checked_at.is.null,last_checked_at.lt.{cutoff}")
+        .execute()
+    )
+    return r.data[0] if r.data else None
+
+
 def open_disputes_due(stale_after_s: int, limit: int = 50) -> list[dict]:
     cutoff = (datetime.now(UTC) - timedelta(seconds=stale_after_s)).isoformat()
     r = (
