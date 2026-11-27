@@ -514,9 +514,7 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
 
                 # Check if key is active
                 if not key_data.get("is_active", True):
-                    logger.warning(
-                        "API key %s is inactive", mask_api_key_for_logging(api_key)
-                    )
+                    logger.warning("API key %s is inactive", mask_api_key_for_logging(api_key))
                     return None
 
                 # Check expiration date
