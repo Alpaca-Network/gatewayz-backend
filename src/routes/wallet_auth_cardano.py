@@ -11,7 +11,11 @@ by the key whose blake2b-224 hash IS the stake credential in the address.
 Linking only -- a stake address is never a way to sign in. It exists so the
 Gatewayz vault's depositors can be matched to accounts. Linking is refused for
 a US / Canadian person (src/services/wallet/eligibility.py); POST
-/wallet/eligibility records the same attestation on its own.
+/wallet/eligibility records the same attestation on its own. Linking also
+needs a payment method (a paid balance or an active subscription), because
+discount credits pay at most 99% of a request and the rest is charged to the
+customer: 402 payment_method_required otherwise
+(src/services/discount_credits/payment_method.py).
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from src.db.user_wallets import CARDANO_NAMESPACE, get_wallet, link_wallet
 from src.routes.wallet_auth import _wallet_view
 from src.security.deps import get_account_owner_id
 from src.security.siwe import SIWE_MESSAGE_TTL_SECONDS
+from src.services.discount_credits.payment_method import require_payment_method
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.services.wallet.cip8 import (
     Cip8VerificationError,
@@ -144,9 +149,11 @@ async def cardano_link_nonce(
 ) -> dict[str, Any]:
     """Issue a one-time message for the wallet to sign with CIP-30
     ``signData(stake_address, payload_hex)``. Refused with 451 for a US /
-    Canadian person (or one who has not attested otherwise) before anything
-    is signed."""
+    Canadian person (or one who has not attested otherwise), and with 402
+    payment_method_required for an account without a payment method, before
+    anything is signed."""
     require_eligible(user_id, request, body.not_us_ca_person)
+    require_payment_method(user_id)
     redis_client = _require_redis()
     nonce = secrets.token_hex(16)
     issued_at = datetime.now(UTC).replace(microsecond=0)
@@ -177,9 +184,10 @@ async def cardano_link(
     _rl: None = Depends(cardano_link_rl),
 ) -> dict[str, Any]:
     """Verify the CIP-30 proof over the issued message and link the stake
-    address to the caller's account. The US / Canada gate applies here
-    too."""
+    address to the caller's account. The US / Canada gate and the payment
+    method check apply here too."""
     require_eligible(user_id, request, body.not_us_ca_person)
+    require_payment_method(user_id)
     redis_client = _require_redis()
     try:
         stored = redis_client.getdel(_nonce_key(user_id, body.stake_address))
