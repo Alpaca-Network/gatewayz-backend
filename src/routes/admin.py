@@ -45,6 +45,7 @@ from src.services.model_catalog_cache import (
 )
 from src.services.models import get_cached_models
 from src.services.providers import get_cached_providers
+from src.utils.safe_errors import log_internal_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -156,7 +157,8 @@ async def create_api_key(request: UserRegistrationRequest):
         )
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        public_error, _ = log_internal_error("Failed to create API key", e, logger)
+        raise HTTPException(status_code=400, detail=public_error) from e
     except Exception as e:
         logger.error(f"API key creation failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -235,7 +237,8 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        public_error, _ = log_internal_error("Failed to add credits", e, logger)
+        raise HTTPException(status_code=400, detail=public_error) from e
     except Exception as e:
         logger.error(f"Add credits failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
@@ -321,7 +324,8 @@ async def admin_set_rate_limit(req: SetRateLimitRequest, admin_user: dict = Depe
         }
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        public_error, _ = log_internal_error("Failed to set rate limits", e, logger)
+        raise HTTPException(status_code=400, detail=public_error) from e
     except HTTPException:
         raise
     except Exception as e:
@@ -447,8 +451,8 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
         }
 
     except Exception as e:
-        logger.error(f"Failed to debug models and providers: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to debug: {str(e)}") from e
+        public_error, _ = log_internal_error("Failed to debug", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.post("/admin/clear-rate-limit-cache", tags=["admin"])
@@ -473,10 +477,8 @@ async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)
         }
 
     except Exception as e:
-        logger.error(f"Failed to clear rate limit cache: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to clear rate limit cache: {str(e)}"
-        ) from e
+        public_error, _ = log_internal_error("Failed to clear rate limit cache", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/admin/users/growth", tags=["admin"])
@@ -1124,9 +1126,8 @@ async def get_all_users_info(
         import traceback
 
         logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get users information: {str(e)}"
-        ) from e
+        public_error, _ = log_internal_error("Failed to get users information", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/admin/credit-transactions", tags=["admin"])
@@ -1363,10 +1364,8 @@ async def get_user_by_api_key(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error looking up user by API key: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to lookup user by API key: {str(e)}"
-        ) from e
+        public_error, _ = log_internal_error("Failed to lookup user by API key", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/admin/api-keys/{api_key_id}", tags=["admin", "api-keys"])
@@ -1491,10 +1490,8 @@ async def get_api_key_details_by_id(api_key_id: int, admin_user: dict = Depends(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching API key details for ID {api_key_id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to fetch API key details: {str(e)}"
-        ) from e
+        public_error, _ = log_internal_error("Failed to fetch API key details", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/admin/users/{user_id}", tags=["admin"])
@@ -1670,8 +1667,9 @@ async def delete_users_by_domain(
                     f"from domain {domain} (admin: {admin_user.get('id', 'unknown')})"
                 )
             except Exception as e:
-                logger.error(f"Failed to delete user {user['id']}: {e}")
-                failed_deletions.append({"id": user["id"], "error": str(e)})
+                logger.error(f"Failed to delete user {user['id']} from domain {domain}")
+                public_error, _ = log_internal_error("Failed to delete user", e, logger)
+                failed_deletions.append({"id": user["id"], "error": public_error})
 
         return {
             "status": "success",
@@ -1957,10 +1955,8 @@ async def get_providers_with_requests_admin(admin_user: dict = Depends(require_a
         }
 
     except Exception as e:
-        logger.error(f"Failed to get providers with requests: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get providers with requests: {str(e)}"
-        )
+        public_error, _ = log_internal_error("Failed to get providers with requests", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/admin/monitoring/chat-requests/counts", tags=["admin", "monitoring"])
@@ -2025,8 +2021,8 @@ async def get_request_counts_by_model_admin(admin_user: dict = Depends(require_a
         }
 
     except Exception as e:
-        logger.error(f"Failed to get request counts: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get request counts: {str(e)}")
+        public_error, _ = log_internal_error("Failed to get request counts", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/admin/monitoring/chat-requests/models", tags=["admin", "monitoring"])
@@ -2151,8 +2147,8 @@ async def get_models_with_requests_admin(
         }
 
     except Exception as e:
-        logger.error(f"Failed to get models with requests: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get models with requests: {str(e)}")
+        public_error, _ = log_internal_error("Failed to get models with requests", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/admin/monitoring/chat-requests", tags=["admin", "monitoring"])
@@ -2239,10 +2235,8 @@ async def get_chat_completion_requests_admin(
         }
 
     except Exception as e:
-        logger.error(f"Failed to get chat completion requests: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get chat completion requests: {str(e)}"
-        )
+        public_error, _ = log_internal_error("Failed to get chat completion requests", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/admin/monitoring/chat-requests/summary", tags=["admin", "monitoring"])
@@ -2475,8 +2469,8 @@ async def get_chat_requests_plot_data_admin(
         }
 
     except Exception as e:
-        logger.error(f"Failed to get plot data: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get plot data: {str(e)}")
+        public_error, _ = log_internal_error("Failed to get plot data", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/admin/model-usage-analytics", tags=["admin"])
@@ -2586,10 +2580,8 @@ async def get_model_usage_analytics(
         }
 
     except Exception as e:
-        logger.error(f"Failed to get model usage analytics: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get model usage analytics: {str(e)}"
-        )
+        public_error, _ = log_internal_error("Failed to get model usage analytics", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 # ============================================================================
