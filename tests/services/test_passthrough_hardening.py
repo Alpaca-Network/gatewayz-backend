@@ -107,3 +107,27 @@ def test_count_tokens_does_not_tokenize_huge_text():
     with patch("src.utils.token_estimator.count_tokens_text") as tokenize:
         assert count_tokens_text("a" * 1_000_000) == 250_000
         tokenize.assert_not_called()
+
+
+def test_relay_backlog_stops_the_upstream_stream():
+    import asyncio
+
+    import pytest
+
+    p = _passthrough({})
+    p.loop = asyncio.new_event_loop()
+    p.queue = asyncio.Queue()
+    try:
+        for _ in range(pt.MAX_QUEUED_EVENTS + 1):
+            p.queue.put_nowait(("event", "x", "{}"))
+        with pytest.raises(pt.RelayBacklog):
+            p.push_event("content_block_delta", "{}")
+    finally:
+        p.loop.close()
+
+
+def test_unreadable_upstream_body_fails_over():
+    from src.services.provider_failover import map_provider_error
+
+    exc = json.JSONDecodeError("Expecting value", "<html>", 0)
+    assert map_provider_error("anthropic", "claude-haiku-4-5", exc).status_code == 502
