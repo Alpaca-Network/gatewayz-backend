@@ -891,7 +891,7 @@ async def auto_topup_async(user: dict[str, Any] | None, shortfall: float = 0.0) 
         result = await asyncio.wait_for(
             asyncio.to_thread(run_auto_topup, user_id, shortfall), timeout=timeout
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("auto top-up for user %s did not finish in time", user_id)
         _quiet(user_id, _RETRY_SECONDS)
         return Decimal(0)
