@@ -45,7 +45,7 @@ jobs:
         working-directory: ${{ runner.temp }}/work
         run: |
           set -euo pipefail
-          npm install -g opencode-ai >/dev/null && opencode --version
+          npm install -g opencode-ai@1.19.6 >/dev/null && opencode --version
           mkdir -p "$HOME/.config/opencode"
           node -e '
             const fs = require("fs");
