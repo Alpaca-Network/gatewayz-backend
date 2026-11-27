@@ -25,6 +25,7 @@ Features:
 import logging
 import re
 import uuid
+from contextvars import ContextVar
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -43,6 +44,15 @@ _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 # angle brackets, percent-encoded sequences, etc.).  Does not require strict UUID v4 format
 # so that clients using custom ID schemes (e.g. "trace-abc123", "req.xyz") are still accepted.
 _VALID_REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
+
+# The current request's id, for code that has no Request object (e.g. an error
+# helper that logs a failure and tells the client which id to quote).
+_current_request_id: ContextVar[str | None] = ContextVar("current_request_id", default=None)
+
+
+def current_request_id() -> str | None:
+    """The id of the request being handled, or None outside a request."""
+    return _current_request_id.get()
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -112,6 +122,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
         # Attach to request state for access in routes
         request.state.request_id = request_id
+        request_id_token = _current_request_id.set(request_id)
 
         # Server-minted billing correlation ref (threat model L7/G4): the
         # client-supplied request_id above is echoed back for the client's own
@@ -137,6 +148,8 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
                 exc_info=True,
             )
             raise
+        finally:
+            _current_request_id.reset(request_id_token)
 
         # Add request ID to response headers
         response.headers["X-Request-ID"] = request_id

@@ -30,6 +30,7 @@ from src.security import deps as security_deps
 from src.security.deps import security as bearer_security
 from src.services.payments import StripeService
 from src.utils.rate_limit_guard import enforce_request_rate_limit
+from src.utils.safe_errors import log_internal_error
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -263,8 +264,8 @@ async def create_checkout_session(
         raise HTTPException(status_code=400, detail=str(e))
 
     except Exception as e:
-        logger.error(f"Error creating checkout session: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to create checkout session: {str(e)}")
+        public_error, _ = log_internal_error("Failed to create checkout session", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/checkout-session/{session_id}")
@@ -284,8 +285,9 @@ async def get_checkout_session(
     try:
         session = stripe_service.retrieve_checkout_session(session_id)
     except Exception as e:
-        logger.error(f"Error retrieving checkout session: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
+        # Stripe's error text names the account/session internals; log it only.
+        log_internal_error("Failed to retrieve checkout session", e, logger)
+        raise HTTPException(status_code=404, detail="Checkout session not found") from e
 
     # Authorization: ensure the session belongs to the caller (prevent IDOR).
     _assert_stripe_object_owner(
@@ -383,8 +385,8 @@ async def create_payment_intent(
         raise HTTPException(status_code=400, detail=str(e))
 
     except Exception as e:
-        logger.error(f"Error creating payment intent: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to create payment intent: {str(e)}")
+        public_error, _ = log_internal_error("Failed to create payment intent", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/payment-intent/{payment_intent_id}")
@@ -471,8 +473,8 @@ async def get_credit_packages():
         }
 
     except Exception as e:
-        logger.error(f"Error getting credit packages: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        public_error, _ = log_internal_error("Failed to get credit packages", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 # ==================== Refunds ====================
@@ -514,8 +516,8 @@ async def create_refund(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating refund: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        public_error, _ = log_internal_error("Failed to create refund", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 # ==================== Payment History ====================
@@ -561,8 +563,8 @@ async def get_payment_history(
         }
 
     except Exception as e:
-        logger.error(f"Error getting payment history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        public_error, _ = log_internal_error("Failed to get payment history", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/payments/{payment_id}")
@@ -611,8 +613,8 @@ async def get_payment_details(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting payment details: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        public_error, _ = log_internal_error("Failed to get payment details", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 # ==================== Subscription Checkout ====================

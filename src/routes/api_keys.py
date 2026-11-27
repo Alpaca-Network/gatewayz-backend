@@ -33,6 +33,7 @@ from src.services.usage_signing import key_id as usage_key_id
 from src.services.usage_signing import public_key_b64 as usage_public_key_b64
 from src.services.usage_signing import sign as sign_usage
 from src.services.user_lookup_cache import get_user
+from src.utils.safe_errors import log_internal_error
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
@@ -190,11 +191,8 @@ async def create_user_api_key(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-
-        logger.error("Error creating/changing API key: %s", sanitize_for_logging(str(e)))
-        logger.error("Traceback: %s", sanitize_for_logging(traceback.format_exc()))
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        public_error, _ = log_internal_error("Failed to create or change API key", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.put("/user/api-keys/{key_id}", tags=["authentication"])
@@ -266,8 +264,8 @@ async def update_user_api_key_endpoint(
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
             except Exception as e:
-                logger.error("Bulk rotation failed: %s", sanitize_for_logging(str(e)))
-                raise HTTPException(status_code=500, detail=f"Bulk rotation failed: {str(e)}")
+                public_error, _ = log_internal_error("Bulk rotation failed", e, logger)
+                raise HTTPException(status_code=500, detail=public_error) from e
 
         else:
             # Regular update - prepare updates (only include fields that were provided)
