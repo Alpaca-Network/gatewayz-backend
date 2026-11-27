@@ -24,6 +24,12 @@ def check_tables_direct():
     # Try service key first, fall back to regular key
     service_key = getattr(Config, 'SUPABASE_SERVICE_KEY', Config.SUPABASE_KEY)
 
+    # supabase-py 2.12 rejects the new sb_secret_ keys unless this shim runs first.
+    import pathlib as _pathlib
+    import sys as _sys
+    _sys.path.append(str(_pathlib.Path(__file__).resolve().parents[1]))
+    from src.config.supabase_compat import allow_new_api_keys  # noqa: E402
+    allow_new_api_keys()
     supabase = create_client(
         Config.SUPABASE_URL,
         service_key

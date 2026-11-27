@@ -428,7 +428,9 @@ def create_app() -> FastAPI:
     logger.info("  [OK] Parsed metrics endpoint at /api/metrics/parsed")
 
     # ==================== Sentry Debug Endpoint ====================
-    if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
+    # Never registered in production: it raises on demand and floods Sentry.
+    # The handler re-checks at request time and answers 404 there as well.
+    if Config.SENTRY_ENABLED and Config.SENTRY_DSN and not Config.IS_PRODUCTION:
 
         @app.get("/sentry-debug", tags=["monitoring"], include_in_schema=False)
         async def trigger_sentry_error(raise_exception: bool = False):
@@ -437,6 +439,9 @@ def create_app() -> FastAPI:
             When raise_exception is False (default) it will capture the error with Sentry but return HTTP 200.
             Pass raise_exception=true to surface the exception for full end-to-end testing.
             """
+            if Config.IS_PRODUCTION:
+                raise HTTPException(status_code=404, detail="Not Found")
+
             import sentry_sdk
 
             # Send test logs to Sentry

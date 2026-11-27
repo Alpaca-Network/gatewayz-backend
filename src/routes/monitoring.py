@@ -29,8 +29,8 @@ Endpoints:
 - GET /api/monitoring/chat-requests/models - Get all models with chat completion requests
 - GET /api/monitoring/chat-requests - Chat completion requests with flexible filtering
 
-Note: These endpoints support optional authentication. If an API key is provided,
-it will be validated. If not provided, public access is allowed with rate limiting.
+Note: All /api/monitoring/* endpoints require an admin API key (require_admin).
+The POST /monitoring Sentry tunnel is a separate router and stays public.
 """
 
 import logging
@@ -42,7 +42,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from src.security.deps import get_optional_api_key
+from src.security.deps import require_admin
 from src.services.analytics import get_analytics_service
 from src.services.model_availability import availability_service
 from src.services.redis_metrics import get_redis_metrics
@@ -57,7 +57,15 @@ def _sentry_client_ip(request: Request) -> str:
     return "" if ip == "unknown" else ip
 
 
-router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
+# Every /api/monitoring/* endpoint is admin-only. They expose per-user request
+# rows (user_id, api_key_id, error_message), trial funnel and cost data. The
+# only consumer is the admin panel, which proxies with the staff member's own
+# admin API key. The router-level dependency also covers endpoints added later.
+router = APIRouter(
+    prefix="/api/monitoring",
+    tags=["monitoring"],
+    dependencies=[Depends(require_admin)],
+)
 
 # --- chat_completion_requests query bounds ---------------------------------
 # chat_completion_requests is the highest-volume table in the schema (~80k live
@@ -290,7 +298,7 @@ class LatencyPercentilesResponse(BaseModel):
 
 # Endpoints
 @router.get("/health", response_model=list[HealthResponse])
-async def get_all_provider_health(api_key: str | None = Depends(get_optional_api_key)):
+async def get_all_provider_health(admin_user: dict = Depends(require_admin)):
     """
     Get health scores for all providers.
 
@@ -328,7 +336,7 @@ async def get_all_provider_health(api_key: str | None = Depends(get_optional_api
 
 
 @router.get("/health/{provider}", response_model=HealthResponse)
-async def get_provider_health(provider: str, api_key: str | None = Depends(get_optional_api_key)):
+async def get_provider_health(provider: str, admin_user: dict = Depends(require_admin)):
     """
     Get health score for a specific provider.
 
@@ -364,7 +372,7 @@ async def get_provider_health(provider: str, api_key: str | None = Depends(get_o
 async def get_provider_errors(
     provider: str,
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of errors to return"),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get recent errors for a specific provider.
@@ -388,7 +396,7 @@ async def get_provider_errors(
 @router.get("/stats/realtime", response_model=RealtimeStatsResponse)
 async def get_realtime_stats(
     hours: int = Query(1, ge=1, le=24, description="Number of hours to look back"),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get real-time statistics from Redis for all providers.
@@ -449,7 +457,7 @@ async def get_realtime_stats(
 async def get_hourly_stats(
     provider: str,
     hours: int = Query(24, ge=1, le=168, description="Number of hours to look back"),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get hourly statistics for a specific provider.
@@ -471,7 +479,7 @@ async def get_hourly_stats(
 
 
 @router.get("/circuit-breakers", response_model=list[CircuitBreakerResponse])
-async def get_all_circuit_breakers(api_key: str | None = Depends(get_optional_api_key)):
+async def get_all_circuit_breakers(admin_user: dict = Depends(require_admin)):
     """
     Get circuit breaker states for all provider/model combinations.
 
@@ -508,9 +516,7 @@ async def get_all_circuit_breakers(api_key: str | None = Depends(get_optional_ap
 
 
 @router.get("/circuit-breakers/{provider}", response_model=list[CircuitBreakerResponse])
-async def get_provider_circuit_breakers(
-    provider: str, api_key: str | None = Depends(get_optional_api_key)
-):
+async def get_provider_circuit_breakers(provider: str, admin_user: dict = Depends(require_admin)):
     """
     Get circuit breaker states for a specific provider's models.
 
@@ -553,7 +559,7 @@ async def get_provider_circuit_breakers(
 
 
 @router.get("/providers/comparison")
-async def get_provider_comparison(api_key: str | None = Depends(get_optional_api_key)):
+async def get_provider_comparison(admin_user: dict = Depends(require_admin)):
     """
     Compare all providers across key metrics.
 
@@ -587,7 +593,7 @@ async def get_latency_percentiles(
     percentiles: str = Query(
         "50,95,99", description="Comma-separated percentiles (e.g., 50,95,99)"
     ),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get latency percentiles for a specific provider/model combination.
@@ -630,7 +636,7 @@ async def get_latency_percentiles(
 
 
 @router.get("/anomalies")
-async def get_anomalies(api_key: str | None = Depends(get_optional_api_key)):
+async def get_anomalies(admin_user: dict = Depends(require_admin)):
     """
     Get detected anomalies in metrics.
 
@@ -660,7 +666,7 @@ async def get_anomalies(api_key: str | None = Depends(get_optional_api_key)):
 
 
 @router.get("/trial-analytics")
-async def get_trial_analytics(api_key: str | None = Depends(get_optional_api_key)):
+async def get_trial_analytics(admin_user: dict = Depends(require_admin)):
     """
     Get trial funnel analytics.
 
@@ -686,7 +692,7 @@ async def get_trial_analytics(api_key: str | None = Depends(get_optional_api_key
 @router.get("/cost-analysis")
 async def get_cost_analysis(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get cost breakdown by provider.
@@ -721,7 +727,7 @@ async def get_cost_analysis(
 async def get_latency_trends(
     provider: str,
     hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze"),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get latency trends for a provider over time.
@@ -750,7 +756,7 @@ async def get_latency_trends(
 @router.get("/error-rates")
 async def get_error_rates(
     hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze"),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get error rates broken down by model.
@@ -777,7 +783,7 @@ async def get_error_rates(
 
 @router.get("/token-efficiency/{provider}/{model}")
 async def get_token_efficiency(
-    provider: str, model: str, api_key: str | None = Depends(get_optional_api_key)
+    provider: str, model: str, admin_user: dict = Depends(require_admin)
 ):
     """
     Get token efficiency metrics for a provider/model.
@@ -805,7 +811,7 @@ async def get_token_efficiency(
 
 
 @router.get("/chat-requests/providers")
-async def get_providers_with_requests(api_key: str | None = Depends(get_optional_api_key)):
+async def get_providers_with_requests(admin_user: dict = Depends(require_admin)):
     """
     Get all providers that have models with chat completion requests.
 
@@ -948,7 +954,7 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
 
 
 @router.get("/chat-requests/counts")
-async def get_request_counts_by_model(api_key: str | None = Depends(get_optional_api_key)):
+async def get_request_counts_by_model(admin_user: dict = Depends(require_admin)):
     """
     Get request counts for each model (lightweight endpoint).
 
@@ -1064,7 +1070,7 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
 @router.get("/chat-requests/models")
 async def get_models_with_requests(
     provider_id: int | None = Query(None, description="Filter by provider ID"),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get all unique models that have chat completion requests.
@@ -1300,7 +1306,7 @@ async def get_chat_completion_requests(
         description="Maximum number of records to return",
     ),
     offset: int = Query(0, ge=0, description="Number of records to skip (pagination)"),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get chat completion requests with flexible filtering options.
@@ -1449,7 +1455,7 @@ async def get_chat_requests_plot_data(
     provider_id: int | None = Query(None, description="Filter by provider ID"),
     start_date: str | None = Query(None, description="Filter by start date (ISO format)"),
     end_date: str | None = Query(None, description="Filter by end date (ISO format)"),
-    api_key: str | None = Depends(get_optional_api_key),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Get optimized chat completion request data for plotting.

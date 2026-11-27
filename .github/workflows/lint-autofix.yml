@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight
 
+# peter-evans/create-pull-request pushes a branch and opens a PR.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   autofix:
     name: Auto-fix Linting Issues

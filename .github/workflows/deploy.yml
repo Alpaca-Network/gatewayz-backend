@@ -40,6 +40,14 @@ env:
   RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
   RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
 
+# Least privilege for GITHUB_TOKEN: read the repo, list PRs + comment on them
+# (issues.createComment), and dispatch monitor-deployment.yml (actions: write).
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+  actions: write
+
 jobs:
   # Determine environment based on branch
   setup-environment:

@@ -4,26 +4,46 @@ Endpoints for fetching transaction analytics from OpenRouter
 """
 
 import logging
+from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config import Config
+from src.security.deps import require_admin
 
 logger = logging.getLogger(__name__)
 
+# Admin-only: these endpoints spend the operator's OpenRouter session cookie
+# (OPENROUTER_COOKIE) and expose account-level spend data.
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+OPENROUTER_TX_ANALYTICS_URL = "https://openrouter.ai/api/frontend/user/transaction-analytics"
+
+# Only these windows are forwarded upstream; anything else is rejected so a
+# caller cannot smuggle extra query parameters into the OpenRouter request.
+ALLOWED_WINDOWS = ("1hr", "1d", "1mo", "1y")
+
+
+def _validate_window(window: str) -> str:
+    if window not in ALLOWED_WINDOWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid window. Allowed values: {', '.join(ALLOWED_WINDOWS)}",
+        )
+    return window
 
 
 @router.get("/transactions")
 async def get_transaction_analytics(
-    window: str = Query("1d", description="Time window: '1hr', '1d', '1mo', or '1y'")
+    window: str = Query("1d", description="Time window: '1hr', '1d', '1mo', or '1y'"),
+    admin_user: dict[str, Any] = Depends(require_admin),
 ):
     """
     Get daily summary of model inference per model from OpenRouter
 
     This endpoint fetches transaction analytics data from OpenRouter API
-    and returns it publicly (no authentication required).
+    and returns it. Requires an admin API key.
 
     Args:
         window: Time window for analytics (default: '1d')
@@ -35,9 +55,8 @@ async def get_transaction_analytics(
     Example:
         GET /analytics/transactions?window=1d
     """
+    window = _validate_window(window)
     try:
-        # OpenRouter transaction analytics endpoint
-        url = f"https://openrouter.ai/api/frontend/user/transaction-analytics?window={window}"
 
         # Get cookie from environment variable
         # NOTE: This cookie should be refreshed periodically as session cookies expire
@@ -62,7 +81,10 @@ async def get_transaction_analytics(
 
         # Make request to OpenRouter API
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, headers=headers)
+            # httpx URL-encodes params; window is also allowlisted above.
+            response = await client.get(
+                OPENROUTER_TX_ANALYTICS_URL, params={"window": window}, headers=headers
+            )
 
             # Check if request was successful
             if response.status_code == 200:
@@ -90,26 +112,25 @@ async def get_transaction_analytics(
 
     except httpx.RequestError as e:
         logger.error(f"Request error: {e}")
-        raise HTTPException(
-            status_code=502, detail=f"Failed to connect to OpenRouter API: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=502, detail="Failed to connect to OpenRouter API") from e
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error fetching transaction analytics: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/transactions/summary")
 async def get_transaction_summary(
-    window: str = Query("1d", description="Time window: '1hr', '1d', '1mo', or '1y'")
+    window: str = Query("1d", description="Time window: '1hr', '1d', '1mo', or '1y'"),
+    admin_user: dict[str, Any] = Depends(require_admin),
 ):
     """
     Get a processed summary of transaction analytics
 
     This endpoint fetches data from OpenRouter and processes it to provide
-    a cleaner summary format. No authentication required.
+    a cleaner summary format. Requires an admin API key.
 
     Args:
         window: Time window for analytics (default: '1d')
@@ -120,7 +141,7 @@ async def get_transaction_summary(
     """
     try:
         # Get the raw data first
-        analytics_data = await get_transaction_analytics(window)
+        analytics_data = await get_transaction_analytics(window, admin_user)
 
         # Process and summarize the data
         # analytics_data has structure: {"success": true, "window": "1mo", "data": {...}}
@@ -252,4 +273,4 @@ async def get_transaction_summary(
         raise
     except Exception as e:
         logger.error(f"Error creating transaction summary: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to create summary: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Failed to create summary") from e

@@ -42,17 +42,31 @@ def _clamp_rate_limit_config(config: dict, user: dict) -> dict:
     """Clamp self-service limits to the default (tier maximum) config.
 
     Users may lower their key limits but not raise them past the platform
-    maximums; admins are exempt.
+    maximums; admins are exempt. There is no per-plan limit table in code:
+    RateLimitConfig's defaults are the tier maximum every self-service key
+    already gets, so they are the ceiling here.
+
+    For non-admins, only the known limit fields are kept (anything else, e.g.
+    window_size_seconds, could change how the limits are enforced) and each
+    must be a non-negative int; a float, bool or string is rejected instead of
+    silently skipping the clamp.
     """
     if user.get("is_admin") or user.get("role") in _ADMIN_ROLES:
         return config
     from src.services.rate_limiting import RateLimitConfig
 
     maxima = RateLimitConfig()
-    clamped = dict(config)
+    clamped: dict = {}
     for field in _RATE_LIMIT_FIELDS:
-        if isinstance(clamped.get(field), int):
-            clamped[field] = min(clamped[field], getattr(maxima, field))
+        if field not in config:
+            continue
+        value = config[field]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid value for {field}: must be non-negative integer",
+            )
+        clamped[field] = min(value, getattr(maxima, field))
     return clamped
 
 

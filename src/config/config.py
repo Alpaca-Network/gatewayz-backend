@@ -1228,7 +1228,7 @@ class Config:
                 f"Missing required environment variables: {', '.join(missing_vars)}\n"
                 "Please create a .env file with the following variables:\n"
                 "SUPABASE_URL=your_supabase_project_url\n"
-                "SUPABASE_KEY=your_supabase_anon_key\n"
+                "SUPABASE_KEY=your_supabase_secret_key (service/secret key, sb_secret_...)\n"
                 "OPENROUTER_API_KEY=your_openrouter_api_key\n"
                 "OPENROUTER_SITE_URL=your_site_url (optional)\n"
                 "OPENROUTER_SITE_NAME=your_site_name (optional)"

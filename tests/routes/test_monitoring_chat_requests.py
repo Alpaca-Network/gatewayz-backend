@@ -14,6 +14,7 @@ These tests pin the two properties that fix depends on:
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -23,8 +24,17 @@ from src.routes.monitoring import (
     CHAT_REQUESTS_MAX_LIMIT,
     CHAT_REQUESTS_PLOT_MAX_POINTS,
 )
+from src.security.deps import require_admin
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _as_admin():
+    """These endpoints are admin-only; authenticate every request as an admin."""
+    app.dependency_overrides[require_admin] = lambda: {"id": 1, "role": "admin"}
+    yield
+    app.dependency_overrides.pop(require_admin, None)
 
 
 def _chainable(data=None, count=None):
