@@ -47,6 +47,11 @@ class TestAuthRateLimitConfig:
         assert config.wallet_nonce_attempts_per_window == 20
         assert config.wallet_nonce_window_seconds == 900  # 15 minutes
 
+        # Session transfer code limits
+        assert config.session_transfer_issue_attempts_per_window == 30
+        assert config.session_transfer_redeem_attempts_per_window == 20
+        assert config.session_transfer_redeem_window_seconds == 900
+
     def test_custom_config(self):
         """Test custom configuration values"""
         config = AuthRateLimitConfig(
@@ -78,6 +83,8 @@ class TestAuthRateLimiter:
                 api_key_create_window_seconds=60,
                 wallet_nonce_attempts_per_window=2,
                 wallet_nonce_window_seconds=60,
+                session_transfer_redeem_attempts_per_window=2,
+                session_transfer_redeem_window_seconds=60,
             )
         )
 
@@ -170,6 +177,20 @@ class TestAuthRateLimiter:
         result = await limiter.check_rate_limit(ip, AuthRateLimitType.WALLET_NONCE)
         assert result.allowed is False
         assert result.reason == "wallet_nonce rate limit exceeded"
+
+    @pytest.mark.asyncio
+    async def test_session_transfer_redeem_rate_limit(self, limiter):
+        """Redeeming transfer codes is limited per IP"""
+        ip = "10.0.0.2"
+        redeem = AuthRateLimitType.SESSION_TRANSFER_REDEEM
+
+        for _ in range(2):
+            result = await limiter.check_rate_limit(ip, redeem)
+            assert result.allowed is True
+
+        result = await limiter.check_rate_limit(ip, redeem)
+        assert result.allowed is False
+        assert result.reason == "session_transfer_redeem rate limit exceeded"
 
     @pytest.mark.asyncio
     async def test_different_ips_have_separate_limits(self, limiter):

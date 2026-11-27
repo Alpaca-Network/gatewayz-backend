@@ -530,6 +530,8 @@ def create_app() -> FastAPI:
         ("system", "System & Health"),  # Cache management and health monitoring
         ("root", "Root/Home"),
         ("auth", "Authentication"),
+        # One-time codes for www -> beta sign-in handoff (no credentials in URLs).
+        ("session_transfer", "Session Transfer Codes"),
         ("users", "User Management"),
         ("api_keys", "API Key Management"),
         ("admin", "Admin Operations"),

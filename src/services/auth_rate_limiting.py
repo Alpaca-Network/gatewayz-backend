@@ -35,6 +35,8 @@ class AuthRateLimitType(Enum):
     PASSWORD_RESET = "password_reset"
     API_KEY_CREATE = "api_key_create"
     WALLET_NONCE = "wallet_nonce"
+    SESSION_TRANSFER_ISSUE = "session_transfer_issue"
+    SESSION_TRANSFER_REDEEM = "session_transfer_redeem"
 
 
 @dataclass
@@ -62,6 +64,13 @@ class AuthRateLimitConfig:
     # section 4.2).
     wallet_nonce_attempts_per_window: int = 20
     wallet_nonce_window_seconds: int = 900  # 15 minutes
+
+    # Cross-site session transfer codes (www -> beta): issuing needs a valid
+    # credential; redeeming is unauthenticated, so it is the tighter one.
+    session_transfer_issue_attempts_per_window: int = 30
+    session_transfer_issue_window_seconds: int = 900  # 15 minutes
+    session_transfer_redeem_attempts_per_window: int = 20
+    session_transfer_redeem_window_seconds: int = 900  # 15 minutes
 
 
 @dataclass
@@ -120,6 +129,16 @@ class AuthRateLimiter:
             return (
                 self.config.wallet_nonce_attempts_per_window,
                 self.config.wallet_nonce_window_seconds,
+            )
+        if limit_type == AuthRateLimitType.SESSION_TRANSFER_ISSUE:
+            return (
+                self.config.session_transfer_issue_attempts_per_window,
+                self.config.session_transfer_issue_window_seconds,
+            )
+        if limit_type == AuthRateLimitType.SESSION_TRANSFER_REDEEM:
+            return (
+                self.config.session_transfer_redeem_attempts_per_window,
+                self.config.session_transfer_redeem_window_seconds,
             )
         raise ValueError(f"Unknown rate limit type: {limit_type}")
 

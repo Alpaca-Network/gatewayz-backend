@@ -38,6 +38,10 @@ ALLOWLIST = {
     ("POST", "/auth/reset-password"): "password reset with emailed token",
     ("POST", "/auth/wallet/nonce"): "wallet login nonce",
     ("POST", "/auth/wallet/verify"): "wallet login signature verification",
+    # Authenticates in the handler: API key via get_api_key, or a verified
+    # Privy access token (always verified, whatever PRIVY_TOKEN_VERIFICATION says).
+    ("POST", "/auth/transfer-code"): "session transfer code issue (auth in handler)",
+    ("POST", "/auth/transfer-code/redeem"): "single-use transfer code redeem, IP rate-limited",
     # Auth is enforced inline (roles._require_admin_dependency) - verified by hand
     ("POST", "/admin/roles/update"): "inline require_admin",
     # Read-only compute that uses POST
