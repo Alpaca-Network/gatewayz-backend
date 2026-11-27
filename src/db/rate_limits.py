@@ -7,8 +7,8 @@ from src.config.supabase_config import get_supabase_client
 from src.db.api_key_lookup import (
     RATE_LIMIT_USAGE_TABLE,
     find_key_row,
-    plaintext_from_row,
     plaintext_fallback_enabled,
+    plaintext_from_row,
     query_by_key,
     rate_limit_key_fields,
 )
