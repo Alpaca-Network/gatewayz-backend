@@ -121,6 +121,23 @@ Besides the attestation, the request country (a trusted header, or the client
 IP looked up in a local country database) can refuse the link; see
 [docs/wallet/ip-country.md](../wallet/ip-country.md).
 
+Linking also needs a payment method, because discount credits pay at most 99%
+of a request and the rest is always charged to the customer. An account has
+one when it has a paid balance above zero (subscription allowance plus
+purchased credits) or an active subscription (Stripe keeps the card that
+renews it). Without one, both calls answer `402` with a typed error, before
+anything is signed:
+
+```json
+{"error": {"type": "payment_method_required", "code": "PAYMENT_METHOD_REQUIRED",
+           "message": "Add a payment method before you link a wallet. ...", "status": 402}}
+```
+
+If the account cannot be read the answer is `503`
+`payment_method_check_unavailable`; a wallet is never linked on doubt. The
+check reads the account row only and never calls Stripe. The code is in
+`src/services/discount_credits/payment_method.py`.
+
 ## Historical names
 
 The tables and SQL functions keep the names they were created with:

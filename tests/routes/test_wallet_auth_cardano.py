@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 import src.routes.wallet_auth_cardano as cardano_routes
 from src.main import app
 from src.security.deps import get_account_owner_id, get_user_id
+from src.services.discount_credits import payment_method
 from src.services.wallet import cip8, eligibility
 from tests.services.wallet.test_cip8 import _cose_key_hex, _raw_public, _sign1_hex
 
@@ -25,6 +26,9 @@ _ELIGIBLE = {
     "attestation_version": eligibility.ATTESTATION_VERSION,
 }
 
+_HAS_PAYMENT_METHOD = {"has_payment_method": True, "paid_balance": True, "card": False}
+_NO_PAYMENT_METHOD = {"has_payment_method": False, "paid_balance": False, "card": False}
+
 
 @pytest.fixture(autouse=True)
 def _overrides():
@@ -33,8 +37,12 @@ def _overrides():
     app.dependency_overrides[get_account_owner_id] = lambda: USER_ID
     app.dependency_overrides[cardano_routes.cardano_link_rl] = lambda: None
     app.dependency_overrides[cardano_routes.cardano_link_nonce_rl] = lambda: None
-    # The account has attested it is not a US / Canadian person.
-    with patch.object(eligibility, "get_eligibility", return_value=_ELIGIBLE):
+    # The account has attested it is not a US / Canadian person, and has a
+    # payment method (a paid balance).
+    with (
+        patch.object(eligibility, "get_eligibility", return_value=_ELIGIBLE),
+        patch.object(payment_method, "payment_method_status", return_value=_HAS_PAYMENT_METHOD),
+    ):
         yield
     app.dependency_overrides.clear()
     app.dependency_overrides.update(saved)
@@ -242,3 +250,65 @@ def test_restricted_account_can_still_unlink(wallet):
         response = client.delete(f"/auth/wallets/{wallet[2]}")
     assert response.status_code == 200
     unlink.assert_called_once_with(USER_ID, wallet[2])
+
+
+def test_nonce_without_a_payment_method_is_402_before_anything_is_signed(wallet):
+    redis_client = _redis()
+    with (
+        patch.object(payment_method, "payment_method_status", return_value=_NO_PAYMENT_METHOD),
+        patch.object(cardano_routes, "get_redis_client", return_value=redis_client),
+    ):
+        response = client.post("/auth/wallet/cardano/nonce", json={"stake_address": wallet[2]})
+    assert response.status_code == 402
+    error = response.json()["error"]
+    assert (error["type"], error["code"], error["status"]) == (
+        "payment_method_required",
+        "PAYMENT_METHOD_REQUIRED",
+        402,
+    )
+    assert "payment method" in error["message"]
+    redis_client.setex.assert_not_called()
+
+
+def test_link_without_a_payment_method_is_402_and_links_nothing(wallet):
+    message = cardano_routes.build_cardano_link_message(
+        USER_ID, wallet[2], "n1", cardano_routes.datetime.now(cardano_routes.UTC)
+    )
+    redis_client = _redis(message)
+    with (
+        patch.object(payment_method, "payment_method_status", return_value=_NO_PAYMENT_METHOD),
+        patch.object(cardano_routes, "get_redis_client", return_value=redis_client),
+        patch.object(cardano_routes, "link_wallet") as link,
+    ):
+        response = client.post("/auth/wallet/cardano/link", json=_proof(wallet, message))
+    assert response.status_code == 402
+    assert response.json()["error"]["type"] == "payment_method_required"
+    link.assert_not_called()
+    # The one-time message is not consumed: the user can retry after adding one.
+    redis_client.getdel.assert_not_called()
+
+
+def test_link_when_the_payment_method_check_fails_is_503(wallet):
+    with (
+        patch.object(payment_method, "payment_method_status", return_value=None),
+        patch.object(cardano_routes, "link_wallet") as link,
+    ):
+        response = client.post("/auth/wallet/cardano/link", json=_proof(wallet, "anything"))
+    assert response.status_code == 503
+    link.assert_not_called()
+
+
+def test_link_with_a_card_on_file_links(wallet):
+    message = cardano_routes.build_cardano_link_message(
+        USER_ID, wallet[2], "n1", cardano_routes.datetime.now(cardano_routes.UTC)
+    )
+    card_only = {"has_payment_method": True, "paid_balance": False, "card": True}
+    row = {"wallet_address": wallet[2], "chain_namespace": "cip34", "source": "cip30"}
+    with (
+        patch.object(payment_method, "payment_method_status", return_value=card_only),
+        patch.object(cardano_routes, "get_redis_client", return_value=_redis(message)),
+        patch.object(cardano_routes, "get_wallet", return_value=None),
+        patch.object(cardano_routes, "link_wallet", return_value=row),
+    ):
+        response = client.post("/auth/wallet/cardano/link", json=_proof(wallet, message))
+    assert response.status_code == 200
