@@ -1,11 +1,12 @@
 import asyncio
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config.config import Config
-from src.db.api_key_lookup import plaintext_from_row
+from src.db.api_key_lookup import key_hash_for, plaintext_from_row
 from src.db.chat_completion_requests import get_chat_completion_requests_by_api_key
 from src.db.credit_transactions import (
     get_admin_daily_grant_total,
@@ -49,6 +50,44 @@ from src.services.providers import get_cached_providers
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Admin search by API key. New keys are stored as key_hash + ciphertext + last4
+# with no plaintext, so the old ilike on api_keys_new.api_key cannot find them.
+# A 4-character query also matches last4; a full key also matches key_hash.
+# The plaintext ilike stays as a fallback for legacy rows.
+_FULL_API_KEY_RE = re.compile(r"^gw_(?:live|test|staging|dev)_[A-Za-z0-9_-]{20,}$")
+# Characters that are safe inside a PostgREST or=() filter without quoting.
+_KEY_SEARCH_SAFE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _api_key_search_filter(api_key: str) -> str | None:
+    """PostgREST ``or`` filter on api_keys_new for an admin key search.
+
+    Returns None when only the legacy plaintext ilike applies (any query that
+    is neither 4 characters nor a full key, or that has unsafe characters).
+    """
+    query = (api_key or "").strip()
+    if not _KEY_SEARCH_SAFE_RE.match(query):
+        return None
+    legacy = f"api_key.ilike.*{query}*"
+    if len(query) == 4:
+        return f"last4.eq.{query},{legacy}"
+    if _FULL_API_KEY_RE.match(query):
+        try:
+            key_hash = key_hash_for(query)
+        except RuntimeError:
+            logger.error("KEY_HASH_SALT is not configured; admin key search uses plaintext only")
+            return None
+        return f"key_hash.eq.{key_hash},{legacy}"
+    return None
+
+
+def _apply_api_key_filter(query, api_key: str):
+    """Filter a users query joined with ``api_keys_new!inner`` by an API key search."""
+    or_filter = _api_key_search_filter(api_key)
+    if or_filter is None:
+        return query.ilike("api_keys_new.api_key", f"%{api_key}%")
+    return query.or_(or_filter, reference_table="api_keys_new")
 
 
 def _with_synthesized_credits(user: dict) -> dict:
@@ -650,7 +689,11 @@ async def get_users_stats(
     # Optional filters (same as main endpoint)
     email: str | None = Query(None, description="Filter by email (case-insensitive partial match)"),
     api_key: str | None = Query(
-        None, description="Filter by API key (case-insensitive partial match)"
+        None,
+        description=(
+            "Filter by API key: last 4 characters, the full key, or a case-insensitive"
+            " partial match on legacy plaintext keys"
+        ),
     ),
     is_active: bool | None = Query(None, description="Filter by active status (true/false)"),
     # Auth
@@ -699,7 +742,7 @@ async def get_users_stats(
             count_query = count_query.ilike("email", email_pattern)
 
         if api_key:
-            count_query = count_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+            count_query = _apply_api_key_filter(count_query, api_key)
 
         if is_active is not None:
             count_query = count_query.eq("is_active", is_active)
@@ -726,7 +769,7 @@ async def get_users_stats(
         if email_pattern:
             role_query = role_query.ilike("email", email_pattern)
         if api_key:
-            role_query = role_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+            role_query = _apply_api_key_filter(role_query, api_key)
         if is_active is not None:
             role_query = role_query.eq("is_active", is_active)
 
@@ -754,7 +797,7 @@ async def get_users_stats(
         if email_pattern:
             status_query = status_query.ilike("email", email_pattern)
         if api_key:
-            status_query = status_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+            status_query = _apply_api_key_filter(status_query, api_key)
         if is_active is not None:
             status_query = status_query.eq("is_active", is_active)
 
@@ -789,7 +832,7 @@ async def get_users_stats(
         if email_pattern:
             credits_query = credits_query.ilike("email", email_pattern)
         if api_key:
-            credits_query = credits_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+            credits_query = _apply_api_key_filter(credits_query, api_key)
         if is_active is not None:
             credits_query = credits_query.eq("is_active", is_active)
 
@@ -823,7 +866,7 @@ async def get_users_stats(
         if email_pattern:
             subscription_query = subscription_query.ilike("email", email_pattern)
         if api_key:
-            subscription_query = subscription_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+            subscription_query = _apply_api_key_filter(subscription_query, api_key)
         if is_active is not None:
             subscription_query = subscription_query.eq("is_active", is_active)
 
@@ -867,7 +910,11 @@ async def get_all_users_info(
     # Search filters
     email: str | None = Query(None, description="Filter by email (case-insensitive partial match)"),
     api_key: str | None = Query(
-        None, description="Filter by API key (case-insensitive partial match)"
+        None,
+        description=(
+            "Filter by API key: last 4 characters, the full key, or a case-insensitive"
+            " partial match on legacy plaintext keys"
+        ),
     ),
     is_active: bool | None = Query(None, description="Filter by active status (true/false)"),
     # Pagination
@@ -886,7 +933,8 @@ async def get_all_users_info(
 
     **Search Parameters**:
     - `email`: Case-insensitive partial match (e.g., "john" matches "john@example.com")
-    - `api_key`: Case-insensitive partial match (e.g., "gw_live" matches keys starting with "gw_live")
+    - `api_key`: last 4 characters (matches `last4`), a full key (matched by hash), or a
+      case-insensitive partial match on legacy plaintext keys (e.g., "gw_live")
     - `is_active`: Filter by active status (true = active only, false = inactive only, null = all)
 
     **Pagination**:
@@ -976,7 +1024,7 @@ async def get_all_users_info(
             count_query = count_query.ilike("email", f"%{email}%")
 
         if api_key:
-            count_query = count_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+            count_query = _apply_api_key_filter(count_query, api_key)
 
         if is_active is not None:
             count_query = count_query.eq("is_active", is_active)
@@ -1015,7 +1063,7 @@ async def get_all_users_info(
             data_query = data_query.ilike("email", f"%{email}%")
 
         if api_key:
-            data_query = data_query.ilike("api_keys_new.api_key", f"%{api_key}%")
+            data_query = _apply_api_key_filter(data_query, api_key)
 
         if is_active is not None:
             data_query = data_query.eq("is_active", is_active)

@@ -34,6 +34,7 @@ from src.security.deps import get_api_key
 from src.services.simple_health_cache import (
     simple_health_cache,
 )
+from src.utils.safe_errors import log_internal_error
 from src.utils.sentry_context import capture_error
 
 logger = logging.getLogger(__name__)
@@ -348,10 +349,10 @@ async def health_railway():
                 await asyncio.sleep(HEALTH_CHECK_RETRY_DELAY)
                 continue
 
-            # Non-transient error or max retries reached
-            logger.error(
-                f"Railway health check error after {retry_count} attempts: "
-                f"{type(e).__name__}: {str(e)}"
+            # Non-transient error or max retries reached. The detail is logged;
+            # this endpoint is public, so the response carries a generic message.
+            public_error, request_id = log_internal_error(
+                f"Railway health check error after {retry_count} attempts", e, logger
             )
 
             # TRANSIENT FAILURE FIX: Return 200 with "warming_up" status even on error
@@ -361,7 +362,8 @@ async def health_railway():
                 "status": "warming_up",
                 "database": "unknown",
                 "health_cache": "unknown",
-                "error": str(last_error),
+                "error": public_error,
+                "request_id": request_id,
                 "error_type": type(last_error).__name__,
                 "is_transient": is_transient,
                 "retry_count": retry_count,
@@ -373,7 +375,7 @@ async def health_railway():
         "status": "warming_up",
         "database": "unknown",
         "health_cache": "unknown",
-        "error": str(last_error) if last_error else "Unknown error after retries",
+        "error": "Health check failed after retries; see server logs for details",
         "retry_count": retry_count,
         "timestamp": datetime.now(UTC).isoformat(),
     }
@@ -727,7 +729,7 @@ async def get_catalog_models(
             },
         }
     except Exception as e:
-        logger.error(f"Failed to get catalog models: {e}", exc_info=True)
+        public_error, request_id = log_internal_error("Failed to get catalog models", e, logger)
         capture_error(
             e,
             context_type="health_endpoint",
@@ -743,7 +745,8 @@ async def get_catalog_models(
                 "total_models": 0,
                 "tracked_models": 0,
                 "timestamp": datetime.now(UTC).isoformat(),
-                "error": str(e),
+                "error": public_error,
+                "request_id": request_id,
             },
         }
 
@@ -848,7 +851,7 @@ async def get_catalog_providers(
             },
         }
     except Exception as e:
-        logger.error(f"Failed to get catalog providers: {e}", exc_info=True)
+        public_error, request_id = log_internal_error("Failed to get catalog providers", e, logger)
         capture_error(
             e,
             context_type="health_endpoint",
@@ -868,7 +871,8 @@ async def get_catalog_providers(
                 "total_providers": 0,
                 "tracked_providers": 0,
                 "timestamp": datetime.now(UTC).isoformat(),
-                "error": str(e),
+                "error": public_error,
+                "request_id": request_id,
             },
         }
 
@@ -1355,19 +1359,14 @@ async def get_health_dashboard(
 
         return response
     except Exception as e:
-        logger.error(f"Failed to get health dashboard: {e}")
+        public_error, _ = log_internal_error("Failed to retrieve health dashboard", e, logger)
         capture_error(
             e,
             context_type="health_endpoint",
             context_data={"endpoint": "/health/dashboard", "operation": "get_health_dashboard"},
             tags={"endpoint": "dashboard", "error_type": type(e).__name__},
         )
-        import traceback
-
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve health dashboard: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.get("/health/status", response_model=dict[str, Any], tags=["health", "status"])
@@ -1523,24 +1522,56 @@ async def check_google_vertex_health():
         from src.services.providers.google_vertex_client import diagnose_google_vertex_credentials
 
         diagnosis = diagnose_google_vertex_credentials()
+        health_status = diagnosis.get("health_status", "unhealthy")
 
         return {
             "provider": "google-vertex",
-            "health_status": diagnosis.get("health_status", "unhealthy"),
-            "status": diagnosis.get("health_status", "unhealthy"),
-            "diagnosis": diagnosis,
+            "health_status": health_status,
+            "status": health_status,
+            "diagnosis": _public_vertex_diagnosis(diagnosis),
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
-        logger.error(f"Failed to check Google Vertex AI health: {e}", exc_info=True)
+        public_error, request_id = log_internal_error(
+            "Failed to check Google Vertex AI health", e, logger
+        )
         return {
             "provider": "google-vertex",
             "health_status": "unhealthy",
             "status": "unhealthy",
-            "error": str(e),
+            "error": public_error,
+            "request_id": request_id,
             "timestamp": datetime.now(UTC).isoformat(),
         }
+
+
+def _public_vertex_diagnosis(diagnosis: dict) -> dict:
+    """The diagnosis without exception text, credential paths or account emails.
+
+    /health/google-vertex is unauthenticated. Step details and the error field
+    can contain raw exception messages, the credentials file path and the
+    service-account email, so only booleans and the credential source type are
+    returned; the full diagnosis is logged server-side when unhealthy.
+    """
+    public = {
+        "credentials_available": bool(diagnosis.get("credentials_available")),
+        "credential_source": diagnosis.get("credential_source"),
+        "initialization_successful": bool(diagnosis.get("initialization_successful")),
+        "error": None,
+        "steps": [
+            {"step": step.get("step"), "passed": bool(step.get("passed"))}
+            for step in diagnosis.get("steps", [])
+            if isinstance(step, dict)
+        ],
+    }
+    if diagnosis.get("error"):
+        public["error"], public["request_id"] = log_internal_error(
+            "Google Vertex AI diagnosis reported a problem",
+            RuntimeError(str(diagnosis.get("error"))),
+            logger,
+        )
+    return public
 
 
 _DB_HEALTH_PUBLIC_ERROR = "Database connection failed; see server logs for details"
@@ -1708,14 +1739,20 @@ async def get_provider_import_status():
             "total_providers": total_providers,
             "loaded_providers": loaded_count,
             "failed_providers": failed_count,
-            "failures": _provider_import_errors if _provider_import_errors else None,
+            # Provider names only: the raw import error text is in the startup logs.
+            "failures": (
+                {name: "import failed" for name in _provider_import_errors}
+                if _provider_import_errors
+                else None
+            ),
             "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
-        logger.error(f"Error checking provider health: {str(e)}")
+        public_error, request_id = log_internal_error("Error checking provider health", e, logger)
         return {
             "status": "error",
-            "error": str(e),
+            "error": public_error,
+            "request_id": request_id,
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
@@ -1810,11 +1847,12 @@ async def get_all_health(
         }
 
     except Exception as e:
-        logger.error(f"Error getting all health: {e}")
+        public_error, request_id = log_internal_error("Error getting all health", e, logger)
         return {
             "status": "error",
             "overall_status": "unknown",
-            "error": str(e),
+            "error": public_error,
+            "request_id": request_id,
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
@@ -1911,10 +1949,11 @@ async def get_models_health_stats(
         }
 
     except Exception as e:
-        logger.error(f"Error getting model health stats: {e}")
+        public_error, request_id = log_internal_error("Error getting model health stats", e, logger)
         return {
             "status": "error",
-            "error": str(e),
+            "error": public_error,
+            "request_id": request_id,
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
@@ -1997,10 +2036,13 @@ async def get_providers_health_stats(
         }
 
     except Exception as e:
-        logger.error(f"Error getting provider health stats: {e}")
+        public_error, request_id = log_internal_error(
+            "Error getting provider health stats", e, logger
+        )
         return {
             "status": "error",
-            "error": str(e),
+            "error": public_error,
+            "request_id": request_id,
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
@@ -2180,13 +2222,11 @@ async def get_health_insights(api_key: str = Depends(get_api_key)):
         }
 
     except Exception as e:
-        logger.error(f"Health insights error: {e}", exc_info=True)
+        public_error, _ = log_internal_error("Failed to retrieve health insights", e, logger)
         capture_error(
             e,
             context_type="health_endpoint",
             context_data={"endpoint": "/health/insights", "operation": "get_health_insights"},
             tags={"endpoint": "health_insights", "error_type": type(e).__name__},
         )
-        raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve health insights: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=public_error) from e

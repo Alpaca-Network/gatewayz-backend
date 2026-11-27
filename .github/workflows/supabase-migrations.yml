@@ -78,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb  # v1.7.3
         with:
           # Pinned: CLI v3.0.0 (2026-11-02) makes `migration list` / `db push`
           # target the local DB by default and ignore --password, so every run

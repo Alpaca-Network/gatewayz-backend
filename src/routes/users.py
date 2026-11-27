@@ -16,6 +16,7 @@ from src.schemas import (
 from src.security.deps import get_api_key
 from src.security.roles import resolve_role_fields
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
+from src.utils.safe_errors import log_internal_error
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
@@ -268,8 +269,8 @@ async def get_user_profile_endpoint(api_key: str = Depends(get_api_key)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error getting user profile: %s", sanitize_for_logging(str(e)), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        public_error, _ = log_internal_error("Failed to get user profile", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.put("/user/profile", response_model=UserProfileResponse, tags=["authentication"])

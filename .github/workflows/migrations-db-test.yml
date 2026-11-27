@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb  # v1.7.3
         with:
           # Pinned to the version supabase-migrations.yml pushes with: `latest`
           # (v3) rejects the [inbucket] section of supabase/config.toml and the

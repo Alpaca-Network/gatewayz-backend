@@ -46,6 +46,7 @@ from src.services.query_timeout import (
     QueryTimeoutError,
     safe_query_with_timeout,
 )
+from src.utils.safe_errors import log_internal_error
 from src.utils.security_validators import (
     is_blocked_email_domain,
     is_temporary_email_domain,
@@ -1730,8 +1731,8 @@ async def register_user(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Registration failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}") from e
+        public_error, _ = log_internal_error("Registration failed", e, logger)
+        raise HTTPException(status_code=500, detail=public_error) from e
 
 
 @router.post("/auth/password-reset", tags=["authentication"])
