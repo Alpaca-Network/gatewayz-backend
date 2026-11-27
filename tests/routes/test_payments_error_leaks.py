@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from src.routes import payments
 
+
 def _run(coro):
     """Run a coroutine on a private loop.
 

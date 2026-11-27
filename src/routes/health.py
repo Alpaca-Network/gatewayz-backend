@@ -1741,7 +1741,7 @@ async def get_provider_import_status():
             "failed_providers": failed_count,
             # Provider names only: the raw import error text is in the startup logs.
             "failures": (
-                {name: "import failed" for name in _provider_import_errors}
+                dict.fromkeys(_provider_import_errors, "import failed")
                 if _provider_import_errors
                 else None
             ),
