@@ -29,7 +29,9 @@ def test_legacy_jwt_keys_still_work():
     assert create_client(URL, FAKE_JWT).supabase_key == FAKE_JWT
 
 
-@pytest.mark.parametrize("bad", ["not a key", "sb_secret_", "sb_other_abc123", "sb_secret_bad key!"])
+@pytest.mark.parametrize(
+    "bad", ["not a key", "sb_secret_", "sb_other_abc123", "sb_secret_bad key!"]
+)
 def test_invalid_keys_are_still_rejected(bad):
     with pytest.raises(SupabaseException):
         create_client(URL, bad)
