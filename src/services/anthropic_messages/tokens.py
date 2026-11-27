@@ -21,10 +21,22 @@ class AnthropicCountTokensRequest(BaseModel):
         extra = "allow"
 
 
+# Text longer than this is estimated at ~4 characters per token instead of
+# being tokenized: count_tokens is free to call, and tokenizing a very large
+# body would hold the worker for seconds.
+_TOKENIZE_LIMIT_CHARS = 200_000
+
+
+def count_tokens_text(text: str) -> int:
+    from src.utils.token_estimator import count_tokens_text as tokenize
+
+    if len(text) > _TOKENIZE_LIMIT_CHARS:
+        return len(text) // 4
+    return tokenize(text)
+
+
 def _count_block_tokens(value: Any) -> int:
     """Tokens in one piece of Anthropic content: text, or any JSON-shaped block."""
-    from src.utils.token_estimator import count_tokens_text
-
     if value is None:
         return 0
     if isinstance(value, str):

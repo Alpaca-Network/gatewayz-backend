@@ -39,7 +39,55 @@ from typing import Any
 
 # Anthropic-hosted tools that Anthropic bills per use, on top of tokens. The
 # gateway has no price for them, so they are removed rather than run at a loss.
-BILLED_SERVER_TOOL_PREFIXES = ("web_search", "web_fetch", "code_execution")
+BILLED_SERVER_TOOL_PREFIXES = ("web_search", "web_fetch", "code_execution", "mcp")
+
+# Request fields forwarded to Anthropic. Everything else in the caller's body is
+# dropped, because the request runs on Gatewayz's Anthropic account: fields
+# like `mcp_servers` (Anthropic connects to a URL the caller chooses), `container`
+# (code-execution containers) or `service_tier` / `speed` (priced higher) would
+# act on that account. New Anthropic fields are added here deliberately.
+FORWARDED_FIELDS = frozenset(
+    {
+        "model",
+        "messages",
+        "max_tokens",
+        "system",
+        "stream",
+        "temperature",
+        "top_p",
+        "top_k",
+        "stop_sequences",
+        "tools",
+        "tool_choice",
+        "metadata",
+        "thinking",
+        "output_config",
+        "context_management",
+        # Claude Code auto mode's safety classifier; Anthropic runs it and
+        # returns safeguard_results (see SAFEGUARDS_FIELD in routes/messages.py).
+        "safeguards",
+    }
+)
+
+# anthropic-beta values that unlock features acting on Gatewayz's Anthropic
+# account: stored files, remote MCP servers, code execution, skills.
+BLOCKED_BETA_PREFIXES = ("files-api", "mcp-client", "code-execution", "skills")
+
+
+def has_file_reference(value: Any) -> bool:
+    """True if any content block refers to a stored file (``source.type == "file"``).
+
+    Such a block makes Anthropic look up a file by id in the account that sends
+    the request, which for Gatewayz is a shared account.
+    """
+    if isinstance(value, dict):
+        source = value.get("source")
+        if isinstance(source, dict) and source.get("type") == "file":
+            return True
+        return any(has_file_reference(v) for v in value.values())
+    if isinstance(value, list):
+        return any(has_file_reference(v) for v in value)
+    return False
 
 # Sentinel placed on the queue when the pipeline's stream has ended.
 STREAM_DONE = object()
@@ -129,7 +177,7 @@ class Passthrough:
         ``max_tokens`` is the pipeline's value, which the credit check may have
         lowered to what the caller can afford. It only ever lowers the caller's.
         """
-        body = copy.deepcopy(self.body)
+        body = {k: copy.deepcopy(v) for k, v in self.body.items() if k in FORWARDED_FIELDS}
         body["model"] = model
         if stream:
             body["stream"] = True
@@ -155,15 +203,21 @@ class Passthrough:
         return body
 
     def upstream_headers(self, headers: dict[str, str]) -> dict[str, str]:
-        """Provider headers plus the caller's ``anthropic-beta`` / ``anthropic-version``.
+        """Provider headers plus the caller's ``anthropic-version`` and allowed betas.
 
         Nothing else from the caller is forwarded; the provider key is ours.
+        Betas in BLOCKED_BETA_PREFIXES are dropped.
         """
         out = dict(headers)
         if self.version:
             out["anthropic-version"] = self.version
-        if self.beta:
-            out["anthropic-beta"] = self.beta
+        betas = [
+            b.strip()
+            for b in (self.beta or "").split(",")
+            if b.strip() and not b.strip().startswith(BLOCKED_BETA_PREFIXES)
+        ]
+        if betas:
+            out["anthropic-beta"] = ",".join(betas)
         return out
 
     def push_event(self, event: str | None, data: str) -> None:

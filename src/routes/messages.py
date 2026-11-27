@@ -239,6 +239,13 @@ async def create_message(
 
     if not req.messages:
         raise anthropic_error(400, "invalid_request_error", "messages must not be empty")
+    if anthropic_passthrough.has_file_reference([req.messages, req.system]):
+        # Would make Anthropic read a stored file by id from Gatewayz's account.
+        raise anthropic_error(
+            400,
+            "invalid_request_error",
+            "File references (source type 'file') are not supported; send the content inline.",
+        )
 
     # Anthropic -> OpenAI (internal shape). cache_control markers are preserved
     # by the transformer.

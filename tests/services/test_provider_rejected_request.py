@@ -158,3 +158,17 @@ def test_handler_message_has_no_duplicated_prefix():
     message = exc.value.detail["error"]["message"]
     assert message.count("Provider 'openai'") == 1
     assert message.endswith("Unsupported 'logprobs'.")
+
+
+def test_http_4xx_detail_uses_the_providers_message_not_raw_json():
+    import httpx
+
+    from src.services.provider_failover import map_provider_error
+
+    body = '{"type":"error","error":{"type":"invalid_request_error","message":"container: bad id"}}'
+    request = httpx.Request("POST", "https://x/v1/messages")
+    response = httpx.Response(400, text=body, request=request)
+    exc = httpx.HTTPStatusError("400", request=response.request, response=response)
+    detail = map_provider_error("anthropic", "claude-haiku-4-5", exc).detail
+    assert detail.endswith("container: bad id")
+    assert "{" not in detail
