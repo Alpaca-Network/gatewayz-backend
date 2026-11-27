@@ -753,6 +753,12 @@ async def chat_completions(
             _user_credits = float(user.get("subscription_allowance") or 0) + float(
                 user.get("purchased_credits") or 0
             )
+            from src.services.billing import card_auto_topup
+
+            if _user_credits <= 0:
+                # Last resort before refusing: the saved card (CARD_AUTO_TOPUP_ENABLED;
+                # 0 at once, no DB call, unless the account set it up).
+                _user_credits += float(await card_auto_topup.auto_topup_async(user))
             if _user_credits <= 0:
                 raise APIExceptions.payment_required(credits=_user_credits)
             # An unpaid balance from earlier usage blocks new paid requests
@@ -785,13 +791,28 @@ async def chat_completions(
                 _credit_capacity = await discount_aware_credits_async(
                     user.get("id"), _user_credits, _max_cost, request_id
                 )
-            _precheck = estimate_and_check_credits(
-                model_id=req.model,
-                messages=_msgs,
-                user_credits=_credit_capacity,
-                max_tokens=getattr(req, "max_tokens", None),
-                **_estimate_inputs,
-            )
+            for _topup_round in (0, 1):
+                _precheck = estimate_and_check_credits(
+                    model_id=req.model,
+                    messages=_msgs,
+                    user_credits=_credit_capacity,
+                    max_tokens=getattr(req, "max_tokens", None),
+                    **_estimate_inputs,
+                )
+                if _topup_round or not card_auto_topup.needs_topup(_precheck):
+                    break
+                # Discount credits and the paid balance fall short: charge the
+                # saved card for the account's top-up amount, then check once
+                # more. Capacity grows by at least what was added.
+                _added = float(
+                    await card_auto_topup.auto_topup_async(
+                        user, card_auto_topup.shortfall_usd(_precheck)
+                    )
+                )
+                if _added <= 0:
+                    break
+                _user_credits += _added
+                _credit_capacity += _added
             if not _precheck["allowed"] and _precheck.get("capped_max_tokens") is None:
                 raise APIExceptions.payment_required(credits=_user_credits)
             # Reserve this request's maximum paid cost so concurrent requests

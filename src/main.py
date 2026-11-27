@@ -558,6 +558,7 @@ def create_app() -> FastAPI:
         ("rate_limits", "Rate Limiting"),
         ("ip_whitelist", "IP Whitelist Management"),  # Admin IP whitelist management
         ("payments", "Stripe Payments"),
+        ("billing_card", "Saved Card and Auto Top-Up"),  # behind CARD_AUTO_TOPUP_ENABLED
         ("chat_history", "Chat History"),
         ("share", "Chat Share Links"),  # Shareable chat links
         (

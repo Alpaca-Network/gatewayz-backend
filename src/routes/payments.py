@@ -110,6 +110,9 @@ async def stripe_webhook(
     - payment_intent.canceled - Payment canceled by user
     - charge.refunded - Charge was refunded, credits reversed (idempotent per refund id)
     - charge.dispute.created / charge.dispute.closed - Chargeback: credits reversed; reinstated if won
+    - payment_method.detached - A saved card removed in Stripe stops being used for auto top-up
+      (checkout.session.completed in setup mode and payment_intent.* with
+      metadata source=auto_topup are handled by src/services/billing/card_auto_topup.py)
 
     Subscription Events:
     - customer.subscription.created - Subscription created, upgrade user tier

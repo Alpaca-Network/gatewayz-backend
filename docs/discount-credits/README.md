@@ -73,6 +73,12 @@ the daily cap, the account can get one email:
   email sender (`src/services/email.py`). Errors are logged and dropped.
 - The code is in `src/services/discount_credits/notifications.py`.
 
+When the paid balance cannot cover the rest either, a saved card can be
+charged off-session for the account's top-up amount before the request is
+refused (behind `CARD_AUTO_TOPUP_ENABLED`, off by default). A failed charge
+sends one `auto_topup_failed` email through the same switch. See
+[card-auto-topup.md](card-auto-topup.md).
+
 ## Where billing calls it
 
 All calls go through `src/services/discount_credits/billing.py`.
@@ -151,8 +157,10 @@ IP looked up in a local country database) can refuse the link; see
 Linking also needs a payment method, because discount credits pay at most 99%
 of a request and the rest is always charged to the customer. An account has
 one when it has a paid balance above zero (subscription allowance plus
-purchased credits) or an active subscription (Stripe keeps the card that
-renews it). Without one, both calls answer `402` with a typed error, before
+purchased credits), an active subscription (Stripe keeps the card that
+renews it), or a saved card with auto top-up switched on and not paused
+(only while `CARD_AUTO_TOPUP_ENABLED` is on for the account; see
+[card-auto-topup.md](card-auto-topup.md)). Without one, both calls answer `402` with a typed error, before
 anything is signed:
 
 ```json

@@ -584,6 +584,28 @@ class ChatInferenceHandler:
             is_trial=False,
             **estimate_inputs,
         )
+        from src.services.billing import card_auto_topup
+
+        if card_auto_topup.needs_topup(check_result):
+            # Discount credits and the paid balance fall short: charge the saved
+            # card for the account's top-up amount (CARD_AUTO_TOPUP_ENABLED; 0 at
+            # once, no DB call, unless the account set it up), then check again.
+            added = float(
+                await card_auto_topup.auto_topup_async(
+                    self.user, card_auto_topup.shortfall_usd(check_result)
+                )
+            )
+            if added > 0:
+                user_credits += added
+                credit_capacity += added
+                check_result = estimate_and_check_credits(
+                    model_id=model_id,
+                    messages=messages,
+                    user_credits=credit_capacity,
+                    max_tokens=max_tokens,
+                    is_trial=False,
+                    **estimate_inputs,
+                )
         self._precheck_input_tokens = int(check_result.get("input_tokens") or 0)
 
         if not check_result["allowed"]:

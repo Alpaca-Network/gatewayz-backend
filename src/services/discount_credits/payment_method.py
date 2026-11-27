@@ -11,7 +11,11 @@ An account has a payment method when it has either:
   credits), the balance billing charges first; or
 * **a card on file**: an active Stripe subscription (a Stripe customer and
   subscription id, with ``subscription_status`` "active"). Stripe keeps the
-  card that renews it.
+  card that renews it; or
+* **a saved card with auto top-up on** (src/services/billing/card_auto_topup.py):
+  the card auto top-up switch is on for the account, it saved a card and
+  switched auto top-up on, and auto top-up is not paused after a decline.
+  Only then can the card actually pay the part discount credits do not.
 
 Reads only the account row: no call to Stripe. A failed lookup is "unknown"
 and linking is refused with 503 (never link on doubt).
@@ -32,8 +36,8 @@ PAYMENT_METHOD_UNAVAILABLE = "payment_method_check_unavailable"
 
 _MESSAGE = (
     "Add a payment method before you link a wallet. Discount credits pay at most 99% of "
-    "each request; the rest is charged to your paid balance, so you need a paid balance "
-    "or an active subscription."
+    "each request; the rest is charged to your paid balance, so you need a paid balance, "
+    "an active subscription or a saved card with automatic top-up on."
 )
 
 
@@ -52,11 +56,17 @@ def has_paid_balance(user: dict[str, Any]) -> bool:
 
 
 def has_card_on_file(user: dict[str, Any]) -> bool:
-    return (
+    subscribed = (
         bool(user.get("stripe_customer_id"))
         and bool(user.get("stripe_subscription_id"))
         and user.get("subscription_status") == "active"
     )
+    if subscribed:
+        return True
+    from src.services.billing.card_auto_topup import can_charge
+
+    # Config and the row only: no DB or Stripe call.
+    return can_charge(user)
 
 
 def payment_method_status(user_id: int) -> dict[str, bool] | None:

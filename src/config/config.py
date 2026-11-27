@@ -290,6 +290,42 @@ class Config:
         for part in (p.strip() for p in _VAULT_DISCOUNT_PILOT_RAW.split(","))
         if part.isascii() and part.isdigit() and int(part) > 0
     )
+    # Card auto top-up (src/services/billing/card_auto_topup.py,
+    # docs/discount-credits/card-auto-topup.md): an account can save a card (Stripe
+    # Checkout in setup mode) and, when its paid balance (after any discount
+    # credits) cannot cover a request, the card is charged off-session for
+    # the account's top-up amount, at most the daily limit per UTC day.
+    # Off (default) -> no card can be saved, nothing is ever charged and the
+    # billing pre-checks make no extra DB or Stripe call.
+    CARD_AUTO_TOPUP_ENABLED = _get_env_var("CARD_AUTO_TOPUP_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # Who the switch applies to: comma-separated account ids, or "*" for every
+    # account. Empty (default) or no valid id means NOBODY, as for
+    # VAULT_DISCOUNT_PILOT_USER_IDS.
+    _CARD_AUTO_TOPUP_USERS_RAW = (_get_env_var("CARD_AUTO_TOPUP_USER_IDS", "") or "").strip()
+    CARD_AUTO_TOPUP_ALL_ACCOUNTS = _CARD_AUTO_TOPUP_USERS_RAW == "*"
+    CARD_AUTO_TOPUP_USER_IDS = frozenset(
+        int(part)
+        for part in (p.strip() for p in _CARD_AUTO_TOPUP_USERS_RAW.split(","))
+        if part.isascii() and part.isdigit() and int(part) > 0
+    )
+    # Amount charged per top-up when the account has not chosen one, and the
+    # range an account may choose from (US cents).
+    CARD_AUTO_TOPUP_DEFAULT_AMOUNT_CENTS = _int_env("CARD_AUTO_TOPUP_DEFAULT_AMOUNT_CENTS", 2000)
+    CARD_AUTO_TOPUP_MIN_AMOUNT_CENTS = _int_env("CARD_AUTO_TOPUP_MIN_AMOUNT_CENTS", 500)
+    CARD_AUTO_TOPUP_MAX_AMOUNT_CENTS = _int_env("CARD_AUTO_TOPUP_MAX_AMOUNT_CENTS", 50000)
+    # Most an account's card can be charged by auto top-up per UTC day (US
+    # cents). Also the default; an account may choose a lower limit only.
+    CARD_AUTO_TOPUP_DAILY_LIMIT_CENTS = _int_env("CARD_AUTO_TOPUP_DAILY_LIMIT_CENTS", 10000)
+    # How long a request waits for the charge before it is refused (the
+    # charge itself still completes; the webhook credits it).
+    CARD_AUTO_TOPUP_TIMEOUT_SECONDS = _int_env("CARD_AUTO_TOPUP_TIMEOUT_SECONDS", 20)
+    # After a charge that failed for a reason other than the card (Stripe
+    # unreachable, rate limited), wait this long before trying again.
+    CARD_AUTO_TOPUP_COOLDOWN_SECONDS = _int_env("CARD_AUTO_TOPUP_COOLDOWN_SECONDS", 600)
     # Credit holds (src/services/billing/credit_holds.py,
     # docs/CREDIT_PREFLIGHT_CHECK.md): the pre-check reserves each request's maximum
     # paid cost, so concurrent requests cannot all count the same balance.
