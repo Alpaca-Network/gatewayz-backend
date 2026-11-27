@@ -17,7 +17,8 @@ from fastapi.testclient import TestClient
 from src.main import app
 from src.security.deps import get_current_user, require_admin
 
-ADMIN = {"id": 1, "role": "admin", "is_admin": True}
+# Signed in with the primary key, so the key is an admin credential too.
+ADMIN = {"id": 1, "role": "admin", "is_admin": True, "is_primary": True}
 REGULAR_USER = {"id": 2, "role": "user", "is_admin": False}
 
 MONITORING_GETS = [

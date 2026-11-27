@@ -233,9 +233,15 @@ class TestCM07AdminRoleHasAllPermissions:
         from src.security.deps import require_admin
 
         # Admin user should pass through
-        admin_user = {"id": 1, "role": "admin", "is_admin": True}
+        # (signed in with the account's primary key, an admin credential)
+        admin_user = {"id": 1, "role": "admin", "is_admin": True, "is_primary": True}
         result = await require_admin(user=admin_user)
         assert result == admin_user
+
+        # An ordinary key of the same admin account is not an admin credential
+        with pytest.raises(HTTPException) as exc_info:
+            await require_admin(user={"id": 1, "role": "admin", "is_admin": True})
+        assert exc_info.value.status_code == 403
 
         # Non-admin (developer) should be rejected with 403
         dev_user = {"id": 2, "role": "developer", "is_admin": False}

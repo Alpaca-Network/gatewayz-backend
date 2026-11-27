@@ -10,6 +10,7 @@ from src.config.usage_limits import TRIAL_CREDITS_AMOUNT, TRIAL_DURATION_DAYS
 from src.db.api_key_lookup import (
     find_key_row,
     key_label,
+    masked_key_from_row,
     new_key_storage_fields,
     plaintext_from_row,
     query_by_key,
@@ -18,6 +19,7 @@ from src.db.api_key_lookup import (
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
 from src.db.rate_limit_defaults import default_rate_limit_config
+from src.services.key_scopes import inference_only_scopes
 from src.utils.api_key_lookup import mask_api_key_for_logging
 from src.utils.db_safety import DatabaseResultError, safe_get_first
 from src.utils.security_validators import sanitize_for_logging
@@ -172,9 +174,10 @@ def create_api_key(
         if expiration_days:
             expiration_date = (datetime.now(UTC) + timedelta(days=expiration_days)).isoformat()
 
-        # Set default permissions if none provided
+        # New keys are inference-only unless scopes are given. Key management
+        # and admin access need explicit scopes (src/services/key_scopes.py).
         if scope_permissions is None:
-            scope_permissions = {"read": ["*"], "write": ["*"], "admin": ["*"]}
+            scope_permissions = inference_only_scopes()
 
         # Create the API key record with new fields
         # Set up trial for new users (if this is their first key)
@@ -360,7 +363,9 @@ def get_user_api_keys(user_id: int) -> list[dict[str, Any]]:
                 key_data = {
                     "id": key["id"],
                     "key_name": key["key_name"],
-                    "api_key": plaintext_from_row(key),
+                    # Masked: the full key is only returned once, at creation.
+                    "api_key": masked_key_from_row(key),
+                    "last4": key.get("last4"),
                     "environment_tag": key.get("environment_tag") or "live",
                     "scope_permissions": key.get("scope_permissions") or {},
                     "is_active": key["is_active"],
@@ -1011,7 +1016,10 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
         return {
             "id": key_data["id"],
             "key_name": key_data["key_name"],
-            "api_key": plaintext_from_row(key_data),
+            # Masked: callers that need the secret internally use
+            # get_api_key_secret_by_id, which is never put in a response.
+            "api_key": masked_key_from_row(key_data),
+            "last4": key_data.get("last4"),
             "environment_tag": key_data.get("environment_tag") or "live",
             "scope_permissions": key_data.get("scope_permissions") or {},
             "is_active": key_data["is_active"],
@@ -1032,6 +1040,30 @@ def get_api_key_by_id(key_id: int, user_id: int) -> dict[str, Any] | None:
 
     except Exception as e:
         logger.error("Error getting API key by ID: %s", sanitize_for_logging(str(e)))
+        return None
+
+
+def get_api_key_secret_by_id(key_id: int, user_id: int) -> str | None:
+    """The key itself, for server-side lookups only (rate limits, update, delete).
+
+    Never return this in an API response; responses use the masked form from
+    get_api_key_by_id. Returns None if the key is not the user's or cannot be
+    recovered.
+    """
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table("api_keys_new")
+            .select("id, api_key, encrypted_key, key_version")
+            .eq("id", key_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not result.data:
+            return None
+        return plaintext_from_row(result.data[0])
+    except Exception as e:
+        logger.error("Error loading API key by ID: %s", sanitize_for_logging(type(e).__name__))
         return None
 
 

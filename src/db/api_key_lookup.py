@@ -242,6 +242,48 @@ def key_label(row: dict[str, Any] | None) -> str:
     return f"...{tail}" if tail else f"key#{row.get('id', '?')}"
 
 
+_ENV_PREFIXES = {
+    "live": "gw_live_",
+    "test": "gw_test_",
+    "staging": "gw_staging_",
+    "development": "gw_dev_",
+}
+
+
+def _prefix_of(api_key: str) -> str:
+    """'gw_live_' for 'gw_live_abc...'; '' if the key has no gw_<env>_ prefix."""
+    parts = api_key.split("_", 2)
+    if len(parts) == 3 and parts[0] == "gw" and parts[1]:
+        return f"gw_{parts[1]}_"
+    return ""
+
+
+def mask_api_key(api_key: str | None) -> str | None:
+    """Display form of a key we hold in memory: prefix + '...' + last 4."""
+    if not api_key:
+        return None
+    return f"{_prefix_of(api_key)}...{last4(api_key)}"
+
+
+def masked_key_from_row(row: dict[str, Any] | None) -> str:
+    """Display form of a stored key, e.g. 'gw_live_...a1b2'. Never the key.
+
+    Uses ``last4`` and ``environment_tag``; never decrypts ``encrypted_key``.
+    API responses use this for every read: the full key is shown only once,
+    in the response that created (or rotated) it.
+    """
+    if not row:
+        return "unknown"
+    stored = row.get("api_key")
+    if stored and not str(stored).startswith(HASH_REF_PREFIX):
+        return mask_api_key(str(stored)) or "unknown"
+    tail = row.get("last4")
+    if not tail:
+        return f"key#{row.get('id', '?')}"
+    prefix = _ENV_PREFIXES.get(str(row.get("environment_tag") or "live"), "gw_")
+    return f"{prefix}...{tail}"
+
+
 def new_key_storage_fields(api_key: str) -> dict[str, Any]:
     """Columns to store for a new key: hash, ciphertext, last4 -- no plaintext.
 

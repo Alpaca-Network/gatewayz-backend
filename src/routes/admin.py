@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config.config import Config
-from src.db.api_key_lookup import key_hash_for, plaintext_from_row
+from src.db.api_key_lookup import key_hash_for, masked_key_from_row
 from src.db.chat_completion_requests import get_chat_completion_requests_by_api_key
 from src.db.credit_transactions import (
     get_admin_daily_grant_total,
@@ -1400,7 +1400,7 @@ async def get_api_key_details_by_id(api_key_id: int, admin_user: dict = Depends(
       "status": "success",
       "api_key": {
         "id": 123,
-        "api_key": "gw_live_abc123xyz...",
+        "api_key": "gw_live_...x1y2",
         "key_name": "Production Key",
         "environment_tag": "live",
         "is_active": true,
@@ -1455,7 +1455,8 @@ async def get_api_key_details_by_id(api_key_id: int, admin_user: dict = Depends(
         # Build comprehensive response
         response_data = {
             "id": api_key_data.get("id"),
-            "api_key": plaintext_from_row(api_key_data),  # Full key (decrypted if needed)
+            # Masked: the full key is only shown to its owner once, at creation.
+            "api_key": masked_key_from_row(api_key_data),
             "key_name": api_key_data.get("key_name"),
             "environment_tag": api_key_data.get("environment_tag", "live"),
             "is_active": api_key_data.get("is_active", True),

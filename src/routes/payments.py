@@ -498,6 +498,9 @@ async def create_refund(
         # Check if user is admin (implement your admin check logic)
         if not current_user.get("is_admin", False):
             raise HTTPException(status_code=403, detail="Only administrators can create refunds")
+        from src.security.deps import require_admin_credential
+
+        require_admin_credential(current_user)
 
         refund = stripe_service.create_refund(request)
 
