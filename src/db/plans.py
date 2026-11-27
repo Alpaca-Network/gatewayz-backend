@@ -714,6 +714,10 @@ def get_subscription_plans() -> list[dict[str, Any]]:
         return []
 
 
+# Credits (USD) an account must hold to count as paying for the higher caps.
+PAID_ACCOUNT_MIN_CREDITS = 1.0
+
+
 def is_paid_account(user_id: int) -> bool:
     """True when the account has money in it or an active paid plan.
 
@@ -736,7 +740,9 @@ def is_paid_account(user_id: int) -> bool:
             .execute()
         )
         row = (user.data or [{}])[0]
-        paid = (float(row.get("purchased_credits") or 0) > 0) or (
+        # A floor, not "> 0": purchased_credits also receives coupon, referral
+        # and refund grants, and a failed charge can leave a few cents behind.
+        paid = (float(row.get("purchased_credits") or 0) >= PAID_ACCOUNT_MIN_CREDITS) or (
             float(row.get("subscription_allowance") or 0) > 0
         )
         if not paid:
