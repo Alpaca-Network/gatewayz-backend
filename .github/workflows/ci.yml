@@ -22,6 +22,10 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
 
+# Least privilege for GITHUB_TOKEN; jobs that need more widen it locally.
+permissions:
+  contents: read
+
 jobs:
   # Job 1: Linting and Code Quality
   lint:
@@ -507,6 +511,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [lint, security, coverage, build]
     if: github.event_name == 'push'
+    permissions:
+      contents: read
+      pull-requests: write # "Comment on PR" step (issues.createComment on a PR)
 
     steps:
       - name: Checkout code

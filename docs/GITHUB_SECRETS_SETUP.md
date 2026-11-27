@@ -66,10 +66,11 @@ The GitHub Actions workflow needs these secrets to apply migrations automaticall
 1. Open your project in [Supabase Dashboard](https://supabase.com/dashboard)
 2. Go to **Settings** → **API** tab
 3. Scroll to **Project API keys** section
-4. Find **service_role** key (NOT anon key!)
+4. Find a **secret** key (`sb_secret_...`, NOT the publishable/anon key). The legacy
+   JWT `service_role` key is disabled.
 5. Click to reveal and copy
 
-**Example**: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlubGVyb2VoeXJtYWFma2dqZ21yIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTY5...`
+**Example**: `sb_secret_xxxxxxxxxxxxxxxxxxxxxxxx` (placeholder; never paste a real key into docs)
 
 ---
 
@@ -266,13 +267,13 @@ SUPABASE_ACCESS_TOKEN=sbp_abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
 
 # Production
 SUPABASE_URL=https://ynleroehyrmaafkgjgmr.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlubGVyb2VoeXJtYWFma2dqZ21yIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTY5...
+SUPABASE_SERVICE_ROLE_KEY=<your-production-secret-key (sb_secret_...)>
 SUPABASE_PROJECT_REF=ynleroehyrmaafkgjgmr
 SUPABASE_DB_PASSWORD=your-secure-db-password-prod
 
 # Staging (if using)
 SUPABASE_STAGING_URL=https://abcdefghijklmnopqrst.supabase.co
-SUPABASE_STAGING_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiY2RlZmdoaWprbG1ub3BxcnN0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTY5...
+SUPABASE_STAGING_SERVICE_ROLE_KEY=<your-staging-secret-key (sb_secret_...)>
 SUPABASE_STAGING_PROJECT_REF=abcdefghijklmnopqrst
 SUPABASE_STAGING_DB_PASSWORD=your-secure-db-password-staging
 ```

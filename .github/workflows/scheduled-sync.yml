@@ -26,6 +26,10 @@ env:
   API_URL: ${{ secrets.RAILWAY_API_URL || secrets.API_URL || 'https://api.gatewayz.ai' }}
   ADMIN_KEY: ${{ secrets.ADMIN_API_KEY }}
 
+# Least privilege for GITHUB_TOKEN: this workflow only reads the repo.
+permissions:
+  contents: read
+
 jobs:
   sync-models:
     name: Sync Models

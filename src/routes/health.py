@@ -1543,6 +1543,16 @@ async def check_google_vertex_health():
         }
 
 
+_DB_HEALTH_PUBLIC_ERROR = "Database connection failed; see server logs for details"
+
+
+def _public_init_status(status: dict) -> dict:
+    """Initialization status without the raw last-error message (logged instead)."""
+    redacted = dict(status or {})
+    redacted.pop("error_message", None)
+    return redacted
+
+
 @router.get("/health/database", tags=["health"])
 async def database_health():
     """
@@ -1594,7 +1604,7 @@ async def database_health():
                         "database": "supabase",
                         "connection": "timeout",
                         "error": f"Database query timed out after {HEALTH_CHECK_TIMEOUT_SECONDS}s ({HEALTH_CHECK_MAX_RETRIES} attempts)",
-                        "initialization": init_status,
+                        "initialization": _public_init_status(init_status),
                         "retry_count": retry_count,
                         "timestamp": datetime.now(UTC).isoformat(),
                     }
@@ -1609,7 +1619,7 @@ async def database_health():
                 "status": "healthy",
                 "database": "supabase",
                 "connection": "verified",
-                "initialization": init_status,
+                "initialization": _public_init_status(init_status),
                 "retry_count": retry_count,
                 "timestamp": datetime.now(UTC).isoformat(),
             }
@@ -1647,9 +1657,11 @@ async def database_health():
                 "status": "unhealthy",
                 "database": "supabase",
                 "connection": "failed",
-                "error": str(last_error),
+                # Raw exception text can carry hostnames, keys or SQL; it is
+                # logged above and sent to Sentry, never returned.
+                "error": _DB_HEALTH_PUBLIC_ERROR,
                 "error_type": type(last_error).__name__,
-                "initialization": get_initialization_status(),
+                "initialization": _public_init_status(get_initialization_status()),
                 "retry_count": retry_count,
                 "is_transient": is_transient,
                 "timestamp": datetime.now(UTC).isoformat(),
@@ -1660,9 +1672,9 @@ async def database_health():
         "status": "unhealthy",
         "database": "supabase",
         "connection": "failed",
-        "error": str(last_error) if last_error else "Unknown error",
+        "error": _DB_HEALTH_PUBLIC_ERROR,
         "error_type": type(last_error).__name__ if last_error else "Unknown",
-        "initialization": get_initialization_status(),
+        "initialization": _public_init_status(get_initialization_status()),
         "retry_count": retry_count,
         "timestamp": datetime.now(UTC).isoformat(),
     }

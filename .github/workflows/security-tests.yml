@@ -71,6 +71,10 @@ jobs:
           # Provide these repo/environment secrets to actively verify that the
           # Supabase anon key cannot read sensitive tables. Without them the test
           # skips, so this step is safe to keep enabled everywhere.
+          # SUPABASE_ANON_KEY must be the project's PUBLISHABLE key
+          # (sb_publishable_...), not the legacy JWT anon key (disabled
+          # 2026-11-27) and never a secret key. A rejected key makes the test
+          # SKIP with an explicit reason (shown via -rs), not pass.
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |

@@ -9,6 +9,11 @@ env:
   RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
   RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
 
+# Least privilege for GITHUB_TOKEN: read the repo, open/list alert issues.
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   monitor-health:
     name: Check Deployment Health

@@ -33,6 +33,14 @@ if not KEY:
     sys.exit(1)
 DRY_RUN = os.environ.get("DRY_RUN", "true").lower() in {"1", "true", "yes"}
 
+# supabase-py 2.12 rejects the new sb_secret_ keys unless this shim runs first.
+import pathlib as _pathlib
+import sys as _sys
+
+_sys.path.append(str(_pathlib.Path(__file__).resolve().parents[2]))
+from src.config.supabase_compat import allow_new_api_keys  # noqa: E402
+
+allow_new_api_keys()
 client = create_client(PROD_URL, KEY)
 
 

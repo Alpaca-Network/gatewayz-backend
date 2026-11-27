@@ -20,13 +20,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
+from src.security.deps import require_admin
+
+ADMIN_USER = {"id": 1, "role": "admin", "is_admin": True}
 
 
 @pytest.fixture
 def client():
-    """FastAPI test client"""
+    """FastAPI test client authenticated as an admin (endpoints are admin-only)"""
     # Clear any existing dependency overrides
     app.dependency_overrides = {}
+    app.dependency_overrides[require_admin] = lambda: ADMIN_USER
     yield TestClient(app)
     # Cleanup after test
     app.dependency_overrides = {}
