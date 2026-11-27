@@ -255,7 +255,11 @@ RAW_EVENTS = [
     ),
     (
         "content_block_delta",
-        {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Let me check."}},
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "Let me check."},
+        },
     ),
     (
         "content_block_delta",
