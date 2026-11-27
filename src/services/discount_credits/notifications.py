@@ -291,3 +291,107 @@ def notify_after_draw(user_id: Any, full_share: Decimal, applied: Decimal) -> No
         _dispatch(user_id)
     except Exception as e:  # noqa: BLE001 - never breaks billing
         logger.warning("discount credits notification not started: %s", type(e).__name__)
+
+
+# ==================== Card auto top-up failures ====================
+#
+# Billing order: discount credits, paid balance, saved card, refuse. When the
+# saved card cannot be charged (src/services/billing/card_auto_topup.py),
+# auto top-up pauses and the account gets one email, through the same
+# switch, Redis deduplication and sender as the events above.
+
+EVENT_TOPUP_FAILED = "auto_topup_failed"
+# The reasons card_auto_topup records: declined, requires_action (the bank
+# wants the customer to confirm), card_unusable (removed or expired).
+_TOPUP_LINES = {
+    "requires_action": "Your bank asked you to confirm the payment, which an automatic "
+    "top-up cannot do.",
+    "card_unusable": "Your saved card can no longer be charged.",
+}
+
+
+def build_topup_failed_email(reason: str, amount_cents: int) -> tuple[str, str, str]:
+    """(subject, html, text) for a failed automatic top-up."""
+    app_url = os.environ.get("APP_URL", "https://gatewayz.ai").rstrip("/")
+    settings_url = f"{app_url}/settings/credits"
+    link = html.escape(settings_url, quote=True)
+    amount = _usd(Decimal(int(amount_cents or 0)) / 100)
+    subject = "Your automatic top-up did not go through"
+    lines = [
+        f"We could not charge your saved card for an automatic top-up of {amount}.",
+        _TOPUP_LINES.get(reason, "Your card was declined."),
+        "Automatic top-ups are paused. Requests your balance cannot cover are refused "
+        "until you add credits, save a card again or switch automatic top-up back on.",
+    ]
+    body = "".join(f"<p>{html.escape(line)}</p>" for line in lines)
+    html_body = (
+        f"<h2>{html.escape(subject)}</h2>{body}"
+        f'<p><a href="{link}">Open your credits settings</a></p>'
+        '<p style="font-size: 12px; color: #666;">You get this email once each time '
+        "automatic top-up is paused.</p>"
+    )
+    text = "\n\n".join([subject, *lines, f"Open your credits settings: {settings_url}"])
+    return subject, html_body, text
+
+
+def process_topup_failed(user_id: int, attempt_id: str, reason: str, amount_cents: int) -> bool:
+    """Deduplicate and send one failed top-up email. Returns True when sent.
+    Never raises."""
+    try:
+        from src.config.redis_config import get_redis_client
+        from src.db.users import get_user_by_id
+        from src.services.email import send_email
+
+        redis_client = get_redis_client()
+        if redis_client is None:
+            logger.info("auto top-up notification skipped for user %s: no Redis", user_id)
+            return False
+        # Once per failed attempt, and at most once per UTC day.
+        if not _claim(
+            redis_client,
+            f"{_KEY_PREFIX}:{EVENT_TOPUP_FAILED}:{user_id}:{attempt_id}",
+            _DAY_KEY_TTL_SECONDS,
+        ):
+            return False
+        if not _claim(
+            redis_client, _day_key(EVENT_TOPUP_FAILED, user_id, _today()), _DAY_KEY_TTL_SECONDS
+        ):
+            return False
+        user = get_user_by_id(user_id) or {}
+        email = user.get("email")
+        if not _deliverable(email):
+            return False
+        subject, html_body, text = build_topup_failed_email(reason, amount_cents)
+        result = send_email(
+            email,
+            subject,
+            html_body,
+            text=text,
+            tags=[{"name": "category", "value": EVENT_TOPUP_FAILED}],
+        )
+        if not result.sent:
+            logger.warning("auto top-up email not sent for user %s: %s", user_id, result.error)
+            return False
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("auto top-up notification failed for user %s: %s", user_id, type(e).__name__)
+        return False
+
+
+def notify_auto_topup_failed(user_id: Any, attempt_id: Any, reason: str, amount_cents: int) -> None:
+    """Email the account once that its automatic top-up failed and is paused.
+    Off with VAULT_DISCOUNT_NOTIFY_EMAIL_ENABLED (no Redis, no DB call).
+    Returns at once (background thread); never raises."""
+    try:
+        if not notify_enabled():
+            return
+        if not isinstance(user_id, int) or isinstance(user_id, bool):
+            return
+        threading.Thread(
+            target=process_topup_failed,
+            args=(user_id, str(attempt_id), str(reason), int(amount_cents or 0)),
+            name="auto-topup-notify",
+            daemon=True,
+        ).start()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("auto top-up notification not started: %s", type(e).__name__)

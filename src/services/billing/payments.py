@@ -926,8 +926,13 @@ class StripeService:
             # ledger level (request_id), so an at-least-once retry cannot double-credit.
 
             try:
+                # Card auto top-up (src/services/billing/card_auto_topup.py):
+                # card setup sessions and off-session top-up charges are told
+                # apart by their own metadata and handled there.
+                if self._handle_card_auto_topup_event(event["type"], event["data"]["object"]):
+                    pass
                 # One-time payment events
-                if event["type"] == "checkout.session.completed":
+                elif event["type"] == "checkout.session.completed":
                     self._handle_checkout_completed(event["data"]["object"])
                 elif event["type"] == "payment_intent.succeeded":
                     self._handle_payment_succeeded(event["data"]["object"])
@@ -974,6 +979,32 @@ class StripeService:
         except Exception as e:
             logger.error(f"Webhook processing error: {e}")
             raise
+
+    @staticmethod
+    def _handle_card_auto_topup_event(event_type: str, obj: Any) -> bool:
+        """Route card auto top-up events. Returns True when the event was one
+        (handled; a failure raises so Stripe retries), False otherwise."""
+        from src.services.billing import card_auto_topup
+
+        if event_type == "checkout.session.completed":
+            if not card_auto_topup.is_card_setup_session(obj):
+                return False
+            card_auto_topup.handle_setup_session_completed(obj)
+            return True
+        if event_type == "payment_intent.succeeded":
+            if not card_auto_topup.is_auto_topup_intent(obj):
+                return False
+            card_auto_topup.handle_intent_succeeded(obj)
+            return True
+        if event_type == "payment_intent.payment_failed":
+            if not card_auto_topup.is_auto_topup_intent(obj):
+                return False
+            card_auto_topup.handle_intent_failed(obj)
+            return True
+        if event_type == "payment_method.detached":
+            card_auto_topup.handle_payment_method_detached(obj)
+            return True
+        return False
 
     def reconcile_checkout_session(self, session) -> bool:
         """Grant credits for a paid session if the webhook has not already done so.
@@ -1037,6 +1068,10 @@ class StripeService:
             # one-time top-up would incorrectly add the subscription's first charge
             # as purchased credits (double grant).
             session_mode = self._get_stripe_object_value(session, "mode")
+            if session_mode == "setup":
+                # Saves a card (card auto top-up); charges nothing, grants nothing.
+                logger.info(f"Checkout session {session_id} is a card setup; no credit grant.")
+                return
             if session_mode == "subscription":
                 logger.info(
                     f"Checkout session {session_id} is a subscription (mode=subscription); "

@@ -46,6 +46,14 @@ async def precheck_credits(
         user.get("id"), balance, estimated_cost, billing_ref
     )
     if balance <= 0 or capacity < estimated_cost:
+        # Last resort before refusing: the saved card (CARD_AUTO_TOPUP_ENABLED;
+        # 0 at once, no DB call, unless the account set it up).
+        from src.services.billing.card_auto_topup import auto_topup_async
+
+        added = float(await auto_topup_async(user, max(estimated_cost - capacity, 0.0)))
+        balance += added
+        capacity += added
+    if balance <= 0 or capacity < estimated_cost:
         raise HTTPException(
             status_code=402,
             detail=(

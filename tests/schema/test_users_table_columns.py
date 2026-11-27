@@ -57,6 +57,16 @@ USERS_COLUMNS = frozenset(
         "partner_signup_timestamp",
         "partner_metadata",
         "privy_app_id",
+        # supabase/migrations/20261127200000_card_auto_topup.sql. Only read or
+        # written while CARD_AUTO_TOPUP_ENABLED is on, which must wait until
+        # that migration is applied.
+        "stripe_default_payment_method_id",
+        "stripe_card_summary",
+        "auto_topup_on",
+        "auto_topup_amount_cents",
+        "auto_topup_daily_limit_cents",
+        "auto_topup_paused_reason",
+        "auto_topup_paused_at",
     }
 )
 
