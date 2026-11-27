@@ -29,6 +29,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import urllib.request
 from datetime import UTC, datetime, timedelta
@@ -135,7 +136,8 @@ class DisputeClient:
 
         return leader_error(self._client, tx)
 
-    def read_dispute(self, dispute_id: str, final: bool) -> dict:
+    def read_dispute(self, dispute_id: str, final: bool, address: str | None = None) -> dict:
+        """Read from the contract the dispute was opened on (it outlives a contract switch)."""
         from genlayer_py.types import TransactionHashVariant
 
         variant = (
@@ -143,7 +145,7 @@ class DisputeClient:
         )
         return dict(
             self._client.read_contract(
-                address=self.contract,
+                address=address or self.contract,
                 function_name="get_dispute",
                 args=[dispute_id],
                 transaction_hash_variant=variant,
@@ -354,6 +356,12 @@ def submit(dispute: dict, client) -> dict:
         tx = client.open_dispute(submit_args(dispute, lines, policy_text(dispute["policy_uri"])))
     except Exception as e:
         msg = str(e)[:500]
+        if "dispute_exists" in msg:
+            # An earlier attempt landed (e.g. its broadcast timed out after being accepted).
+            # The dispute is on chain: adopt it instead of failing and freeing its lines.
+            adopted = _adopt(dispute, client)
+            if adopted is not None:
+                return adopted
         permanent = any(p in msg for p in _PERMANENT_ERRORS)
         if permanent or attempts >= MAX_SUBMIT_ATTEMPTS:
             logger.error("dispute %s submission failed for good: %s", dispute["dispute_id"], msg)
@@ -371,6 +379,27 @@ def submit(dispute: dict, client) -> dict:
     )
 
 
+def _adopt(dispute: dict, client) -> dict | None:
+    try:
+        v = client.read_dispute(
+            dispute["dispute_id"], final=False, address=dispute["contract_address"]
+        )
+    except Exception as e:
+        logger.warning("dispute %s exists but could not be read: %s", dispute["dispute_id"], e)
+        return None
+    if str(v.get("dispute_id", "")).lower() != dispute["dispute_id"].lower():
+        return None
+    return db.update_dispute(
+        dispute["dispute_id"],
+        {
+            **_verdict_fields(v),
+            "status": "decided",
+            "decided_at": _now().isoformat(),
+            "error": None,
+        },
+    )
+
+
 # --------------------------------------------------------------------------- refresh
 
 
@@ -384,14 +413,26 @@ def _verdict_fields(v: dict) -> dict:
 
 def refresh(dispute: dict, client) -> dict:
     """Advance one open dispute from chain state. Returns the (possibly updated) row."""
-    if dispute["status"] == "submitted" or not dispute.get("genlayer_tx"):
-        return submit(dispute, client)
+    if dispute["status"] == "submitted":
+        claimed = db.claim_for_submit(dispute["dispute_id"])
+        return submit(claimed, client) if claimed else dispute
+    address = dispute["contract_address"]
+    if not dispute.get("genlayer_tx"):
+        # Adopted after `dispute_exists`: no tx to follow, so finality is read from state.
+        try:
+            v = client.read_dispute(dispute["dispute_id"], final=True, address=address)
+        except Exception:
+            return db.update_dispute(dispute["dispute_id"], {"last_checked_at": _now().isoformat()})
+        return db.update_dispute(
+            dispute["dispute_id"],
+            {**_verdict_fields(v), "status": "final", "finalized_at": _now().isoformat()},
+        )
     tx = dispute["genlayer_tx"]
     state = client.tx_state(tx)
     stamp = {"last_checked_at": _now().isoformat()}
     if state is None:
         return db.update_dispute(dispute["dispute_id"], stamp)
-    if state.recipient and state.recipient.lower() != dispute["contract_address"].lower():
+    if not state.recipient or state.recipient.lower() != address.lower():
         return _fail(dispute, "error", f"dispute tx {tx} targets {state.recipient}", stamp)
     if state.failed_execution:
         reason = client.leader_error(tx) or "CostDispute execution failed"
@@ -399,7 +440,7 @@ def refresh(dispute: dict, client) -> dict:
     if state.dead:
         return _fail(dispute, "undetermined", f"consensus: {state.status}/{state.result}", stamp)
     if state.final:
-        v = client.read_dispute(dispute["dispute_id"], final=True)
+        v = client.read_dispute(dispute["dispute_id"], final=True, address=address)
         return db.update_dispute(
             dispute["dispute_id"],
             {
@@ -411,7 +452,7 @@ def refresh(dispute: dict, client) -> dict:
             },
         )
     if state.decided and dispute["status"] == "adjudicating":
-        v = client.read_dispute(dispute["dispute_id"], final=False)
+        v = client.read_dispute(dispute["dispute_id"], final=False, address=address)
         return db.update_dispute(
             dispute["dispute_id"],
             {**stamp, **_verdict_fields(v), "status": "decided", "decided_at": _now().isoformat()},
@@ -427,6 +468,22 @@ def _usd(value: Any) -> str | None:
     from decimal import Decimal
 
     return format(Decimal(str(value)).normalize(), "f")
+
+
+_REFUSAL = re.compile(r"contract refused the dispute: ([a-z_]+)")
+
+
+def public_error(error: str | None) -> str | None:
+    """A stable code for customers. Raw errors (RPC text, balances, addresses) stay in the
+    `error` column for operators."""
+    if not error:
+        return None
+    m = _REFUSAL.search(error)
+    if m:
+        return f"contract_refused:{m.group(1)}"
+    if error.startswith("consensus:"):
+        return "no_consensus"
+    return "submission_failed"
 
 
 def view(d: dict) -> dict[str, Any]:
@@ -453,7 +510,7 @@ def view(d: dict) -> dict[str, Any]:
         "created_at": d.get("created_at"),
         "decided_at": d.get("decided_at"),
         "finalized_at": d.get("finalized_at"),
-        "error": d.get("error"),
+        "error": public_error(d.get("error")),
     }
 
 
@@ -470,9 +527,9 @@ def submit_now(dispute_id: str) -> None:
     from src.services.outbound_webhooks import emit
 
     try:
-        d = db.get_dispute(dispute_id)
-        if not d or d["status"] != "submitted":
-            return
+        d = db.claim_for_submit(dispute_id)
+        if not d:
+            return  # a poller has it, or it is no longer `submitted`
         after = submit(d, get_client())
         if changed(d, after):
             emit(after["user_id"], "job.dispute.updated", view(after))

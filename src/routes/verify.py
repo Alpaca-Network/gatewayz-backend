@@ -206,7 +206,9 @@ async def get_case(
     stale = not last or datetime.fromisoformat(str(last).replace("Z", "+00:00")) < datetime.now(
         UTC
     ) - timedelta(seconds=STALE_REFRESH_S)
-    if case["status"] in db.OPEN_STATUSES and stale and is_configured():
+    # Only follow a case already on chain: submitting from a GET let parallel reads send the
+    # same case several times (fees each, and the losers marked error and refunded).
+    if case["status"] in db.OPEN_STATUSES and case.get("genlayer_tx") and stale and is_configured():
         try:
             case = await asyncio.to_thread(cases.refresh, case, get_client())
         except Exception as e:  # the stored state is still a correct answer
