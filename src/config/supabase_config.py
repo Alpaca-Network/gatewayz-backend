@@ -33,7 +33,11 @@ from httpx import RemoteProtocolError
 from supabase.client import ClientOptions
 
 from src.config.config import Config
+from src.config.supabase_compat import allow_new_api_keys
 from supabase import Client, create_client
+
+# Accept Supabase's new sb_secret_ keys (supabase-py 2.12 only accepts JWTs).
+allow_new_api_keys()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
