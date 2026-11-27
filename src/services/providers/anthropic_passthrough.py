@@ -89,6 +89,7 @@ def has_file_reference(value: Any) -> bool:
         return any(has_file_reference(v) for v in value)
     return False
 
+
 # Sentinel placed on the queue when the pipeline's stream has ended.
 STREAM_DONE = object()
 
