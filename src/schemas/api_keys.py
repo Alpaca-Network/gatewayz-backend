@@ -18,7 +18,9 @@ class CreateApiKeyRequest(BaseModel):
 
 class ApiKeyResponse(BaseModel):
     id: int
+    # Masked ("gw_live_...a1b2"). The full key is only in the create/rotate response.
     api_key: str
+    last4: str | None = None
     key_name: str
     environment_tag: str
     scope_permissions: dict[str, list[str]]
@@ -74,6 +76,8 @@ class UpdateApiKeyResponse(BaseModel):
     message: str
     updated_key: ApiKeyResponse
     timestamp: datetime
+    # Only set by action="rotate": the new key, shown this once.
+    new_api_key: str | None = None
 
 
 class ApiKeyUsageResponse(BaseModel):

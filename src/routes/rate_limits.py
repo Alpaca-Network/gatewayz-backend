@@ -6,8 +6,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from src.db.api_key_lookup import find_key_row, key_label
-from src.db.api_keys import get_api_key_by_id
+from src.db.api_key_lookup import find_key_row, key_label, mask_api_key
+from src.db.api_keys import get_api_key_by_id, get_api_key_secret_by_id
 from src.db.rate_limits import (
     bulk_update_rate_limit_configs,
     get_rate_limit_alerts,
@@ -19,6 +19,7 @@ from src.db.rate_limits import (
     update_rate_limit_config,
 )
 from src.security.deps import get_api_key, require_admin
+from src.services.key_scopes import has_admin_credential
 from src.services.user_lookup_cache import get_user
 
 # Initialize logging
@@ -52,7 +53,7 @@ def _clamp_rate_limit_config(config: dict, user: dict) -> dict:
     must be a non-negative int; a float, bool or string is rejected instead of
     silently skipping the clamp.
     """
-    if user.get("is_admin") or user.get("role") in _ADMIN_ROLES:
+    if (user.get("is_admin") or user.get("role") in _ADMIN_ROLES) and has_admin_credential(user):
         return config
     from src.services.rate_limiting import RateLimitConfig
 
@@ -95,6 +96,8 @@ def _fetch_user_rate_limits_sync(api_key: str) -> dict | None:
         enhanced_configs.append(
             {
                 **config,
+                # The full key is only shown once, at creation.
+                "api_key": mask_api_key(config.get("api_key")),
                 "usage_stats": usage_stats,
                 "current_status": {
                     "requests_remaining_minute": max(
@@ -196,9 +199,10 @@ async def update_user_rate_limits_advanced(
         rate_limit_config = _clamp_rate_limit_config(rate_limit_config, user)
 
         # Update rate limit configuration
-        success = await asyncio.to_thread(
-            update_rate_limit_config, key_to_update["api_key"], rate_limit_config
-        )
+        key_secret = await asyncio.to_thread(get_api_key_secret_by_id, key_id, user["id"])
+        if not key_secret:
+            raise HTTPException(status_code=500, detail="Failed to update rate limit configuration")
+        success = await asyncio.to_thread(update_rate_limit_config, key_secret, rate_limit_config)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update rate limit configuration")
@@ -292,9 +296,12 @@ async def get_api_key_rate_limit_usage(
             )
 
         # Get usage statistics and config in parallel threads
+        key_secret = await asyncio.to_thread(get_api_key_secret_by_id, key_id, user["id"])
+        if not key_secret:
+            raise HTTPException(status_code=500, detail="Failed to load API key")
         usage_stats, rate_limit_config = await asyncio.gather(
-            asyncio.to_thread(get_rate_limit_usage_stats, key_to_check["api_key"], time_window),
-            asyncio.to_thread(get_rate_limit_config, key_to_check["api_key"]),
+            asyncio.to_thread(get_rate_limit_usage_stats, key_secret, time_window),
+            asyncio.to_thread(get_rate_limit_config, key_secret),
         )
 
         return {

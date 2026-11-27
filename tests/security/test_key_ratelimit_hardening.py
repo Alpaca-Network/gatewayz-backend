@@ -92,6 +92,7 @@ async def test_user_cannot_raise_own_limits_above_tier_max():
     with (
         patch.object(mod, "get_user", return_value={"id": 1, "role": "user"}),
         patch.object(mod, "get_api_key_by_id", return_value={"api_key": "k"}),
+        patch.object(mod, "get_api_key_secret_by_id", return_value="k"),
         patch.object(
             mod, "update_rate_limit_config", side_effect=lambda k, c: captured.update(c) or True
         ),
@@ -109,8 +110,11 @@ async def test_admin_can_exceed_tier_max():
 
     captured = {}
     with (
-        patch.object(mod, "get_user", return_value={"id": 1, "role": "admin"}),
+        # Signed in with the primary key: an admin credential (an ordinary key of
+        # an admin account does not get the exemption).
+        patch.object(mod, "get_user", return_value={"id": 1, "role": "admin", "is_primary": True}),
         patch.object(mod, "get_api_key_by_id", return_value={"api_key": "k"}),
+        patch.object(mod, "get_api_key_secret_by_id", return_value="k"),
         patch.object(
             mod, "update_rate_limit_config", side_effect=lambda k, c: captured.update(c) or True
         ),

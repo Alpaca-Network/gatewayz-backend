@@ -254,7 +254,8 @@ async def test_get_current_user_404(monkeypatch, mod):
 async def test_require_admin_via_flag(monkeypatch, mod):
     fake_audit = FakeAuditLogger()
     monkeypatch.setattr(mod, "audit_logger", fake_audit)
-    user = {"id": 1, "is_admin": True}
+    # The key is the account's primary (sign-in) key: an admin credential.
+    user = {"id": 1, "is_admin": True, "is_primary": True}
     out = await mod.require_admin(user=user)
     assert out["id"] == 1
     assert not fake_audit.violation_calls  # no violation
@@ -264,7 +265,7 @@ async def test_require_admin_via_flag(monkeypatch, mod):
 async def test_require_admin_via_role(monkeypatch, mod):
     fake_audit = FakeAuditLogger()
     monkeypatch.setattr(mod, "audit_logger", fake_audit)
-    user = {"id": 2, "role": "admin"}
+    user = {"id": 2, "role": "admin", "is_primary": True}
     out = await mod.require_admin(user=user)
     assert out["id"] == 2
 
@@ -286,7 +287,7 @@ async def test_require_admin_via_superadmin_role(monkeypatch, mod):
     """superadmin is a strict superset of admin -- require_admin must accept it."""
     fake_audit = FakeAuditLogger()
     monkeypatch.setattr(mod, "audit_logger", fake_audit)
-    user = {"id": 4, "role": "superadmin"}
+    user = {"id": 4, "role": "superadmin", "is_primary": True}
     out = await mod.require_admin(user=user)
     assert out["id"] == 4
     assert not fake_audit.violation_calls
@@ -299,7 +300,7 @@ async def test_require_admin_via_superadmin_role(monkeypatch, mod):
 async def test_require_superadmin_allows_superadmin(monkeypatch, mod):
     fake_audit = FakeAuditLogger()
     monkeypatch.setattr(mod, "audit_logger", fake_audit)
-    user = {"id": 5, "role": "superadmin"}
+    user = {"id": 5, "role": "superadmin", "is_primary": True}
     out = await mod.require_superadmin(user=user)
     assert out["id"] == 5
     assert not fake_audit.violation_calls
@@ -343,7 +344,7 @@ async def test_require_admin_or_env_key_accepts_superadmin_user(monkeypatch, mod
         return creds.credentials
 
     async def fake_get_current_user(api_key):
-        return {"id": 8, "role": "superadmin"}
+        return {"id": 8, "role": "superadmin", "is_primary": True}
 
     monkeypatch.setattr(mod, "get_api_key", fake_get_api_key)
     monkeypatch.setattr(mod, "get_current_user", fake_get_current_user)

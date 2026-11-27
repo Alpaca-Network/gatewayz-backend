@@ -19,6 +19,7 @@ from src.security.security import (
 )
 from src.services.job_usage import job_lease_of
 from src.services.key_purpose import bind_request_key_purpose, is_validator_key
+from src.services.key_scopes import SCOPE_ADMIN, has_admin_credential
 from src.services.user_lookup_cache import get_user
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
@@ -327,6 +328,39 @@ async def get_current_user(api_key: str = Depends(get_api_key)) -> dict[str, Any
 # §3 Phase A1.
 _ADMIN_ROLES = ("admin", "superadmin")
 
+ADMIN_CREDENTIAL_REQUIRED = "admin_credential_required"
+
+
+def require_admin_credential(user: dict[str, Any]) -> None:
+    """An elevated account is not enough: the key must be allowed on admin routes.
+
+    Allowed: the account's sign-in credential (primary key or gw_temp_ session
+    key, which the admin panel sends) or a key with the explicit ``admin_api``
+    scope. An ordinary key of an admin account gets 403, so a leaked inference
+    key cannot be used as an admin credential. The ADMIN_API_KEY env key is
+    handled separately (require_admin_or_env_key) and is unaffected.
+    """
+    if has_admin_credential(user):
+        return
+    audit_logger.log_security_violation(
+        violation_type="ADMIN_ROUTE_WITH_NON_ADMIN_KEY",
+        user_id=user.get("id"),
+        details="Elevated account used a key without admin access on an admin endpoint",
+    )
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "error": {
+                "message": (
+                    "This API key cannot be used for admin endpoints. Use a signed-in "
+                    f"session or a key with the '{SCOPE_ADMIN}' scope."
+                ),
+                "type": "permission_error",
+                "code": ADMIN_CREDENTIAL_REQUIRED,
+            }
+        },
+    )
+
 
 async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     """
@@ -351,6 +385,7 @@ async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dic
         )
         raise HTTPException(status_code=403, detail="Administrator privileges required")
 
+    require_admin_credential(user)
     return user
 
 
@@ -380,6 +415,7 @@ async def require_superadmin(user: dict[str, Any] = Depends(get_current_user)) -
         )
         raise HTTPException(status_code=403, detail="Superadmin privileges required")
 
+    require_admin_credential(user)
     return user
 
 
@@ -412,6 +448,7 @@ async def require_admin_or_env_key(
         is_admin = user.get("is_admin", False) or user.get("role") in _ADMIN_ROLES
         if not is_admin:
             raise HTTPException(status_code=403, detail="Administrator privileges required")
+        require_admin_credential(user)
         return user
     except HTTPException:
         raise

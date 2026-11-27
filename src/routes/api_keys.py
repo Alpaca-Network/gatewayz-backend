@@ -8,10 +8,10 @@ from src.db.api_keys import (
     create_api_key,
     delete_api_key,
     get_api_key_by_id,
+    get_api_key_secret_by_id,
     get_user_all_api_keys_usage,
     get_user_api_keys,
     update_api_key,
-    validate_api_key_permissions,
 )
 from src.db.chat_completion_requests import get_usage_by_tag
 from src.schemas import (
@@ -22,11 +22,19 @@ from src.schemas import (
     UpdateApiKeyResponse,
 )
 from src.security.deps import get_api_key
+from src.security.roles import resolve_role_fields
 from src.services.auth_rate_limiting import (
     AuthRateLimitType,
     check_auth_rate_limit,
 )
 from src.services.key_purpose import PURPOSE_GENERAL, normalize_purpose
+from src.services.key_scopes import (
+    SCOPE_ADMIN,
+    SCOPE_KEY_MANAGEMENT,
+    can_manage_keys,
+    is_session_credential,
+    privileged_scopes_in,
+)
 from src.services.usage_signing import ALG as USAGE_ALG
 from src.services.usage_signing import SigningUnavailable
 from src.services.usage_signing import key_id as usage_key_id
@@ -43,17 +51,70 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _forbidden(code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=403,
+        detail={"error": {"message": message, "type": "permission_error", "code": code}},
+    )
+
+
+def _require_key_manager(api_key: str) -> dict:
+    """The caller's user, if this credential may manage keys.
+
+    Allowed: the account's sign-in credential (primary key or gw_temp_ session
+    key, which is what the web app uses) or a key with the explicit
+    ``key_management`` scope. Ordinary inference keys get 403.
+    """
+    user = get_user(api_key)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    if not can_manage_keys(api_key, user):
+        raise _forbidden(
+            "key_management_scope_required",
+            "This API key cannot manage API keys. Sign in to the dashboard, or use a key "
+            f"with the '{SCOPE_KEY_MANAGEMENT}' scope.",
+        )
+    return user
+
+
+def _check_scope_grant(api_key: str, user: dict, scope_permissions: dict | None) -> None:
+    """Only a session credential may grant key_management or admin_api, and
+    admin_api only on an elevated account."""
+    privileged = privileged_scopes_in(scope_permissions)
+    if not privileged:
+        return
+    if not is_session_credential(api_key, user):
+        raise _forbidden(
+            "session_required_to_grant_scope",
+            f"Granting {', '.join(privileged)} requires a signed-in session.",
+        )
+    if SCOPE_ADMIN in privileged and not resolve_role_fields(user)[1]:
+        raise _forbidden("admin_scope_not_allowed", "This account cannot hold admin-scoped keys.")
+
+
+def _check_primary_target(api_key: str, user: dict, target: dict) -> None:
+    """Changing the account's primary (sign-in) key needs a session credential,
+    so a scoped key cannot lock the owner out."""
+    if target.get("is_primary") and not is_session_credential(api_key, user):
+        raise _forbidden(
+            "session_required_for_primary_key",
+            "Changing the primary key requires a signed-in session.",
+        )
+
+
 # API Key Management Endpoints
 @router.post("/user/api-keys", tags=["authentication"])
 async def create_user_api_key(
     request: CreateApiKeyRequest,
     api_key: str = Depends(get_api_key),
 ):
-    """Create a new API key for the user"""
+    """Create a new API key for the user.
+
+    The full key is in this response only; every later read returns it masked.
+    Without ``scope_permissions`` the new key is inference-only.
+    """
     try:
-        user = get_user(api_key)
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        user = _require_key_manager(api_key)
 
         # Rate limit check - 10 API key creations per hour per user (prevent key spam)
         user_id = str(user["id"])
@@ -69,13 +130,9 @@ async def create_user_api_key(
                 headers={"Retry-After": str(rate_limit_result.retry_after)},
             )
 
-        # Validate permissions - check if the user can create keys
-        if not validate_api_key_permissions(api_key, "write", "api_keys"):
-            raise HTTPException(
-                status_code=403, detail="Insufficient permissions to create API keys"
-            )
-
         if request.action == "create":
+            _check_scope_grant(api_key, user, request.scope_permissions)
+
             # Validate input
             if request.expiration_days is not None and request.expiration_days <= 0:
                 raise HTTPException(status_code=400, detail="Expiration days must be positive")
@@ -201,15 +258,7 @@ async def update_user_api_key_endpoint(
 ):
     """Update an existing API key for the user"""
     try:
-        user = get_user(api_key)
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
-
-        # Validate permissions - check if the user can update keys
-        if not validate_api_key_permissions(api_key, "write", "api_keys"):
-            raise HTTPException(
-                status_code=403, detail="Insufficient permissions to update API keys"
-            )
+        user = _require_key_manager(api_key)
 
         # Verify the user owns the key
         key_to_update = get_api_key_by_id(key_id, user["id"])
@@ -217,36 +266,42 @@ async def update_user_api_key_endpoint(
         if not key_to_update:
             raise HTTPException(status_code=404, detail="API key not found")
 
-        # Handle key rotation (Phase 4 feature)
+        _check_primary_target(api_key, user, key_to_update)
+
+        # Rotation: a new secret for the same row. The new key is returned in
+        # this response only (new_api_key); the old one stops working at once.
         if request.action == "rotate":
-            # Generate a new API key with the same settings
-            import secrets
+            from src.db_security import rotate_api_key
 
-            environment_tag = key_to_update["environment_tag"]
+            new_api_key = rotate_api_key(key_id, user["id"])
+            if not new_api_key:
+                raise HTTPException(status_code=500, detail="Failed to rotate API key")
 
-            if environment_tag == "test":
-                prefix = "gw_test_"
-            elif environment_tag == "staging":
-                prefix = "gw_staging_"
-            elif environment_tag == "development":
-                prefix = "gw_dev_"
-            else:
-                prefix = "gw_live_"
-
-            random_part = secrets.token_urlsafe(32)
-            new_api_key = prefix + random_part
-
-            # Update the API key
-            updates = {"api_key": new_api_key}
-
-            # Log rotation for audit purposes
             logger.info(
-                "API key rotated for user %s: %s -> new key generated",
+                "API key rotated for user %s: %s",
                 sanitize_for_logging(str(user["id"])),
                 sanitize_for_logging(key_to_update["key_name"]),
             )
+            rotated_key = get_api_key_by_id(key_id, user["id"])
+            if not rotated_key:
+                raise HTTPException(
+                    status_code=500, detail="Failed to retrieve updated key details"
+                )
+            return UpdateApiKeyResponse(
+                status="success",
+                message="API key rotated. Copy the new key now: it will not be shown again.",
+                updated_key=ApiKeyResponse(**rotated_key),
+                timestamp=datetime.now(UTC),
+                new_api_key=new_api_key,
+            )
 
         elif request.action == "bulk_rotate":
+            # Rotates every key, the primary (sign-in) key included.
+            if not is_session_credential(api_key, user):
+                raise _forbidden(
+                    "session_required_for_primary_key",
+                    "Bulk rotation requires a signed-in session.",
+                )
             # Handle bulk rotation for all user keys
             try:
                 from src.db_security import bulk_rotate_user_keys
@@ -273,6 +328,7 @@ async def update_user_api_key_endpoint(
             if request.key_name is not None:
                 updates["key_name"] = request.key_name
             if request.scope_permissions is not None:
+                _check_scope_grant(api_key, user, request.scope_permissions)
                 updates["scope_permissions"] = request.scope_permissions
             if request.expiration_days is not None:
                 updates["expiration_days"] = request.expiration_days
@@ -300,7 +356,10 @@ async def update_user_api_key_endpoint(
             # its secret, and this used to pass the CALLER's key -- so editing
             # key B while authenticated with key A silently edited A. For a
             # privacy flag that is a fail-open: B would keep being logged.
-            success = update_api_key(key_to_update["api_key"], user["id"], updates)
+            key_secret = get_api_key_secret_by_id(key_id, user["id"])
+            if not key_secret:
+                raise HTTPException(status_code=500, detail="Failed to update API key")
+            success = update_api_key(key_secret, user["id"], updates)
 
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to update API key")
@@ -318,12 +377,7 @@ async def update_user_api_key_endpoint(
         if not updated_key:
             raise HTTPException(status_code=500, detail="Failed to retrieve updated key details")
 
-        # Prepare a response message based on action
-        if request.action == "rotate":
-            message = "API key rotated successfully with new key generated"
-
-        else:
-            message = "API key updated successfully with enhanced security features"
+        message = "API key updated successfully with enhanced security features"
 
         return UpdateApiKeyResponse(
             status="success",
@@ -341,15 +395,9 @@ async def update_user_api_key_endpoint(
 
 @router.get("/user/api-keys", tags=["authentication"])
 async def list_user_api_keys(api_key: str = Depends(get_api_key)):
-    """Get all API keys for the authenticated user"""
+    """Get all API keys for the authenticated user (masked: prefix + last 4)."""
     try:
-        user = get_user(api_key)
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
-
-        # Validate permissions - check if a user can read their keys
-        if not validate_api_key_permissions(api_key, "read", "api_keys"):
-            raise HTTPException(status_code=403, detail="Insufficient permissions to view API keys")
+        user = _require_key_manager(api_key)
 
         keys = get_user_api_keys(user["id"])
 
@@ -394,9 +442,7 @@ async def delete_user_api_key(
 ):
     """Delete an API key for the user"""
     try:
-        user = get_user(api_key)
-        if not user:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+        user = _require_key_manager(api_key)
 
         # Verify confirmation
         if confirmation.confirmation != "DELETE_KEY":
@@ -405,19 +451,16 @@ async def delete_user_api_key(
                 detail="Confirmation must be 'DELETE_KEY' to proceed with key deletion",
             )
 
-        # Validate permissions - check if a user can delete keys
-        if not validate_api_key_permissions(api_key, "write", "api_keys"):
-            raise HTTPException(
-                status_code=403, detail="Insufficient permissions to delete API keys"
-            )
-
-        # Resolve key string by id and ownership
+        # Resolve the key by id and ownership
         key_to_delete = get_api_key_by_id(key_id, user["id"])
         if not key_to_delete:
             raise HTTPException(status_code=404, detail="API key not found")
 
-        # Delete the API key by its actual string
-        success = delete_api_key(key_to_delete["api_key"], user["id"])
+        _check_primary_target(api_key, user, key_to_delete)
+
+        # Delete by the key itself (server-side only; never returned)
+        key_secret = get_api_key_secret_by_id(key_id, user["id"])
+        success = bool(key_secret) and delete_api_key(key_secret, user["id"])
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete API key")

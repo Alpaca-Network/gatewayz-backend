@@ -33,7 +33,8 @@ def _run(coro):
 
 CALLER_KEY = "gw_live_caller_key_A"
 TARGET_KEY = "gw_live_target_key_B"
-USER = {"id": 5}
+# The caller signs in with the primary key, which may manage keys.
+USER = {"id": 5, "is_primary": True}
 
 
 def _target_row(purpose="general"):
@@ -60,8 +61,8 @@ def create_env():
         patch.object(
             routes, "check_auth_rate_limit", AsyncMock(return_value=SimpleNamespace(allowed=True))
         ),
-        patch.object(routes, "validate_api_key_permissions", return_value=True),
         patch.object(routes, "create_api_key", create),
+        patch("src.services.payment_gate.check_live_key_allowed", return_value=(True, None)),
     ):
         yield create
 
@@ -94,8 +95,9 @@ class TestUpdate:
         update = Mock(return_value=update_ok)
         with (
             patch.object(routes, "get_user", return_value=USER),
-            patch.object(routes, "validate_api_key_permissions", return_value=True),
             patch.object(routes, "get_api_key_by_id", return_value=_target_row()),
+            # The path's key, resolved by id (responses only carry the masked form).
+            patch.object(routes, "get_api_key_secret_by_id", return_value=TARGET_KEY),
             patch.object(routes, "update_api_key", update),
         ):
             _run(

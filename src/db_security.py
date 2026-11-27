@@ -57,7 +57,10 @@ def create_secure_api_key(
 
         # Set default permissions if none provided
         if scope_permissions is None:
-            scope_permissions = {"read": ["*"], "write": ["*"], "admin": ["*"]}
+            # Inference-only by default, as in create_api_key.
+            from src.services.key_scopes import inference_only_scopes
+
+            scope_permissions = inference_only_scopes()
 
         # Create the API key record with enhanced security fields
         result = (

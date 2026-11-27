@@ -122,6 +122,9 @@ def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
         )
+    from src.security.deps import require_admin_credential
+
+    require_admin_credential(current_user)
     return current_user
 
 
