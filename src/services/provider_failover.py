@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 
@@ -908,6 +909,15 @@ def _map_provider_error_impl(
                         status,
                         response_body,
                     )
+                    # The provider's own sentence when the body is a JSON error,
+                    # not the raw JSON.
+                    try:
+                        parsed = json.loads(response_body)
+                        inner = parsed.get("error") if isinstance(parsed, dict) else None
+                        if isinstance(inner, dict) and inner.get("message"):
+                            response_body = str(inner["message"])
+                    except ValueError:
+                        pass
                     error_detail += (
                         f": {sanitize_provider_error_for_user(response_body, max_length=200)}"
                     )
