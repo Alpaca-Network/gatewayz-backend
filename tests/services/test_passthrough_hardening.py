@@ -50,6 +50,11 @@ def test_risky_betas_are_dropped_and_the_rest_kept():
     assert headers["x-api-key"] == "ours"
 
 
+def test_long_context_and_unknown_betas_are_dropped():
+    p = _passthrough({}, beta="context-1m-2025-08-07,some-new-beta-2027-01-01,effort-2025-11-24")
+    assert p.upstream_headers({})["anthropic-beta"] == "effort-2025-11-24"
+
+
 def test_no_beta_header_when_every_beta_is_blocked():
     headers = _passthrough({}, beta="files-api-2025-04-14").upstream_headers({})
     assert "anthropic-beta" not in headers

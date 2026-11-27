@@ -127,12 +127,12 @@ def test_pipeline_never_raises_max_tokens():
 
 
 def test_only_beta_and_version_headers_are_forwarded():
-    passthrough = _passthrough(beta="interleaved-thinking-2025-05-14,x-new", version="2023-06-01")
+    passthrough = _passthrough(beta="interleaved-thinking-2025-05-14", version="2023-06-01")
     headers = passthrough.upstream_headers({"x-api-key": "ours", "anthropic-version": "default"})
     assert headers == {
         "x-api-key": "ours",
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": "interleaved-thinking-2025-05-14,x-new",
+        "anthropic-beta": "interleaved-thinking-2025-05-14",
     }
 
 
@@ -255,7 +255,7 @@ RAW_EVENTS = [
     ),
     (
         "content_block_delta",
-        {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta"}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Let me check."}},
     ),
     (
         "content_block_delta",
@@ -367,3 +367,14 @@ def test_stream_without_a_passthrough_relays_nothing():
     client, chunks = asyncio.run(run())
     assert "anthropic-beta" not in client.stream.call_args.kwargs["headers"]
     assert chunks[-1]["usage"]["completion_tokens"] == 40
+
+
+def test_stream_hands_thinking_to_billing(bound):
+    """A stream cut before message_delta is billed from the text seen so far;
+    the thinking must be part of it or it is free (audit 2026-11-26)."""
+    passthrough = bound(_passthrough(beta="interleaved-thinking-2025-05-14"))
+    _, chunks, _ = asyncio.run(_run_stream(passthrough))
+    reasoning = "".join(
+        c["choices"][0]["delta"].get("reasoning_content") or "" for c in chunks if c["choices"]
+    )
+    assert reasoning == "Let me check."

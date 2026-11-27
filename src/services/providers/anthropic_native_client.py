@@ -611,6 +611,12 @@ def make_anthropic_native_request_stream(messages, model, **kwargs) -> Iterator[
                     delta_type = delta.get("type")
                     if delta_type == "text_delta":
                         yield _chunk({"content": delta.get("text", "")})
+                    elif delta_type == "thinking_delta" and passthrough is not None:
+                        # The caller already has the thinking (relayed raw);
+                        # this copy is for billing only. If the stream is cut
+                        # before message_delta brings the real output count,
+                        # the estimate must include the thinking or it is free.
+                        yield _chunk({"reasoning_content": delta.get("thinking", "")})
                     elif delta_type == "input_json_delta" and tool_index >= 0:
                         yield _chunk(
                             {

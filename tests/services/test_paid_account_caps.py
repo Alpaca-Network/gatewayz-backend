@@ -100,6 +100,10 @@ def _client(user_row, plan_rows):
     "user_row, plan_rows, expected",
     [
         ({"purchased_credits": 14.06, "subscription_allowance": 0}, [], True),
+        # Coupon dust or a leftover after a failed charge is not "paying".
+        ({"purchased_credits": 0.0001, "subscription_allowance": 0}, [], False),
+        ({"purchased_credits": 0.99, "subscription_allowance": 0}, [], False),
+        ({"purchased_credits": 1.0, "subscription_allowance": 0}, [], True),
         ({"purchased_credits": 0, "subscription_allowance": 5}, [], True),
         (
             {"purchased_credits": 0, "subscription_allowance": 0},

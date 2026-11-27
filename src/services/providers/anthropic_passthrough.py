@@ -69,9 +69,23 @@ FORWARDED_FIELDS = frozenset(
     }
 )
 
-# anthropic-beta values that unlock features acting on Gatewayz's Anthropic
-# account: stored files, remote MCP servers, code execution, skills.
-BLOCKED_BETA_PREFIXES = ("files-api", "mcp-client", "code-execution", "skills")
+# anthropic-beta values forwarded to Anthropic; all others are dropped. An
+# allowlist, because a beta can act on Gatewayz's Anthropic account (files,
+# remote MCP, code execution, skills) or change its price (1M-token context is
+# billed at a premium Gatewayz does not charge). Add new ones deliberately.
+ALLOWED_BETA_PREFIXES = (
+    "claude-code-",
+    "interleaved-thinking-",
+    "fine-grained-tool-streaming-",
+    "context-management-",
+    "dangerous-tool-use-",  # Claude Code auto mode (safeguards)
+    "token-efficient-tools-",
+    "prompt-caching-",
+    "output-128k-",
+    "effort-",
+    "structured-outputs-",
+    "redact-thinking-",
+)
 
 
 def has_file_reference(value: Any) -> bool:
@@ -207,7 +221,7 @@ class Passthrough:
         """Provider headers plus the caller's ``anthropic-version`` and allowed betas.
 
         Nothing else from the caller is forwarded; the provider key is ours.
-        Betas in BLOCKED_BETA_PREFIXES are dropped.
+        Only betas in ALLOWED_BETA_PREFIXES are kept.
         """
         out = dict(headers)
         if self.version:
@@ -215,7 +229,7 @@ class Passthrough:
         betas = [
             b.strip()
             for b in (self.beta or "").split(",")
-            if b.strip() and not b.strip().startswith(BLOCKED_BETA_PREFIXES)
+            if b.strip().startswith(ALLOWED_BETA_PREFIXES)
         ]
         if betas:
             out["anthropic-beta"] = ",".join(betas)
