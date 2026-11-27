@@ -541,7 +541,7 @@ async def poll_open_disputes() -> int:
     """Scheduler job: advance every open dispute, and webhook each state change."""
     import asyncio
 
-    from src.services.outbound_webhooks import emit
+    from src.services.outbound_webhooks import emit_in_background
 
     if not is_configured():
         return 0
@@ -555,5 +555,5 @@ async def poll_open_disputes() -> int:
             continue
         if changed(d, after):
             n += 1
-            await asyncio.to_thread(emit, after["user_id"], "job.dispute.updated", view(after))
+            emit_in_background(after["user_id"], "job.dispute.updated", view(after))
     return n

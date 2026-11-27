@@ -30,7 +30,9 @@ router = APIRouter()
 
 _HASH = re.compile(r"^0x[0-9a-f]{64}$")
 
-price_sheet_rl = create_endpoint_rate_limit("price_sheet", max_requests=120, window_seconds=60)
+price_sheet_rl = create_endpoint_rate_limit(
+    "price_sheet", max_requests=120, window_seconds=60, key_by_ip=True
+)
 
 
 def _not_found() -> HTTPException:

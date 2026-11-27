@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 dispute_content_rl = create_endpoint_rate_limit(
-    "dispute_content", max_requests=120, window_seconds=60
+    "dispute_content", max_requests=120, window_seconds=60, key_by_ip=True
 )
 
 

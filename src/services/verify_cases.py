@@ -187,7 +187,7 @@ async def poll_open_cases() -> int:
     import asyncio
 
     from src.services.genlayer_verify import get_client, is_configured
-    from src.services.outbound_webhooks import emit
+    from src.services.outbound_webhooks import emit_in_background
 
     if not is_configured():
         return 0
@@ -201,5 +201,5 @@ async def poll_open_cases() -> int:
             continue
         if changed(case, after):
             n += 1
-            await asyncio.to_thread(emit, after["user_id"], "verify.case.updated", view(after))
+            emit_in_background(after["user_id"], "verify.case.updated", view(after))
     return n
