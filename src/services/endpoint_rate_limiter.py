@@ -118,6 +118,7 @@ def create_endpoint_rate_limit(
     endpoint_name: str,
     max_requests: int = 60,
     window_seconds: int = 60,
+    key_by_ip: bool = False,
 ) -> Callable:
     """Create a FastAPI dependency that enforces per-endpoint rate limiting.
 
@@ -158,10 +159,13 @@ def create_endpoint_rate_limit(
         else:
             api_key = ""
 
-        # If no API key is present, skip endpoint rate limiting
-        # (the auth dependency will reject the request anyway)
-        if not api_key:
-            return None
+        # Public routes (key_by_ip) count per client IP: keyed on the raw bearer string,
+        # every made-up token got a fresh bucket, and no header skipped the limit.
+        # Requests with no key count per IP too, instead of not at all.
+        if key_by_ip or not api_key:
+            from src.services.auth_rate_limiting import get_client_ip
+
+            api_key = "ip:" + get_client_ip(request)
 
         allowed, remaining, retry_after = _check_rate_limit(
             api_key=api_key,

@@ -96,6 +96,22 @@ def _deliver_one(
     return status
 
 
+_EMIT_POOL = None
+
+
+def emit_in_background(user_id: int, event_type: str, data: dict[str, Any]) -> None:
+    """Deliver without making the caller wait. Pollers use this so one customer's slow
+    endpoint (3 tries x 10 s per hook) cannot stall everyone else's cases and disputes."""
+    global _EMIT_POOL
+    if event_type not in EVENTS:
+        raise ValueError(f"unknown event {event_type}")
+    if _EMIT_POOL is None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _EMIT_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="webhook-emit")
+    _EMIT_POOL.submit(emit, user_id, event_type, data)
+
+
 def emit(user_id: int, event_type: str, data: dict[str, Any], sleep=time.sleep) -> int:
     """Deliver an event to every active hook of user_id subscribed to it. Blocking —
     callers run it in a background task/thread. Returns the number delivered."""

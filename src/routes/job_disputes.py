@@ -13,6 +13,7 @@ verdict. Shadow mode: verdicts are recorded, no refund is paid. Webhook event:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -61,7 +62,10 @@ async def open_job_dispute(
     claims = {str(ln.index): ln.claim for ln in body.lines if ln.claim}
     uris = {str(ln.index): ln.content_uri for ln in body.lines if ln.content_uri}
     try:
-        dispute = cost_disputes.open_dispute(job, user_id, indexes, claims, uris)
+        # Reads every usage line and rebuilds the Merkle tree: keep it off the event loop.
+        dispute = await asyncio.to_thread(
+            cost_disputes.open_dispute, job, user_id, indexes, claims, uris
+        )
     except cost_disputes.DisputeError as e:
         raise _error(e.status, e.code, e.message)
     logger.info(
