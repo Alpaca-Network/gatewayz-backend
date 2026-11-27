@@ -117,9 +117,7 @@ def test_issue_returns_code_and_stores_only_hash(redis, api_key_auth):
 
 
 def test_issue_requires_credentials(redis):
-    with patch.object(
-        st, "get_api_key", new=AsyncMock(side_effect=HTTPException(status_code=401))
-    ):
+    with patch.object(st, "get_api_key", new=AsyncMock(side_effect=HTTPException(status_code=401))):
         resp = client.post("/auth/transfer-code")
     assert resp.status_code == 401
     assert redis.store == {}
