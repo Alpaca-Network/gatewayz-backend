@@ -135,7 +135,7 @@ def test_issue_with_verified_privy_token(redis):
         )
     assert resp.status_code == 200
     verify.assert_called_once_with("privy.jwt.token", expected_sub="did:privy:abc")
-    (value, _) = next(iter(redis.store.values()))
+    value, _ = next(iter(redis.store.values()))
     assert json.loads(value)["key_id"] is None
 
 
