@@ -4,6 +4,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.db.api_key_lookup import (
+    RATE_LIMIT_USAGE_TABLE,
+    find_key_row,
+    plaintext_from_row,
+    plaintext_fallback_enabled,
+    query_by_key,
+    rate_limit_key_fields,
+)
 from src.db.api_keys import get_api_key_by_key
 from src.db.rate_limit_defaults import (
     DEFAULT_KEY_BURST_LIMIT,
@@ -12,6 +20,7 @@ from src.db.rate_limit_defaults import (
     DEFAULT_KEY_MAX_TOKENS_PER_HOUR,
 )
 from src.db.users import get_user
+from src.utils.api_key_lookup import mask_api_key_for_logging
 
 logger = logging.getLogger(__name__)
 
@@ -23,15 +32,15 @@ def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
 
         # First try to get rate limits from the new system (rate_limit_configs table)
         try:
-            # Get the API key record from api_keys_new
-            key_record = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+            # Get the API key record from api_keys_new (by key_hash)
+            key_record = find_key_row(client, api_key, "id")
 
-            if key_record.data and len(key_record.data) > 0:
+            if key_record:
                 # Get rate limit config for this key
                 rate_config = (
                     client.table("rate_limit_configs")
                     .select("*")
-                    .eq("api_key_id", key_record.data[0]["id"])
+                    .eq("api_key_id", key_record["id"])
                     .execute()
                 )
 
@@ -63,7 +72,7 @@ def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
             logger.warning(f"Failed to get rate limits from new system: {e}")
 
         # If we reach here, no rate limits found - return None
-        logger.debug(f"No rate limits found for API key {api_key[:10]}...")
+        logger.debug(f"No rate limits found for API key {mask_api_key_for_logging(api_key)}")
         return None
 
     except Exception as e:
@@ -88,13 +97,13 @@ async def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> Non
         def _set_rate_limits_sync():
             client = get_supabase_client()
 
-            # Get the API key record from api_keys_new
-            key_record = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
+            # Get the API key record from api_keys_new (by key_hash)
+            key_record = find_key_row(client, api_key, "id")
 
-            if not key_record.data or len(key_record.data) == 0:
-                raise ValueError(f"API key not found: {api_key[:10]}...")
+            if not key_record:
+                raise ValueError(f"API key not found: {mask_api_key_for_logging(api_key)}")
 
-            api_key_id = key_record.data[0]["id"]
+            api_key_id = key_record["id"]
 
             # Prepare rate limit config data
             # Convert per-minute/per-day values to per-hour for storage
@@ -126,11 +135,11 @@ async def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> Non
                 client.table("rate_limit_configs").update(rate_limit_config).eq(
                     "api_key_id", api_key_id
                 ).execute()
-                logger.info(f"Updated rate limits for API key {api_key[:10]}...")
+                logger.info(f"Updated rate limits for API key {mask_api_key_for_logging(api_key)}")
             else:
                 # Insert new config
                 client.table("rate_limit_configs").insert(rate_limit_config).execute()
-                logger.info(f"Created rate limits for API key {api_key[:10]}...")
+                logger.info(f"Created rate limits for API key {mask_api_key_for_logging(api_key)}")
 
         # Execute the synchronous function in a thread pool
         await asyncio.to_thread(_set_rate_limits_sync)
@@ -158,11 +167,13 @@ def check_rate_limit(api_key: str, tokens_used: int = 0) -> dict[str, Any]:
             hour_start = now.replace(minute=0, second=0, microsecond=0)
             day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-            # Get current usage for all windows
-            usage_result = (
-                client.table("rate_limit_usage").select("*").eq("api_key", api_key).execute()
-            )
-            usage_records = usage_result.data
+            # Get current usage for all windows (by key_hash; plaintext fallback
+            # behind API_KEY_PLAINTEXT_FALLBACK for rows written before stage 2)
+            def _usage(column: str, value: str):
+                return client.table(RATE_LIMIT_USAGE_TABLE).select("*").eq(column, value)
+
+            usage_result = query_by_key(api_key, _usage, table=RATE_LIMIT_USAGE_TABLE)
+            usage_records = usage_result.data or []
         except Exception as table_error:
             # If table doesn't exist, allow the request but log the issue
             logger.warning(
@@ -257,8 +268,11 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
         # Get user info
         user = get_user(api_key)
         if not user:
-            logger.error(f"User not found for API key: {api_key}")
+            logger.error(f"User not found for API key: {mask_api_key_for_logging(api_key)}")
             return
+
+        # Rows are keyed by key_hash; api_key only gets a non-secret placeholder.
+        key_fields = rate_limit_key_fields(api_key)
 
         user_id = user["id"]
         now = datetime.now(UTC)
@@ -279,7 +293,7 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
         # Update minute window
         minute_data = {
             "user_id": user_id,
-            "api_key": api_key,
+            **key_fields,
             "window_type": "minute",
             "window_start": minute_start,
             "requests_count": 1,
@@ -291,7 +305,7 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
         # Update hour window
         hour_data = {
             "user_id": user_id,
-            "api_key": api_key,
+            **key_fields,
             "window_type": "hour",
             "window_start": hour_start,
             "requests_count": 1,
@@ -303,7 +317,7 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
         # Update day window
         day_data = {
             "user_id": user_id,
-            "api_key": api_key,
+            **key_fields,
             "window_type": "day",
             "window_start": day_start,
             "requests_count": 1,
@@ -324,15 +338,17 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
         if table_exists:
             for window_data in [minute_data, hour_data, day_data]:
                 try:
-                    # Check if record exists
-                    existing = (
-                        client.table("rate_limit_usage")
-                        .select("*")
-                        .eq("api_key", api_key)
-                        .eq("window_type", window_data["window_type"])
-                        .eq("window_start", window_data["window_start"])
-                        .execute()
-                    )
+                    # Check if record exists (by key_hash, plaintext fallback by flag)
+                    def _window(column: str, value: str, window: dict = window_data):
+                        return (
+                            client.table(RATE_LIMIT_USAGE_TABLE)
+                            .select("*")
+                            .eq(column, value)
+                            .eq("window_type", window["window_type"])
+                            .eq("window_start", window["window_start"])
+                        )
+
+                    existing = query_by_key(api_key, _window, table=RATE_LIMIT_USAGE_TABLE)
 
                     if existing.data and len(existing.data) > 0:
                         # Update existing record
@@ -362,9 +378,11 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
         if is_new_key:
             try:
                 # Update last_used_at in api_keys_new
-                client.table("api_keys_new").update({"last_used_at": timestamp}).eq(
-                    "api_key", api_key
-                ).execute()
+                key_record = find_key_row(client, api_key, "id")
+                if key_record:
+                    client.table("api_keys_new").update({"last_used_at": timestamp}).eq(
+                        "id", key_record["id"]
+                    ).execute()
             except Exception as e:
                 logger.warning(f"Failed to update last_used_at in api_keys_new: {e}")
 
@@ -419,27 +437,22 @@ def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
 
         # Try to get rate limit config from api_keys_new table
         try:
-            result = (
-                client.table("api_keys_new")
-                .select("rate_limit_config")
-                .eq("api_key", api_key)
-                .execute()
-            )
+            row = find_key_row(client, api_key, "rate_limit_config")
 
-            if result.data and len(result.data) > 0 and result.data[0].get("rate_limit_config"):
-                return result.data[0]["rate_limit_config"]
+            if row and row.get("rate_limit_config"):
+                return row["rate_limit_config"]
         except Exception as e:
             # Column might not exist yet, log and continue
             logger.debug(f"rate_limit_config column not available: {e}")
 
         # Try to get from rate_limit_configs table if it exists
         try:
-            key_result = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-            if key_result.data and len(key_result.data) > 0:
+            key_record = find_key_row(client, api_key, "id")
+            if key_record:
                 config_result = (
                     client.table("rate_limit_configs")
                     .select("*")
-                    .eq("api_key_id", key_result.data[0]["id"])
+                    .eq("api_key_id", key_record["id"])
                     .execute()
                 )
                 if config_result.data and len(config_result.data) > 0:
@@ -475,7 +488,9 @@ def get_rate_limit_config(api_key: str) -> dict[str, Any] | None:
         }
 
     except Exception as e:
-        logger.error(f"Error getting rate limit config for key {api_key[:10]}...: {e}")
+        logger.error(
+            "Error getting rate limit config for key %s: %s", mask_api_key_for_logging(api_key), e
+        )
         return None
 
 
@@ -483,6 +498,12 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
     """Update rate limit configuration for a specific API key"""
     try:
         client = get_supabase_client()
+
+        # Resolve the key row once, by key_hash
+        key_record = find_key_row(client, api_key, "id")
+        if not key_record:
+            return False
+        api_key_id = key_record["id"]
 
         # Try to update in api_keys_new table
         try:
@@ -494,7 +515,7 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
                         "updated_at": datetime.now(UTC).isoformat(),
                     }
                 )
-                .eq("api_key", api_key)
+                .eq("id", api_key_id)
                 .execute()
             )
 
@@ -505,9 +526,7 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
 
         # Try to update in rate_limit_configs table if it exists
         try:
-            key_result = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-            if key_result.data and len(key_result.data) > 0:
-                api_key_id = key_result.data[0]["id"]
+            if api_key_id:
 
                 # Try to update existing config
                 existing = (
@@ -554,7 +573,9 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
         return False
 
     except Exception as e:
-        logger.error(f"Error updating rate limit config for key {api_key[:10]}...: {e}")
+        logger.error(
+            "Error updating rate limit config for key %s: %s", mask_api_key_for_logging(api_key), e
+        )
         return False
 
 
@@ -567,7 +588,10 @@ def get_user_rate_limit_configs(user_id: int) -> list[dict[str, Any]]:
         try:
             result = (
                 client.table("api_keys_new")
-                .select("api_key, key_name, rate_limit_config, environment_tag")
+                .select(
+                    "id, api_key, encrypted_key, key_version, key_name, "
+                    "rate_limit_config, environment_tag"
+                )
                 .eq("user_id", user_id)
                 .execute()
             )
@@ -577,7 +601,7 @@ def get_user_rate_limit_configs(user_id: int) -> list[dict[str, Any]]:
                 config = key.get("rate_limit_config", {})
                 configs.append(
                     {
-                        "api_key": key["api_key"],
+                        "api_key": plaintext_from_row(key),
                         "key_name": key["key_name"],
                         "environment_tag": key["environment_tag"],
                         "rate_limit_config": config,
@@ -595,7 +619,7 @@ def get_user_rate_limit_configs(user_id: int) -> list[dict[str, Any]]:
         # Fallback: query without rate_limit_config column
         result = (
             client.table("api_keys_new")
-            .select("id, api_key, key_name, environment_tag")
+            .select("id, api_key, encrypted_key, key_version, key_name, environment_tag")
             .eq("user_id", user_id)
             .execute()
         )
@@ -636,7 +660,7 @@ def get_user_rate_limit_configs(user_id: int) -> list[dict[str, Any]]:
 
             configs.append(
                 {
-                    "api_key": key["api_key"],
+                    "api_key": plaintext_from_row(key),
                     "key_name": key["key_name"],
                     "environment_tag": key["environment_tag"],
                     "rate_limit_config": config,
@@ -730,7 +754,11 @@ def get_rate_limit_usage_stats(api_key: str, time_window: str = "minute") -> dic
         }
 
     except Exception as e:
-        logger.error(f"Error getting rate limit usage stats for key {api_key[:10]}...: {e}")
+        logger.error(
+            "Error getting rate limit usage stats for key %s: %s",
+            mask_api_key_for_logging(api_key),
+            e,
+        )
         return {
             "time_window": time_window,
             "total_requests": 0,
@@ -839,8 +867,10 @@ def create_rate_limit_alert(api_key: str, alert_type: str, details: dict[str, An
             logger.info("Rate limit alerts table not available, skipping alert creation")
             return True
 
+        # rate_limit_alerts.api_key is NOT NULL: store the non-secret hash
+        # reference, never the key itself.
         alert_data = {
-            "api_key": api_key,
+            "api_key": rate_limit_key_fields(api_key)["api_key"],
             "alert_type": alert_type,
             "details": details,
             "created_at": datetime.now(UTC).isoformat(),
@@ -879,7 +909,12 @@ def get_rate_limit_alerts(
         )
 
         if api_key:
-            query = query.eq("api_key", api_key)
+            # Alerts written since stage 2 carry hash_ref(key_hash); older rows
+            # carry the plaintext and are matched only while the fallback is on.
+            refs = [rate_limit_key_fields(api_key)["api_key"]]
+            if plaintext_fallback_enabled():
+                refs.append(api_key)
+            query = query.in_("api_key", refs)
 
         result = query.execute()
         return result.data or []

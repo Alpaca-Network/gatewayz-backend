@@ -111,7 +111,7 @@ class TestCreateSecureAPIKey:
     @patch("src.db_security.get_security_manager")
     @patch("src.db_security.get_audit_logger")
     @patch("src.db_security.generate_secure_api_key")
-    @patch("src.db_security.hash_api_key")
+    @patch("src.db_security.new_key_storage_fields")
     @patch("src.db_security.check_key_name_uniqueness")
     def test_create_secure_api_key_success(
         self,
@@ -134,7 +134,7 @@ class TestCreateSecureAPIKey:
 
         mock_check_uniqueness.return_value = True
         mock_generate_key.return_value = "gw_live_new_key_12345"
-        mock_hash_key.return_value = "hash_new_123"
+        mock_hash_key.return_value = {"api_key": None, "key_hash": "hash_new_123"}
 
         # Mock successful insert
         table_mock.execute.return_value = Mock(data=[{"id": 1}])
@@ -144,8 +144,8 @@ class TestCreateSecureAPIKey:
 
         assert result == "gw_live_new_key_12345"
 
-        # Verify key was encrypted
-        mock_security_manager.encrypt_api_key.assert_called_once()
+        # Verify key was stored via hash + ciphertext (no plaintext)
+        mock_hash_key.assert_called_once()
 
         # Verify audit log was created
         mock_audit_logger.log_api_key_creation.assert_called_once()
@@ -154,7 +154,7 @@ class TestCreateSecureAPIKey:
     @patch("src.db_security.get_security_manager")
     @patch("src.db_security.get_audit_logger")
     @patch("src.db_security.generate_secure_api_key")
-    @patch("src.db_security.hash_api_key")
+    @patch("src.db_security.new_key_storage_fields")
     @patch("src.db_security.check_key_name_uniqueness")
     def test_create_secure_api_key_with_expiration(
         self,
@@ -176,7 +176,7 @@ class TestCreateSecureAPIKey:
 
         mock_check_uniqueness.return_value = True
         mock_generate_key.return_value = "gw_live_key_12345"
-        mock_hash_key.return_value = "hash_123"
+        mock_hash_key.return_value = {"api_key": None, "key_hash": "hash_123"}
         table_mock.execute.return_value = Mock(data=[{"id": 1}])
 
         result = create_secure_api_key(user_id=100, key_name="expiring_key", expiration_days=30)
@@ -195,7 +195,7 @@ class TestCreateSecureAPIKey:
     @patch("src.db_security.get_security_manager")
     @patch("src.db_security.get_audit_logger")
     @patch("src.db_security.generate_secure_api_key")
-    @patch("src.db_security.hash_api_key")
+    @patch("src.db_security.new_key_storage_fields")
     @patch("src.db_security.check_key_name_uniqueness")
     def test_create_secure_api_key_with_ip_allowlist(
         self,
@@ -217,7 +217,7 @@ class TestCreateSecureAPIKey:
 
         mock_check_uniqueness.return_value = True
         mock_generate_key.return_value = "gw_live_key_12345"
-        mock_hash_key.return_value = "hash_123"
+        mock_hash_key.return_value = {"api_key": None, "key_hash": "hash_123"}
         table_mock.execute.return_value = Mock(data=[{"id": 1}])
 
         ip_list = ["192.168.1.1", "10.0.0.1"]
@@ -247,7 +247,7 @@ class TestCreateSecureAPIKey:
     @patch("src.db_security.get_security_manager")
     @patch("src.db_security.get_audit_logger")
     @patch("src.db_security.generate_secure_api_key")
-    @patch("src.db_security.hash_api_key")
+    @patch("src.db_security.new_key_storage_fields")
     @patch("src.db_security.check_key_name_uniqueness")
     def test_create_secure_api_key_insert_fails(
         self,
@@ -269,7 +269,7 @@ class TestCreateSecureAPIKey:
 
         mock_check_uniqueness.return_value = True
         mock_generate_key.return_value = "gw_live_key_12345"
-        mock_hash_key.return_value = "hash_123"
+        mock_hash_key.return_value = {"api_key": None, "key_hash": "hash_123"}
 
         # Insert returns no data (failure)
         table_mock.execute.return_value = Mock(data=[])
@@ -283,7 +283,7 @@ class TestCreateSecureAPIKey:
     @patch("src.db_security.get_security_manager")
     @patch("src.db_security.get_audit_logger")
     @patch("src.db_security.generate_secure_api_key")
-    @patch("src.db_security.hash_api_key")
+    @patch("src.db_security.new_key_storage_fields")
     @patch("src.db_security.check_key_name_uniqueness")
     def test_create_secure_api_key_with_custom_permissions(
         self,
@@ -305,7 +305,7 @@ class TestCreateSecureAPIKey:
 
         mock_check_uniqueness.return_value = True
         mock_generate_key.return_value = "gw_live_key_12345"
-        mock_hash_key.return_value = "hash_123"
+        mock_hash_key.return_value = {"api_key": None, "key_hash": "hash_123"}
         table_mock.execute.return_value = Mock(data=[{"id": 1}])
 
         custom_perms = {"read": ["models", "usage"], "write": [], "admin": []}
@@ -619,7 +619,7 @@ class TestRotateAPIKey:
     @patch("src.db_security.get_security_manager")
     @patch("src.db_security.get_audit_logger")
     @patch("src.db_security.generate_secure_api_key")
-    @patch("src.db_security.hash_api_key")
+    @patch("src.db_security.new_key_storage_fields")
     def test_rotate_api_key_success(
         self,
         mock_hash_key,
@@ -646,14 +646,14 @@ class TestRotateAPIKey:
         ]
 
         mock_generate_key.return_value = "gw_live_rotated_key_12345"
-        mock_hash_key.return_value = "hash_rotated_123"
+        mock_hash_key.return_value = {"api_key": None, "key_hash": "hash_rotated_123"}
 
         result = rotate_api_key(key_id=1, user_id=100)
 
         assert result == "gw_live_rotated_key_12345"
 
-        # Verify new key was encrypted
-        mock_security_manager.encrypt_api_key.assert_called_once()
+        # Verify new key was stored via hash + ciphertext (no plaintext)
+        mock_hash_key.assert_called_once()
 
         # Verify audit log was created
         mock_audit_logger.log_api_key_creation.assert_called_once()
@@ -688,7 +688,7 @@ class TestRotateAPIKey:
     @patch("src.db_security.get_security_manager")
     @patch("src.db_security.get_audit_logger")
     @patch("src.db_security.generate_secure_api_key")
-    @patch("src.db_security.hash_api_key")
+    @patch("src.db_security.new_key_storage_fields")
     def test_rotate_api_key_with_new_name(
         self,
         mock_hash_key,
@@ -714,7 +714,7 @@ class TestRotateAPIKey:
         ]
 
         mock_generate_key.return_value = "gw_live_new_key_12345"
-        mock_hash_key.return_value = "hash_new_123"
+        mock_hash_key.return_value = {"api_key": None, "key_hash": "hash_new_123"}
 
         result = rotate_api_key(key_id=1, user_id=100, new_key_name="rotated_key_v2")
 

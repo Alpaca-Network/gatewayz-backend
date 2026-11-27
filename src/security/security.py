@@ -241,30 +241,13 @@ def validate_api_key_security(
         logger.debug(f"Checking {table_name} table for API key")
 
         try:
-            # Primary lookup: hash-based (avoids exposing plaintext in queries)
-            result = None
-            hash_lookup_attempted = False
-            try:
-                from src.utils.crypto import sha256_key_hash
+            # Hash lookup; plaintext fallback only behind API_KEY_PLAINTEXT_FALLBACK
+            from src.db.api_key_lookup import find_key_row
 
-                computed_hash = sha256_key_hash(api_key)
-                result = (
-                    client.table(table_name).select("*").eq("key_hash", computed_hash).execute()
-                )
-                hash_lookup_attempted = True
-            except (ValueError, RuntimeError, KeyError) as e:
-                logger.warning("Hash lookup unavailable, falling back to plaintext: %s", str(e))
-                result = client.table(table_name).select("*").eq("api_key", api_key).execute()
+            key_data = find_key_row(client, api_key)
 
-            # Only fall back to plaintext when the hash lookup succeeded but found nothing
-            if hash_lookup_attempted and (not result or not result.data):
-                result = client.table(table_name).select("*").eq("api_key", api_key).execute()
-
-            if not result.data:
+            if not key_data:
                 continue
-
-            # Found the key
-            key_data = result.data[0]
 
             # Validate key constraints
             _validate_key_constraints(

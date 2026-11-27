@@ -13,6 +13,7 @@ import src.config.supabase_config as supabase_config
 import src.db.users as users_module
 import src.enhanced_notification_service as notif_module
 from src.db.activity import log_activity
+from src.db.api_key_lookup import new_key_storage_fields, plaintext_from_row, safe_db_error
 from src.db.user_wallets import count_wallets, get_wallet, link_wallet
 from src.db.users import _is_temporary_api_key
 from src.schemas import (
@@ -58,6 +59,11 @@ from src.utils.wallet_address import normalize_wallet_address
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _new_fallback_key() -> str:
+    """Random primary key for the manual user-creation fallback paths."""
+    return "gw_live_" + secrets.token_urlsafe(32)
 
 
 def _resolve_account_email(account) -> str | None:
@@ -258,7 +264,7 @@ def _handle_existing_user(
         def fetch_api_keys():
             return (
                 client.table("api_keys_new")
-                .select("api_key, is_primary, created_at")
+                .select("id, api_key, encrypted_key, key_version, is_primary, created_at")
                 .eq("user_id", existing_user["id"])
                 .eq("is_active", True)
                 .order("is_primary", desc=True)
@@ -281,7 +287,8 @@ def _handle_existing_user(
                 all_keys_result.data,
                 key=lambda k: (not k.get("is_primary", False), k.get("created_at", "")),
             )
-            api_key_to_return = sorted_keys[0]["api_key"]
+            # Plaintext column while it exists, else decrypt encrypted_key.
+            api_key_to_return = plaintext_from_row(sorted_keys[0]) or api_key_to_return
             key_type = "primary" if sorted_keys[0].get("is_primary") else "active"
             logger.info(
                 "Returning %s API key for user %s from %s active keys",
@@ -431,9 +438,10 @@ def _handle_existing_user(
                 )
                 api_key_to_return = primary_key
 
-                # Update the users table with the new key
+                # Clear the legacy users.api_key column (it used to receive the
+                # new plaintext key). The key lives in api_keys_new only.
                 try:
-                    client.table("users").update({"api_key": primary_key}).eq(
+                    client.table("users").update({"api_key": None}).eq(
                         "id", existing_user["id"]
                     ).execute()
                     logger.info(
@@ -1292,7 +1300,7 @@ async def privy_auth(
                     try:
                         existing_key_result = (
                             client.table("api_keys_new")
-                            .select("api_key")
+                            .select("id, api_key, encrypted_key, key_version")
                             .eq("user_id", created_user["id"])
                             .eq("is_active", True)
                             .order("is_primary", desc=True)
@@ -1301,7 +1309,9 @@ async def privy_auth(
                             .execute()
                         )
                         if existing_key_result.data and len(existing_key_result.data) > 0:
-                            api_key_value = existing_key_result.data[0]["api_key"]
+                            api_key_value = (
+                                plaintext_from_row(existing_key_result.data[0]) or api_key_value
+                            )
                             logger.info(
                                 f"Reusing existing API key for fallback user {created_user['id']}"
                             )
@@ -1313,12 +1323,14 @@ async def privy_auth(
                         )
 
                     if not api_key_value:
-                        api_key_value = f"gw_live_{username}_fallback"
+                        # Random key, stored as hash + ciphertext (was a
+                        # guessable f"gw_live_{username}_fallback" in plaintext).
+                        api_key_value = _new_fallback_key()
                         try:
                             client.table("api_keys_new").insert(
                                 {
                                     "user_id": created_user["id"],
-                                    "api_key": api_key_value,
+                                    **new_key_storage_fields(api_key_value),
                                     "key_name": "Primary API Key",
                                     "is_primary": True,
                                     "is_active": True,
@@ -1330,7 +1342,8 @@ async def privy_auth(
                             )
                         except Exception as api_key_error:
                             logger.error(
-                                f"Failed to create API key for fallback user {created_user['id']}: {api_key_error}"
+                                f"Failed to create API key for fallback user {created_user['id']}: "
+                                f"{safe_db_error(api_key_error)}"
                             )
 
                     user_data = {
@@ -1611,7 +1624,9 @@ async def register_user(
                     ) from creation_error
 
                 created_user = user_insert.data[0]
-                api_key_value = f"gw_live_{request.username}_fallback"
+                # Random key, stored as hash + ciphertext (was a guessable
+                # f"gw_live_{username}_fallback" in plaintext).
+                api_key_value = _new_fallback_key()
 
                 # Apply same fixes as privy_auth: validate environment_tag
                 env_tag = request.environment_tag or "live"
@@ -1631,7 +1646,7 @@ async def register_user(
                     client.table("api_keys_new").insert(
                         {
                             "user_id": created_user["id"],
-                            "api_key": api_key_value,
+                            **new_key_storage_fields(api_key_value),
                             "key_name": request.key_name,
                             "is_primary": True,
                             "is_active": True,
@@ -1645,7 +1660,8 @@ async def register_user(
                 except Exception as api_key_error:
                     logger.error(
                         f"Failed to create API key for registration user {created_user['id']}: "
-                        f"{api_key_error}, proceeding without API key in api_keys_new table"
+                        f"{safe_db_error(api_key_error)}, proceeding without API key in "
+                        "api_keys_new table"
                     )
 
                 user_data = {

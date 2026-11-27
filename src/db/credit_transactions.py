@@ -555,16 +555,24 @@ def add_credits(
                 .execute()
             )
         else:
-            user_result = (
-                client.table("users")
-                .select("id, purchased_credits, subscription_allowance")
-                .eq("api_key", api_key)
-                .execute()
-            )
+            # api_keys_new by key_hash first, then the legacy users.api_key
+            # column behind API_KEY_PLAINTEXT_FALLBACK.
+            from src.db.api_key_lookup import resolve_user_id
 
-        if not user_result.data:
+            resolved_id = resolve_user_id(client, api_key) if api_key else None
+            user_result = None
+            if resolved_id is not None:
+                user_result = (
+                    client.table("users")
+                    .select("id, purchased_credits, subscription_allowance")
+                    .eq("id", resolved_id)
+                    .execute()
+                )
+
+        if not user_result or not user_result.data:
             logger.error(
-                f"User not found for {'user_id: ' + str(user_id) if user_id else 'API key: ' + api_key[:15] + '...'}"
+                "User not found for %s",
+                f"user_id: {user_id}" if user_id else "API key (not shown)",
             )
             return False
 

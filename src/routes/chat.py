@@ -324,14 +324,17 @@ def _fallback_get_user(api_key: str):
     try:
         supabase_module = importlib.import_module("src.config.supabase_config")
         client = supabase_module.get_supabase_client()
-        result = client.table("users").select("*").eq("api_key", api_key).execute()
-        if result.data:
-            logging.getLogger(__name__).debug("Fallback user lookup succeeded for %s", api_key)
-            return result.data[0]
-        logging.getLogger(__name__).debug(
-            "Fallback lookup found no data; table snapshot=%s",
-            client.table("users").select("*").execute().data,
-        )
+        # api_keys_new by key_hash, then legacy users.api_key behind the
+        # API_KEY_PLAINTEXT_FALLBACK flag. Never log the key or table rows.
+        from src.db.api_key_lookup import find_user_row
+
+        user = find_user_row(client, api_key)
+        if user:
+            logging.getLogger(__name__).debug(
+                "Fallback user lookup succeeded for %s", mask_key(api_key)
+            )
+            return user
+        logging.getLogger(__name__).debug("Fallback lookup found no user")
     except Exception as exc:
         logging.getLogger(__name__).debug(
             "Fallback user lookup error for %s: %s", mask_key(api_key), exc

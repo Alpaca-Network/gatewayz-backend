@@ -19,6 +19,7 @@ import logging
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.db.api_key_lookup import find_key_row
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +32,14 @@ def get_routing_policy_for_key(api_key: str) -> dict[str, Any] | None:
     """
     try:
         client = get_supabase_client()
-        key_record = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-        if not key_record.data:
+        key_record = find_key_row(client, api_key, "id")
+        if not key_record:
             return None
 
         policy_row = (
             client.table("routing_policies")
             .select("*")
-            .eq("api_key_id", key_record.data[0]["id"])
+            .eq("api_key_id", key_record["id"])
             .execute()
         )
         if not policy_row.data:
