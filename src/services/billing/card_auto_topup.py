@@ -69,6 +69,7 @@ UNKNOWN = "unknown"
 # Pause reason when the saved card can no longer be used at all.
 CARD_UNUSABLE = "card_unusable"
 
+
 @dataclass(frozen=True)
 class TopupResult:
     status: str  # succeeded | refused | requires_action | declined | failed | unknown
