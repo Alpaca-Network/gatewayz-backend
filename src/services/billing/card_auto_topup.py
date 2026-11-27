@@ -1015,4 +1015,3 @@ def handle_payment_method_detached(payment_method: Any) -> None:
     for row in result.data or []:
         if row.get("id") is not None:
             invalidate_user_cache_by_id(row["id"])
-
