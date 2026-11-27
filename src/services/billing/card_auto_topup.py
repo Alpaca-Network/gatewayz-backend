@@ -913,15 +913,14 @@ def is_auto_topup_intent(payment_intent: Any) -> bool:
 
 
 def is_card_setup_session(session: Any) -> bool:
-    return (
-        _field(session, "mode") == "setup" and _metadata(session).get("purpose") == SETUP_PURPOSE
-    )
+    if _field(session, "mode") != "setup":
+        return False
+    return _metadata(session).get("purpose") == SETUP_PURPOSE
 
 
 def _attempt(attempt_id: str) -> dict[str, Any] | None:
-    result = (
-        _client().table("auto_topup_attempts").select("*").eq("id", attempt_id).limit(1).execute()
-    )
+    query = _client().table("auto_topup_attempts").select("*").eq("id", attempt_id)
+    result = query.limit(1).execute()
     return (result.data or [None])[0]
 
 

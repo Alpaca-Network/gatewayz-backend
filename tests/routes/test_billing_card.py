@@ -56,18 +56,16 @@ def test_changes_are_404_while_off(monkeypatch, method, path, body):
 
 
 def test_setup_session_returns_the_checkout_url():
-    with patch.object(
-        cat, "create_setup_session", return_value={"session_id": "cs_t", "url": "https://x"}
-    ):
+    session = {"session_id": "cs_t", "url": "https://x"}
+    with patch.object(cat, "create_setup_session", return_value=session):
         r = client.post("/user/billing/card/setup-session")
     assert r.status_code == 200
     assert r.json()["data"]["url"] == "https://x"
 
 
 def test_service_errors_map_to_their_status():
-    with patch.object(
-        cat, "set_preferences", side_effect=cat.CardSetupError("card_required", 409)
-    ):
+    refused = cat.CardSetupError("card_required", 409)
+    with patch.object(cat, "set_preferences", side_effect=refused):
         r = client.put("/user/billing/auto-topup", json={"enabled": True})
     assert r.status_code == 409
 

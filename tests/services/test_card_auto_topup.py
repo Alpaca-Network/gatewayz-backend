@@ -160,9 +160,8 @@ def test_needs_topup_and_shortfall():
 
 
 def test_successful_charge_credits_once_with_the_webhook_key():
-    with _Harness() as h, patch.object(
-        stripe.PaymentIntent, "create", return_value=_intent()
-    ) as create:
+    create_intent = patch.object(stripe.PaymentIntent, "create", return_value=_intent())
+    with _Harness() as h, create_intent as create:
         result = cat.run_auto_topup(USER_ID)
     assert result.status == cat.SUCCEEDED
     assert result.credited_usd == Decimal("20.0")
@@ -218,9 +217,8 @@ def test_sca_required_is_requires_action():
 
 
 def test_requires_action_status_without_error_is_handled_too():
-    with _Harness() as h, patch.object(
-        stripe.PaymentIntent, "create", return_value=_intent(status="requires_action")
-    ):
+    intent = _intent(status="requires_action")
+    with _Harness() as h, patch.object(stripe.PaymentIntent, "create", return_value=intent):
         result = cat.run_auto_topup(USER_ID)
     assert result.status == cat.REQUIRES_ACTION
     h.add_credits.assert_not_called()
@@ -256,9 +254,8 @@ def test_removed_card_is_unusable_and_paused():
 
 @pytest.mark.parametrize("reason", ["daily_limit", "in_flight", "cooldown", "paused", "no_card"])
 def test_refused_by_the_database_never_calls_stripe(reason):
-    with _Harness(begin={"status": "refused", "reason": reason}), patch.object(
-        stripe.PaymentIntent, "create"
-    ) as create:
+    harness = _Harness(begin={"status": "refused", "reason": reason})
+    with harness, patch.object(stripe.PaymentIntent, "create") as create:
         result = cat.run_auto_topup(USER_ID)
     assert result.status == "refused" and result.reason == reason
     create.assert_not_called()
@@ -273,9 +270,8 @@ def test_amount_too_small_for_the_request_charges_nothing():
 
 
 def test_amount_mismatch_is_not_credited():
-    with _Harness() as h, patch.object(
-        stripe.PaymentIntent, "create", return_value=_intent(amount=1)
-    ):
+    intent = _intent(amount=1)
+    with _Harness() as h, patch.object(stripe.PaymentIntent, "create", return_value=intent):
         result = cat.run_auto_topup(USER_ID)
     assert result.status == cat.UNKNOWN
     h.add_credits.assert_not_called()
@@ -323,12 +319,12 @@ def _webhook_intent(amount=2000, user_id=USER_ID, status="succeeded", error=None
 
 def test_webhook_success_credits_with_the_same_key():
     attempt = {"id": "att-1", "user_id": USER_ID, "amount_cents": 2000}
-    with patch.object(cat, "_attempt", return_value=attempt), patch(
-        "src.db.payments.get_payment", return_value={"id": 9, "user_id": USER_ID}
-    ), patch("src.db.users.add_credits_to_user") as add, patch(
-        "src.db.payments.update_payment_status"
-    ), patch.object(cat, "_finish") as finish:
-        cat.handle_intent_succeeded(_webhook_intent())
+    found = patch.object(cat, "_attempt", return_value=attempt)
+    payment = patch("src.db.payments.get_payment", return_value={"id": 9, "user_id": USER_ID})
+    status = patch("src.db.payments.update_payment_status")
+    with found, payment, status, patch("src.db.users.add_credits_to_user") as add:
+        with patch.object(cat, "_finish") as finish:
+            cat.handle_intent_succeeded(_webhook_intent())
     assert add.call_args.kwargs["request_id"] == StripeService._grant_idempotency_key(
         "pi:pi_test_9"
     )
@@ -338,9 +334,8 @@ def test_webhook_success_credits_with_the_same_key():
 @pytest.mark.parametrize("intent", [_webhook_intent(amount=1), _webhook_intent(user_id=999)])
 def test_webhook_success_that_does_not_match_its_attempt_raises(intent):
     attempt = {"id": "att-1", "user_id": USER_ID, "amount_cents": 2000}
-    with patch.object(cat, "_attempt", return_value=attempt), patch(
-        "src.db.users.add_credits_to_user"
-    ) as add:
+    found = patch.object(cat, "_attempt", return_value=attempt)
+    with found, patch("src.db.users.add_credits_to_user") as add:
         with pytest.raises(ValueError):
             cat.handle_intent_succeeded(intent)
     add.assert_not_called()
@@ -349,13 +344,11 @@ def test_webhook_success_that_does_not_match_its_attempt_raises(intent):
 def test_webhook_failure_notifies_only_when_it_changed_the_attempt():
     intent = _webhook_intent(status="requires_payment_method", error={"code": "card_declined"})
     for changed, expected in ((True, 1), (False, 0)):
-        with patch.object(
-            cat,
-            "_finish",
-            return_value={"changed": changed, "user_id": USER_ID, "amount_cents": 2000},
-        ), patch("src.db.payments.get_payment_by_stripe_intent", return_value=None), patch.object(
-            cat, "_notify_failure"
-        ) as notify, patch.object(cat, "_cancel_quietly"):
+        outcome = {"changed": changed, "user_id": USER_ID, "amount_cents": 2000}
+        finish = patch.object(cat, "_finish", return_value=outcome)
+        lookup = patch("src.db.payments.get_payment_by_stripe_intent", return_value=None)
+        cancel = patch.object(cat, "_cancel_quietly")
+        with finish, lookup, cancel, patch.object(cat, "_notify_failure") as notify:
             cat.handle_intent_failed(intent)
         assert notify.call_count == expected
 
@@ -418,9 +411,9 @@ def _pm(customer=CUS):
 
 def test_completed_setup_session_saves_the_card_and_clears_a_pause():
     user = _user(stripe_default_payment_method_id=None, auto_topup_paused_reason="declined")
-    with patch.object(cat, "_fresh_user", return_value=user), patch.object(
-        stripe.PaymentMethod, "retrieve", return_value=_pm()
-    ), patch.object(cat, "_update_user") as update:
+    fresh = patch.object(cat, "_fresh_user", return_value=user)
+    retrieve = patch.object(stripe.PaymentMethod, "retrieve", return_value=_pm())
+    with fresh, retrieve, patch.object(cat, "_update_user") as update:
         summary = cat.save_card_from_session(_session(), expected_user_id=USER_ID)
     assert summary == {"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2030}
     fields = update.call_args.args[1]
@@ -438,9 +431,9 @@ def test_completed_setup_session_saves_the_card_and_clears_a_pause():
     ],
 )
 def test_setup_session_that_is_not_this_accounts_is_refused(session, expected_user):
-    with patch.object(cat, "_fresh_user", return_value=_user()), patch.object(
-        stripe.PaymentMethod, "retrieve", return_value=_pm()
-    ), patch.object(cat, "_update_user") as update:
+    fresh = patch.object(cat, "_fresh_user", return_value=_user())
+    retrieve = patch.object(stripe.PaymentMethod, "retrieve", return_value=_pm())
+    with fresh, retrieve, patch.object(cat, "_update_user") as update:
         with pytest.raises(cat.CardSetupError) as err:
             cat.save_card_from_session(session, expected_user_id=expected_user)
     assert err.value.status_code == 404
@@ -448,9 +441,8 @@ def test_setup_session_that_is_not_this_accounts_is_refused(session, expected_us
 
 
 def test_incomplete_setup_session_is_not_saved():
-    with patch.object(cat, "_fresh_user", return_value=_user()), patch.object(
-        cat, "_update_user"
-    ) as update:
+    fresh = patch.object(cat, "_fresh_user", return_value=_user())
+    with fresh, patch.object(cat, "_update_user") as update:
         with pytest.raises(cat.CardSetupError) as err:
             cat.save_card_from_session(_session(status="open"), expected_user_id=USER_ID)
     assert err.value.status_code == 409
@@ -458,11 +450,10 @@ def test_incomplete_setup_session_is_not_saved():
 
 
 def test_setup_session_uses_fixed_return_urls_and_the_stored_customer():
-    with patch.object(cat, "_fresh_user", return_value=_user()), patch.object(
-        stripe.checkout.Session,
-        "create",
-        return_value={"id": "cs_test_2", "url": "https://checkout.example/cs_test_2"},
-    ) as create, patch.object(stripe.Customer, "create") as new_customer:
+    fresh = patch.object(cat, "_fresh_user", return_value=_user())
+    session = {"id": "cs_test_2", "url": "https://checkout.example/cs_test_2"}
+    create_session = patch.object(stripe.checkout.Session, "create", return_value=session)
+    with fresh, create_session as create, patch.object(stripe.Customer, "create") as new_customer:
         out = cat.create_setup_session(USER_ID)
     assert out["session_id"] == "cs_test_2"
     kwargs = create.call_args.kwargs
@@ -509,9 +500,9 @@ def test_remove_card_keeps_a_subscription_card_attached():
             stripe_subscription_id="sub_test" if subscribed else None,
             subscription_status="active" if subscribed else None,
         )
-        with patch.object(cat, "_fresh_user", return_value=user), patch.object(
-            cat, "_update_user"
-        ) as update, patch.object(stripe.PaymentMethod, "detach") as detach:
+        fresh = patch.object(cat, "_fresh_user", return_value=user)
+        detacher = patch.object(stripe.PaymentMethod, "detach")
+        with fresh, patch.object(cat, "_update_user") as update, detacher as detach:
             cat.remove_card(USER_ID)
         assert update.call_args.args[1]["auto_topup_on"] is False
         assert detach.call_count == detached
@@ -537,9 +528,8 @@ async def test_simple_precheck_tops_up_before_refusing():
     from src.services.billing import simple_metering
 
     user = _user(subscription_allowance=0, purchased_credits=0)
-    with patch("src.db.users.get_user", return_value=user), patch.object(
-        cat, "auto_topup_async", return_value=Decimal("20")
-    ) as topup:
+    topup_patch = patch.object(cat, "auto_topup_async", return_value=Decimal("20"))
+    with patch("src.db.users.get_user", return_value=user), topup_patch as topup:
         assert await simple_metering.precheck_credits("gw_test", 0.5) is user
     topup.assert_awaited_once()
 
@@ -580,9 +570,9 @@ def test_failed_top_up_email_is_sent_once():
 
     redis.set.side_effect = _set
     sent = MagicMock(return_value=MagicMock(sent=True))
-    with patch("src.config.redis_config.get_redis_client", return_value=redis), patch(
-        "src.db.users.get_user_by_id", return_value={"email": "someone@example.com"}
-    ), patch("src.services.email.send_email", sent):
+    redis_patch = patch("src.config.redis_config.get_redis_client", return_value=redis)
+    user_patch = patch("src.db.users.get_user_by_id", return_value={"email": "someone@example.com"})
+    with redis_patch, user_patch, patch("src.services.email.send_email", sent):
         assert notifications.process_topup_failed(USER_ID, "att-1", "declined", 2000) is True
         assert notifications.process_topup_failed(USER_ID, "att-1", "declined", 2000) is False
         # A second failure the same UTC day is not emailed either.
