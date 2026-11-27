@@ -61,6 +61,7 @@ def anon_key_is_live():
         pytest.skip(f"Could not reach Supabase to validate the anon key ({exc}); not verified.")
     assert status == 200, f"unexpected status {status} validating the anon key"
 
+
 SENSITIVE_TABLES = [
     "users",
     "payments",
