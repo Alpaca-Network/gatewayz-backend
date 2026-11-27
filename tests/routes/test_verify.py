@@ -232,8 +232,9 @@ def test_cases_are_private_to_their_owner(world):
     )
 
 
-def test_read_refreshes_a_stale_open_case(world, monkeypatch):
+def test_read_refreshes_a_stale_case_already_on_chain(world, monkeypatch):
     case_id = _post(_client()).json()["case_id"]
+    world.cases[case_id].update(status="adjudicating", genlayer_tx="0xtx")
     monkeypatch.setattr(
         vr.cases,
         "refresh",
@@ -241,6 +242,16 @@ def test_read_refreshes_a_stale_open_case(world, monkeypatch):
     )
     v = _client().get(f"/v1/verify/cases/{case_id}").json()
     assert v["status"] == "decided" and v["pass"] is True
+
+
+def test_read_never_submits_a_case(world, monkeypatch):
+    """Parallel GETs used to each submit a `submitted` case (fees per GET)."""
+    case_id = _post(_client()).json()["case_id"]
+    world.cases[case_id].update(status="submitted", genlayer_tx=None)
+    calls = []
+    monkeypatch.setattr(vr.cases, "refresh", lambda case, client: calls.append(case) or case)
+    v = _client().get(f"/v1/verify/cases/{case_id}").json()
+    assert v["status"] == "submitted" and calls == []
 
 
 def test_appeal_flow(world):
