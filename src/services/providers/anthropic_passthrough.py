@@ -88,6 +88,17 @@ ALLOWED_BETA_PREFIXES = (
 )
 
 
+# Items buffered for one streamed response before the caller is considered
+# gone. The queue holds about two items per streamed token (Anthropic's event
+# and the pipeline's line); Anthropic streams on the order of 100 tokens a
+# second, so this is minutes behind: a caller that has stopped reading.
+MAX_QUEUED_EVENTS = 50_000
+
+
+class RelayBacklog(RuntimeError):
+    """The caller stopped reading a passed-through stream."""
+
+
 def has_file_reference(value: Any) -> bool:
     """True if any content block refers to a stored file (``source.type == "file"``).
 
@@ -236,9 +247,16 @@ class Passthrough:
         return out
 
     def push_event(self, event: str | None, data: str) -> None:
-        """Hand one raw SSE event to the route. Safe to call from a worker thread."""
+        """Hand one raw SSE event to the route. Safe to call from a worker thread.
+
+        Raises RelayBacklog when the caller has stopped reading and the backlog
+        passes MAX_QUEUED_EVENTS: the upstream stream is then abandoned (and
+        billed for what was produced) instead of buffering in memory.
+        """
         if self.loop is None or self.queue is None:
             return
+        if self.queue.qsize() > MAX_QUEUED_EVENTS:
+            raise RelayBacklog("caller is not reading the stream")
         self.loop.call_soon_threadsafe(self.queue.put_nowait, ("event", event, data))
 
 

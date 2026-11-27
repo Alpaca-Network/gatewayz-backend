@@ -714,6 +714,15 @@ def _map_provider_error_impl(
                 detail=f"{provider} returned no response candidates. Trying alternative providers.",
             )
 
+        # An unreadable upstream body is the provider's fault, not the
+        # caller's: 502, so the next provider is tried. As a 400 it would end
+        # the request (ProviderRejectedRequest stops failover).
+        if isinstance(exc, json.JSONDecodeError):
+            return HTTPException(
+                status_code=502,
+                detail=f"Provider '{provider}' returned an unreadable response for model '{model}'",
+            )
+
         # Other ValueErrors are treated as bad requests (sanitized: never leak
         # raw URLs/tokens embedded in upstream error text)
         return HTTPException(
