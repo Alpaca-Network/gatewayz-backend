@@ -268,6 +268,14 @@ class Config:
     # lives if the request is never billed (60..3600 s). Settled holds go at
     # once.
     VAULT_DISCOUNT_HOLD_TTL_SECONDS = _int_env("VAULT_DISCOUNT_HOLD_TTL_SECONDS", 900)
+    # Email the account once when billing falls back to the paid balance
+    # because its discount credits ran out or its daily cap was reached
+    # (src/services/discount_credits/notifications.py). At most one email per
+    # event per account per UTC day. Off (default) -> no email, no extra
+    # Redis or DB call.
+    VAULT_DISCOUNT_NOTIFY_EMAIL_ENABLED = _get_env_var(
+        "VAULT_DISCOUNT_NOTIFY_EMAIL_ENABLED", "false"
+    ).lower() in {"1", "true", "yes"}
     # Who the switch applies to. Comma-separated account ids: billing draws
     # on discount credits for those accounts only, and every other account is
     # billed exactly as with the switch off. A single "*" means every

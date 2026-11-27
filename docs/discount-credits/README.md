@@ -43,8 +43,35 @@ Balances are kept in US dollars to six decimal places. One discount credit is US
 | `VAULT_DISCOUNT_PERCENT` | `0.99` | Share of a request's list price drawn from discount credits. Capped at 99% in code and in the SQL. |
 | `VAULT_DISCOUNT_HOLD_TTL_SECONDS` | `900` | How long a pre-request hold on the balance lives if the request is never billed or released (clamped to between one minute and one hour). Must stay longer than the longest request: a hold that expires first no longer protects that request. |
 | `VAULT_DISCOUNT_PILOT_USER_IDS` | empty | Which accounts the switch applies to: account ids, or `*` for all. Empty means nobody |
+| `VAULT_DISCOUNT_NOTIFY_EMAIL_ENABLED` | `false` | Email the account once when billing falls back to the paid balance because its discount credits ran out or its daily cap was reached (see "Running out"). Off means no email and no extra Redis or database call. |
 
 There are no aliases for older key names.
+
+## Running out
+
+When a request draws less discount than its full share, the rest is charged
+to the paid balance as usual and the request never fails. If that happened
+because the discount credits balance is empty, or because today's use reached
+the daily cap, the account can get one email:
+
+| Event | Subject |
+|---|---|
+| `credits_depleted` | You are out of discount credits |
+| `daily_cap_reached` | You reached today's discount limit |
+
+- Behind `VAULT_DISCOUNT_NOTIFY_EMAIL_ENABLED` (off by default). The app shows
+  the same state in-app from `GET /discount-credits` whatever this setting
+  says.
+- At most one email per event per account per UTC day, deduplicated in Redis
+  across workers. An empty balance is emailed once per depletion, not every
+  day it stays empty; a new grant that runs out again is a new event. Without
+  Redis no email is sent.
+- Not sent when the account set its cap to 0, was never granted discount
+  credits, or has no deliverable email address.
+- Billing only calls `notify_after_draw`, which returns at once. The balance
+  read and the send run on a background thread, through the backend's one
+  email sender (`src/services/email.py`). Errors are logged and dropped.
+- The code is in `src/services/discount_credits/notifications.py`.
 
 ## Where billing calls it
 

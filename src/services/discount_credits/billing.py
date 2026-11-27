@@ -160,7 +160,14 @@ def apply_for_request(
         logger.warning("discount credits above its ceiling for user %s; reversing", user_id)
         reverse_for_request(key)
         return Decimal(0)
-    return max(applied, Decimal(0)).quantize(_DISCOUNT_DP, rounding=ROUND_DOWN)
+    applied = max(applied, Decimal(0)).quantize(_DISCOUNT_DP, rounding=ROUND_DOWN)
+    # A draw short of the full share means the rest falls back to the paid
+    # balance: maybe the credits ran out or the daily cap was reached. Email
+    # once (off by default; returns at once, never raises).
+    from src.services.discount_credits.notifications import notify_after_draw
+
+    notify_after_draw(user_id, ceiling, applied)
+    return applied
 
 
 def reverse_or_none(request_id: Any) -> Decimal | None:
