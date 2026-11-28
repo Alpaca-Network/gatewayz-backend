@@ -172,7 +172,13 @@ class CreateCheckoutSessionRequest(BaseModel):
     currency: StripeCurrency = Field(default=StripeCurrency.USD)
     success_url: str | None = Field(None, description="URL to redirect on success")
     cancel_url: str | None = Field(None, description="URL to redirect on cancel")
-    customer_email: str | None = None
+    customer_email: str | None = Field(
+        None,
+        description=(
+            "DEPRECATED / ignored. Checkout always uses the account's stored email and "
+            "Stripe customer."
+        ),
+    )
     metadata: dict[str, Any] | None = Field(default_factory=dict)
     description: str | None = "Gatewayz Credits Purchase"
 
@@ -436,7 +442,13 @@ class CreateSubscriptionCheckoutRequest(BaseModel):
 
     price_id: str = Field(..., description="Stripe price ID (e.g., price_1SNk2KLVT8n4vaEn7lHNPYWB)")
     product_id: str = Field(..., description="Stripe product ID (e.g., prod_TKOqQPhVRxNp4Q)")
-    customer_email: str | None = Field(None, description="Customer email address")
+    customer_email: str | None = Field(
+        None,
+        description=(
+            "DEPRECATED / ignored. Checkout always uses the account's stored email and "
+            "Stripe customer."
+        ),
+    )
     success_url: str = Field(..., description="URL to redirect on successful subscription")
     cancel_url: str = Field(..., description="URL to redirect on canceled subscription")
     mode: str = Field(

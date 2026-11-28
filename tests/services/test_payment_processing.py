@@ -96,6 +96,17 @@ class TestStripeServiceInitialization:
 class TestCheckoutSession:
     """Test checkout session creation"""
 
+    @pytest.fixture(autouse=True)
+    def _no_stripe_customer(self):
+        """Never call Stripe for the account's customer in these tests.
+        By default no customer can be created, so checkout falls back to the
+        account's stored email."""
+        with patch(
+            "src.services.billing.card_auto_topup.ensure_customer", return_value=None
+        ) as ensure:
+            self.ensure_customer = ensure
+            yield ensure
+
     @patch("src.services.billing.payments.get_user_by_id")
     @patch("src.services.billing.payments.create_payment")
     @patch("stripe.checkout.Session.create")
@@ -379,9 +390,136 @@ class TestCheckoutSession:
         response = stripe_service.create_checkout_session(user_id=1, request=request)
 
         assert response.session_id == "cs_test_123"
-        # Should use provided customer_email
+        # A client-supplied customer_email is never used, and a Privy DID is not
+        # an email: Stripe collects the email itself.
         call_kwargs = mock_stripe_create.call_args[1]
-        assert call_kwargs["customer_email"] == "real@example.com"
+        assert "customer_email" not in call_kwargs
+        assert "customer" not in call_kwargs
+
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
+    @patch("stripe.checkout.Session.create")
+    @patch("src.services.billing.payments.update_payment_status")
+    def test_checkout_ignores_client_customer_email(
+        self,
+        mock_update_payment,
+        mock_stripe_create,
+        mock_create_payment,
+        mock_get_user,
+        stripe_service,
+        mock_user,
+        mock_payment,
+    ):
+        """The account's stored email is used, never the request's."""
+        mock_get_user.return_value = mock_user  # email: test@example.com
+        mock_create_payment.return_value = mock_payment
+        mock_stripe_create.return_value = _session_mock()
+
+        request = CreateCheckoutSessionRequest(
+            amount=1000, currency=StripeCurrency.USD, customer_email="someone-else@example.com"
+        )
+        stripe_service.create_checkout_session(user_id=1, request=request)
+
+        call_kwargs = mock_stripe_create.call_args[1]
+        assert call_kwargs["customer_email"] == "test@example.com"
+        assert "someone-else@example.com" not in str(call_kwargs)
+
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
+    @patch("stripe.checkout.Session.create")
+    @patch("src.services.billing.payments.update_payment_status")
+    def test_checkout_uses_stored_stripe_customer(
+        self,
+        mock_update_payment,
+        mock_stripe_create,
+        mock_create_payment,
+        mock_get_user,
+        stripe_service,
+        mock_payment,
+    ):
+        """A stored customer id is passed as ``customer`` (and no email)."""
+        mock_get_user.return_value = {
+            "id": 1,
+            "email": "test@example.com",
+            "stripe_customer_id": "cus_stored",
+        }
+        mock_create_payment.return_value = mock_payment
+        mock_stripe_create.return_value = _session_mock()
+
+        request = CreateCheckoutSessionRequest(
+            amount=1000, currency=StripeCurrency.USD, customer_email="someone-else@example.com"
+        )
+        stripe_service.create_checkout_session(user_id=1, request=request)
+
+        call_kwargs = mock_stripe_create.call_args[1]
+        assert call_kwargs["customer"] == "cus_stored"
+        assert "customer_email" not in call_kwargs
+        self.ensure_customer.assert_not_called()
+
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
+    @patch("stripe.checkout.Session.create")
+    @patch("src.services.billing.payments.update_payment_status")
+    def test_checkout_creates_account_customer_on_first_use(
+        self,
+        mock_update_payment,
+        mock_stripe_create,
+        mock_create_payment,
+        mock_get_user,
+        stripe_service,
+        mock_user,
+        mock_payment,
+    ):
+        """Without a stored id, the account's customer is created and used."""
+        self.ensure_customer.return_value = "cus_new"
+        mock_get_user.return_value = mock_user
+        mock_create_payment.return_value = mock_payment
+        mock_stripe_create.return_value = _session_mock()
+
+        request = CreateCheckoutSessionRequest(amount=1000, currency=StripeCurrency.USD)
+        stripe_service.create_checkout_session(user_id=1, request=request)
+
+        self.ensure_customer.assert_called_once_with(mock_user)
+        call_kwargs = mock_stripe_create.call_args[1]
+        assert call_kwargs["customer"] == "cus_new"
+        assert "customer_email" not in call_kwargs
+
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
+    @patch("stripe.checkout.Session.create")
+    @patch("src.services.billing.payments.update_payment_status")
+    def test_checkout_falls_back_to_stored_email_if_customer_creation_fails(
+        self,
+        mock_update_payment,
+        mock_stripe_create,
+        mock_create_payment,
+        mock_get_user,
+        stripe_service,
+        mock_user,
+        mock_payment,
+    ):
+        self.ensure_customer.side_effect = RuntimeError("stripe down")
+        mock_get_user.return_value = mock_user
+        mock_create_payment.return_value = mock_payment
+        mock_stripe_create.return_value = _session_mock()
+
+        request = CreateCheckoutSessionRequest(
+            amount=1000, currency=StripeCurrency.USD, customer_email="someone-else@example.com"
+        )
+        stripe_service.create_checkout_session(user_id=1, request=request)
+
+        call_kwargs = mock_stripe_create.call_args[1]
+        assert call_kwargs["customer_email"] == "test@example.com"
+        assert "customer" not in call_kwargs
+
+
+def _session_mock():
+    session = Mock()
+    session.id = "cs_test_123"
+    session.url = "https://checkout.stripe.com/pay/cs_test_123"
+    session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
+    session.payment_intent = None
+    return session
 
 
 class TestPaymentIntents:
