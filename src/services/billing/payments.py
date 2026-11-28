@@ -603,6 +603,48 @@ class StripeService:
 
         return payment
 
+    @staticmethod
+    def _account_billing_email(user: dict[str, Any]) -> str | None:
+        """The account's stored email, or None when it is not a real address
+        (empty, or a Privy DID placeholder)."""
+        email = (user.get("email") or "").strip()
+        if not email or email.startswith("did:privy:") or "@" not in email:
+            return None
+        return email
+
+    @staticmethod
+    def _account_stripe_customer_id(user: dict[str, Any]) -> str | None:
+        """The account's Stripe customer id, creating and storing it on first use.
+
+        Returns None if the customer cannot be created; checkout then falls back
+        to the account's stored email, never to a client-supplied one.
+        """
+        existing = user.get("stripe_customer_id")
+        if existing:
+            return str(existing)
+        try:
+            from src.services.billing.card_auto_topup import ensure_customer
+
+            return ensure_customer(user)
+        except Exception as e:  # noqa: BLE001 - checkout must still work without it
+            logger.warning(
+                "Could not create Stripe customer for user %s: %s",
+                user.get("id"),
+                type(e).__name__,
+            )
+            return None
+
+    @staticmethod
+    def _checkout_customer_params(
+        stripe_customer_id: str | None, user_email: str | None
+    ) -> dict[str, str]:
+        """Stripe accepts either ``customer`` or ``customer_email``, not both."""
+        if stripe_customer_id:
+            return {"customer": stripe_customer_id}
+        if user_email:
+            return {"customer_email": user_email}
+        return {}
+
     def create_checkout_session(
         self, user_id: int, request: CreateCheckoutSessionRequest
     ) -> CheckoutSessionResponse:
@@ -613,31 +655,11 @@ class StripeService:
             if not user:
                 raise ValueError(f"User {user_id} not found")
 
-            # Extract real email if stored email is a Privy DID
-            user_email = user.get("email", "")
-            if user_email.startswith("did:privy:"):
-                logger.warning(f"User {user_id} has Privy DID as email: {user_email}")
-                # Try to get email from Privy linked accounts via Supabase
-                from src.config.supabase_config import get_supabase_client
-
-                client = get_supabase_client()
-                user_result = (
-                    client.table("users").select("privy_user_id").eq("id", user_id).execute()
-                )
-                if user_result.data and user_result.data[0].get("privy_user_id"):
-                    privy_user_id = user_result.data[0]["privy_user_id"]
-                    logger.info(f"Found privy_user_id for user {user_id}: {privy_user_id}")
-                    # For now, use request.customer_email if available, otherwise generic email
-                    if request.customer_email:
-                        user_email = request.customer_email
-                    else:
-                        # If no customer_email in request, we can't get real email without Privy token
-                        user_email = None
-                        logger.warning(
-                            f"No customer_email in request for user {user_id} with Privy DID"
-                        )
-                else:
-                    user_email = None
+            # Billing identity comes from the account only: its stored Stripe
+            # customer (created on first use) and its stored email. A
+            # client-supplied ``customer_email`` is ignored.
+            user_email = self._account_billing_email(user)
+            stripe_customer_id = self._account_stripe_customer_id(user)
 
             # Create payment record
             payment = create_payment(
@@ -717,7 +739,7 @@ class StripeService:
                 mode="payment",
                 success_url=success_url,
                 cancel_url=cancel_url,
-                customer_email=request.customer_email or user_email,
+                **self._checkout_customer_params(stripe_customer_id, user_email),
                 client_reference_id=str(user_id),
                 metadata=checkout_metadata,
                 payment_intent_data={"metadata": checkout_metadata.copy()},
@@ -2177,17 +2199,9 @@ class StripeService:
             if not user:
                 raise ValueError(f"User {user_id} not found")
 
-            # Extract real email if stored email is a Privy DID
-            user_email = user.get("email", "")
-            if user_email.startswith("did:privy:"):
-                logger.warning(f"User {user_id} has Privy DID as email: {user_email}")
-                if request.customer_email:
-                    user_email = request.customer_email
-                else:
-                    user_email = None
-                    logger.warning(
-                        f"No customer_email in request for user {user_id} with Privy DID"
-                    )
+            # The account's stored email only; a client-supplied
+            # ``customer_email`` is ignored.
+            user_email = self._account_billing_email(user)
 
             # Get or create Stripe customer
             stripe_customer_id = user.get("stripe_customer_id")
@@ -2196,7 +2210,7 @@ class StripeService:
                 # Create new Stripe customer
                 logger.info(f"Creating Stripe customer for user {user_id}")
                 customer = stripe.Customer.create(
-                    email=request.customer_email or user_email,
+                    email=user_email,
                     metadata={
                         "user_id": str(user_id),
                         "username": user.get("username", ""),

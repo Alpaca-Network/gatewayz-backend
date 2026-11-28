@@ -2397,9 +2397,11 @@ def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str,
         if not user:
             raise ValueError("User with this API key not found")
 
-        # Prepare update data
+        # Prepare update data. The account email is not editable here: changing it
+        # without verifying the new address would let billing and notifications
+        # follow an address the account owner never proved they control.
         update_data = {}
-        allowed_fields = ["name", "email", "preferences", "settings"]
+        allowed_fields = ["name", "preferences", "settings"]
 
         for field, value in profile_data.items():
             if field in allowed_fields:
@@ -2488,6 +2490,9 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
             "is_active": user.get("is_active"),
             "registration_date": user.get("registration_date"),
             "settings": user.get("settings"),  # User settings including auto top-up configuration
+            # The account's own Stripe customer id, so billing lookups can go by id
+            # instead of by email. Only ever returned to the account itself.
+            "stripe_customer_id": user.get("stripe_customer_id"),
         }
 
         logger.info(f"Profile built successfully for user {user.get('id')}")

@@ -37,6 +37,19 @@ _credit_transactions_rate_limit = create_endpoint_rate_limit(
 )
 
 
+EMAIL_CHANGE_NOT_SUPPORTED = (
+    "The account email cannot be changed here. Your email comes from the account "
+    "you sign in with; to use a different address, sign in with it or contact support."
+)
+
+
+def _same_email(requested: str | None, current: str | None) -> bool:
+    """True when ``requested`` is the account's current email (case-insensitive)."""
+    if requested is None or current is None:
+        return requested is None and current is None
+    return requested.strip().lower() == current.strip().lower()
+
+
 # Backwards compatibility wrappers for tests to patch
 def get_user(*args, **kwargs):
     return users_module.get_user(*args, **kwargs)
@@ -296,8 +309,21 @@ async def update_user_profile_endpoint(
                 status_code=400, detail="At least one profile field must be provided"
             )
 
+        update_fields = profile_update.model_dump(exclude_unset=True)
+
+        # The account email cannot be changed through this route: there is no
+        # verification of the new address here. Re-sending the current email
+        # (clients that echo the whole profile) is accepted as a no-op.
+        if "email" in update_fields:
+            requested_email = update_fields.pop("email")
+            if not _same_email(requested_email, user.get("email")):
+                raise HTTPException(status_code=403, detail=EMAIL_CHANGE_NOT_SUPPORTED)
+
+        if not update_fields:
+            return get_user_profile(api_key)
+
         # Update user profile
-        updated_user = update_user_profile(api_key, profile_update.model_dump(exclude_unset=True))
+        updated_user = update_user_profile(api_key, update_fields)
 
         if not updated_user:
             raise HTTPException(status_code=500, detail="Failed to update user profile")

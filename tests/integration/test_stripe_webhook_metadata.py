@@ -16,6 +16,14 @@ from src.schemas.payments import WebhookProcessingResult
 from src.services.payments import StripeService
 
 
+@pytest.fixture(autouse=True)
+def _no_stripe_customer_creation():
+    """Checkout creates the account's Stripe customer on first use; never call
+    Stripe for it in these tests."""
+    with patch("src.services.billing.card_auto_topup.ensure_customer", return_value=None):
+        yield
+
+
 @pytest.fixture
 def stripe_service():
     """Create a StripeService instance for testing"""
